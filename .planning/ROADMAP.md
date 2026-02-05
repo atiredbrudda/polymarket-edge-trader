@@ -1,0 +1,139 @@
+# Roadmap: Polymarket eSports Smart Money Tracker
+
+## Overview
+
+This roadmap delivers an intelligence tool that identifies expert eSports traders on Polymarket, scores their specialization depth, and surfaces consensus signals when multiple experts converge on positions. The journey progresses through seven phases: establishing data infrastructure and taxonomy-driven classification, building historical evaluation and expertise scoring engines, detecting consensus signals while filtering herding behavior, and finally delivering alerts and CLI interfaces. Each phase builds upon the previous, culminating in a complete system that transforms raw Polymarket data into actionable intelligence about where informed eSports traders are moving.
+
+## Phases
+
+**Phase Numbering:**
+- Integer phases (1, 2, 3): Planned milestone work
+- Decimal phases (2.1, 2.2): Urgent insertions (marked with INSERTED)
+
+Decimal phases appear between their surrounding integers in numeric order.
+
+- [ ] **Phase 1: Foundation** - Data collection and storage infrastructure
+- [ ] **Phase 2: Classification & Discovery** - Taxonomy system and trader identification
+- [ ] **Phase 3: Historical Evaluation** - Performance tracking and validation framework
+- [ ] **Phase 4: Scoring Engine** - Specialization depth and expertise calculation
+- [ ] **Phase 5: Signal Detection** - Consensus identification and herding filters
+- [ ] **Phase 6: Alerting System** - Multi-channel alert delivery
+- [ ] **Phase 7: CLI Interface** - User commands and presentation layer
+
+## Phase Details
+
+### Phase 1: Foundation
+**Goal**: Establish reliable data ingestion from Polymarket CLOB API and persistent local storage
+**Depends on**: Nothing (first phase)
+**Requirements**: DATA-01, DATA-02, DATA-03, DATA-04, DATA-05, DATA-06
+**Success Criteria** (what must be TRUE):
+  1. System can fetch active eSports events and markets from Polymarket API without hitting rate limits
+  2. System can retrieve complete trade histories for any trader address
+  3. System persists market, trader, and position data in SQLite with proper indexing
+  4. System filters trade history by date range and resolution status
+**Plans**: TBD
+
+Plans:
+- [ ] TBD during planning
+
+### Phase 2: Classification & Discovery
+**Goal**: Classify markets into eSports taxonomy and identify active traders
+**Depends on**: Phase 1
+**Requirements**: TAXO-01, TAXO-02, TAXO-03, DATA-02
+**Success Criteria** (what must be TRUE):
+  1. System classifies Polymarket markets into game-level eSports categories using YAML taxonomy
+  2. System discovers traders participating in active eSports markets from order books
+  3. Adding a new eSports category requires only YAML changes, not code modification
+  4. System tracks current open positions with size, direction, and entry price
+**Plans**: TBD
+
+Plans:
+- [ ] TBD during planning
+
+### Phase 3: Historical Evaluation
+**Goal**: Enable historical performance analysis with validation framework
+**Depends on**: Phase 2
+**Requirements**: PERF-01, PERF-02, PERF-03, PERF-04
+**Success Criteria** (what must be TRUE):
+  1. System calculates PnL, win rate, and total volume for each trader across multiple timeframes (7d, 30d, 90d, all-time)
+  2. System identifies traders with consistent performance vs lucky streaks using cross-timeframe analysis
+  3. System tracks market resolution states and excludes disputed/unresolved markets from performance metrics
+  4. System provides out-of-sample validation framework for testing expertise scores on historical data
+**Plans**: TBD
+
+Plans:
+- [ ] TBD during planning
+
+### Phase 4: Scoring Engine
+**Goal**: Calculate specialization depth scores that identify domain experts
+**Depends on**: Phase 3
+**Requirements**: SCOR-01, SCOR-02, SCOR-03, SCOR-04, SCOR-05
+**Success Criteria** (what must be TRUE):
+  1. System produces 0-100 expertise scores per trader per eSports category incorporating concentration, win rate, sample size, and recency
+  2. System enforces minimum sample size (5+ resolved markets in category) before assigning scores
+  3. System applies recency weighting so recent performance counts more than old activity
+  4. System generates ranked leaderboard of top traders per eSports niche
+  5. Scores distinguish game-level specialists from generalists
+**Plans**: TBD
+
+Plans:
+- [ ] TBD during planning
+
+### Phase 5: Signal Detection
+**Goal**: Identify expert consensus while filtering herding behavior
+**Depends on**: Phase 4
+**Requirements**: SGNL-01, SGNL-02, SGNL-03, SGNL-04, SGNL-05
+**Success Criteria** (what must be TRUE):
+  1. System detects consensus when 2+ expert traders (score >70) independently take the same position
+  2. System calculates consensus strength weighted by expertise scores and generates 0-100 confidence score
+  3. System identifies potential herding by analyzing bet timing clusters vs independent decisions
+  4. System surfaces markets ranked by expert activity in past 1/6/24 hours
+  5. System distinguishes first movers from fast-followers in consensus detection
+**Plans**: TBD
+
+Plans:
+- [ ] TBD during planning
+
+### Phase 6: Alerting System
+**Goal**: Deliver consensus signals via Telegram and Discord with retry reliability
+**Depends on**: Phase 5
+**Requirements**: ALRT-01, ALRT-02, ALRT-03, ALRT-04
+**Success Criteria** (what must be TRUE):
+  1. System sends consensus signal alerts to Telegram with market context, expert count, consensus direction, and confidence
+  2. System sends consensus signal alerts to Discord via webhook
+  3. System retries failed alert deliveries with exponential backoff
+  4. Alert payloads include complete signal metadata for user decision-making
+**Plans**: TBD
+
+Plans:
+- [ ] TBD during planning
+
+### Phase 7: CLI Interface
+**Goal**: Provide command-line tools for market exploration, trader analysis, and signal monitoring
+**Depends on**: Phase 6
+**Requirements**: CLI-01, CLI-02, CLI-03, CLI-04, CLI-05, POLL-01, POLL-02, POLL-03
+**Success Criteria** (what must be TRUE):
+  1. User can list active eSports markets with their taxonomy classification
+  2. User can view detailed trader profiles including stats, scores, and position history
+  3. User can view current consensus signals ranked by confidence score
+  4. User can view ranked leaderboards of eSports experts per game niche
+  5. User can trigger manual market sweeps and automated hourly polling runs
+**Plans**: TBD
+
+Plans:
+- [ ] TBD during planning
+
+## Progress
+
+**Execution Order:**
+Phases execute in numeric order: 1 → 2 → 3 → 4 → 5 → 6 → 7
+
+| Phase | Plans Complete | Status | Completed |
+|-------|----------------|--------|-----------|
+| 1. Foundation | 0/TBD | Not started | - |
+| 2. Classification & Discovery | 0/TBD | Not started | - |
+| 3. Historical Evaluation | 0/TBD | Not started | - |
+| 4. Scoring Engine | 0/TBD | Not started | - |
+| 5. Signal Detection | 0/TBD | Not started | - |
+| 6. Alerting System | 0/TBD | Not started | - |
+| 7. CLI Interface | 0/TBD | Not started | - |

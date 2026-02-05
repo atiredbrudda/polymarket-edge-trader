@@ -108,47 +108,47 @@ Which phases cover which requirements. Updated during roadmap creation.
 
 | Requirement | Phase | Status |
 |-------------|-------|--------|
-| DATA-01 | — | Pending |
-| DATA-02 | — | Pending |
-| DATA-03 | — | Pending |
-| DATA-04 | — | Pending |
-| DATA-05 | — | Pending |
-| DATA-06 | — | Pending |
-| TAXO-01 | — | Pending |
-| TAXO-02 | — | Pending |
-| TAXO-03 | — | Pending |
-| PERF-01 | — | Pending |
-| PERF-02 | — | Pending |
-| PERF-03 | — | Pending |
-| PERF-04 | — | Pending |
-| SCOR-01 | — | Pending |
-| SCOR-02 | — | Pending |
-| SCOR-03 | — | Pending |
-| SCOR-04 | — | Pending |
-| SCOR-05 | — | Pending |
-| SGNL-01 | — | Pending |
-| SGNL-02 | — | Pending |
-| SGNL-03 | — | Pending |
-| SGNL-04 | — | Pending |
-| SGNL-05 | — | Pending |
-| ALRT-01 | — | Pending |
-| ALRT-02 | — | Pending |
-| ALRT-03 | — | Pending |
-| ALRT-04 | — | Pending |
-| CLI-01 | — | Pending |
-| CLI-02 | — | Pending |
-| CLI-03 | — | Pending |
-| CLI-04 | — | Pending |
-| CLI-05 | — | Pending |
-| POLL-01 | — | Pending |
-| POLL-02 | — | Pending |
-| POLL-03 | — | Pending |
+| DATA-01 | Phase 1 | Pending |
+| DATA-02 | Phase 1 | Pending |
+| DATA-03 | Phase 1 | Pending |
+| DATA-04 | Phase 1 | Pending |
+| DATA-05 | Phase 1 | Pending |
+| DATA-06 | Phase 1 | Pending |
+| TAXO-01 | Phase 2 | Pending |
+| TAXO-02 | Phase 2 | Pending |
+| TAXO-03 | Phase 2 | Pending |
+| PERF-01 | Phase 3 | Pending |
+| PERF-02 | Phase 3 | Pending |
+| PERF-03 | Phase 3 | Pending |
+| PERF-04 | Phase 3 | Pending |
+| SCOR-01 | Phase 4 | Pending |
+| SCOR-02 | Phase 4 | Pending |
+| SCOR-03 | Phase 4 | Pending |
+| SCOR-04 | Phase 4 | Pending |
+| SCOR-05 | Phase 4 | Pending |
+| SGNL-01 | Phase 5 | Pending |
+| SGNL-02 | Phase 5 | Pending |
+| SGNL-03 | Phase 5 | Pending |
+| SGNL-04 | Phase 5 | Pending |
+| SGNL-05 | Phase 5 | Pending |
+| ALRT-01 | Phase 6 | Pending |
+| ALRT-02 | Phase 6 | Pending |
+| ALRT-03 | Phase 6 | Pending |
+| ALRT-04 | Phase 6 | Pending |
+| CLI-01 | Phase 7 | Pending |
+| CLI-02 | Phase 7 | Pending |
+| CLI-03 | Phase 7 | Pending |
+| CLI-04 | Phase 7 | Pending |
+| CLI-05 | Phase 7 | Pending |
+| POLL-01 | Phase 7 | Pending |
+| POLL-02 | Phase 7 | Pending |
+| POLL-03 | Phase 7 | Pending |
 
 **Coverage:**
 - v1 requirements: 35 total
-- Mapped to phases: 0
-- Unmapped: 35 ⚠️
+- Mapped to phases: 35
+- Unmapped: 0
 
 ---
 *Requirements defined: 2026-02-05*
-*Last updated: 2026-02-05 after initial definition*
+*Last updated: 2026-02-06 after roadmap creation*
