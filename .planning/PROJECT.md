@@ -1,12 +1,12 @@
-# Polymarket eSports Smart Money Tracker
+# Polymarket Smart Money Tracker
 
 ## What This Is
 
-An intelligence tool that identifies expert niche traders on Polymarket's eSports markets, scores their specialization depth, and aggregates their positions to surface consensus signals. It starts from active events, discovers who's trading them, backtracks their history to evaluate expertise, and alerts when qualified traders converge on a position. Built for awareness and pattern recognition, not automated trading.
+A category-agnostic intelligence pipeline that identifies expert niche traders on Polymarket, scores their specialization depth, and aggregates their positions to surface consensus signals. It starts from active events, discovers who's trading them, backtracks their history to evaluate expertise, and alerts when qualified traders converge on a position. eSports is the first case study used to develop and validate the approach, with the pipeline designed to generalize to any Polymarket category (politics, crypto, sports) via taxonomy configuration. Built for awareness and pattern recognition, not automated trading.
 
 ## Core Value
 
-Surface where smart money is moving in eSports markets so the user can see what informed traders are doing and factor that into their own thinking.
+Surface where smart money is moving in niche prediction markets so the user can see what informed traders are doing and factor that into their own thinking. The system must be category-agnostic by design — eSports is the proving ground, not the ceiling.
 
 ## Requirements
 
@@ -33,7 +33,7 @@ Surface where smart money is moving in eSports markets so the user can see what 
 - Web dashboard — premature until signal quality is proven
 - Auto-trading / bot execution — this is an awareness tool, not a trading bot
 - Real-time streaming — hourly polling is sufficient for the use case
-- Non-eSports categories in v1 — architecture supports it, but only eSports is built out
+- Non-eSports categories in v1 — architecture is category-agnostic by design, but only eSports taxonomy is configured as the initial case study
 - Mobile app — CLI + webhooks covers the interface needs
 
 ## Context
@@ -41,6 +41,7 @@ Surface where smart money is moving in eSports markets so the user can see what 
 - **Platform:** Polymarket — prediction market on Polygon blockchain. Uses a CLOB (Central Limit Order Book) API for trading data. Traders identified by wallet addresses.
 - **Discovery approach:** Scanning all historical traders is infeasible and unnecessary. Instead, start from currently active events, find who's trading them, then evaluate those traders' histories. This naturally focuses on active participants.
 - **Niche hypothesis:** Traders who specialize deeply in a narrow category (e.g., one specific esport game) likely have domain knowledge that generalists don't. Their convergence on a position is a stronger signal than broad-market consensus.
+- **eSports as case study:** eSports is the proving ground, not the end goal. It's a small enough category to validate the niche-expertise-detection pipeline before applying it to larger markets. Every design choice should ask "would this generalize?" — hard-coding eSports assumptions is tech debt.
 - **Signal philosophy:** The output is intelligence, not instruction. The user wants to see patterns and make their own decisions. Alerts are awareness triggers, not trade recommendations.
 
 ## Constraints
@@ -54,7 +55,7 @@ Surface where smart money is moving in eSports markets so the user can see what 
 
 | Decision | Rationale | Outcome |
 |----------|-----------|---------|
-| Start with eSports only | Small category, easier to validate approach before scaling to larger markets | — Pending |
+| eSports as first case study | Small category to validate the category-agnostic pipeline before applying to larger markets; eSports is the proving ground, not the product | — Pending |
 | Event-first discovery (not trader-first) | Avoids scanning entire trader database; focuses on active participants naturally | — Pending |
 | Custom taxonomy over Polymarket categories | Polymarket's categories are too broad; game-level granularity needed for niche detection | — Pending |
 | Hourly polling, not real-time | Awareness tool doesn't need sub-minute latency; reduces API pressure and complexity | — Pending |
@@ -62,4 +63,4 @@ Surface where smart money is moving in eSports markets so the user can see what 
 | Both summary signal and trader drill-down | User wants to evaluate the signal themselves, not just trust the algorithm blindly | — Pending |
 
 ---
-*Last updated: 2026-02-05 after initialization*
+*Last updated: 2026-02-05 after clarifying eSports as case study, not end goal*
