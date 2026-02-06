@@ -1,5 +1,6 @@
 """Configuration settings using Pydantic with environment variable loading."""
 
+from decimal import Decimal
 from functools import lru_cache
 from typing import List
 
@@ -36,6 +37,14 @@ class Settings(BaseSettings):
     # Logging Configuration
     log_level: str = "INFO"
     log_dir: str = "logs"
+
+    # Taxonomy Configuration
+    taxonomy_path: str = "data/taxonomy/esports.yaml"
+
+    # Trader Discovery Configuration
+    trader_min_trades: int = 5  # Minimum trades for eSports trader discovery
+    trader_min_volume: Decimal = Decimal("500")  # Minimum USD volume for discovery
+    discovery_sweep_enabled: bool = True  # Whether periodic sweep is active
 
     # Pydantic v2 configuration
     model_config = SettingsConfigDict(

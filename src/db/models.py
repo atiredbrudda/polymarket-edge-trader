@@ -12,7 +12,7 @@ All models use SQLAlchemy 2.0 declarative style with Mapped[] type hints.
 from datetime import datetime
 from decimal import Decimal
 
-from sqlalchemy import Index, Numeric, String
+from sqlalchemy import ForeignKey, Index, Numeric, String
 from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column
 
 
@@ -119,3 +119,83 @@ class TraderCategorySummary(Base):
     )
 
     __table_args__ = (Index("ix_summary_trader_category", "trader_address", "category", unique=True),)
+
+
+class TaxonomyNode(Base):
+    """Taxonomy hierarchy node for market classification.
+
+    Represents a single node in the taxonomy tree (root, game, tournament, team).
+    Used to store YAML taxonomy structure in the database for queryable access.
+    """
+
+    __tablename__ = "taxonomy_nodes"
+
+    id: Mapped[int] = mapped_column(primary_key=True, autoincrement=True)
+    name: Mapped[str] = mapped_column(String(100), nullable=False)
+    slug: Mapped[str] = mapped_column(String(100), nullable=False)  # e.g., "esports.cs2.iem-katowice"
+    parent_id: Mapped[int | None] = mapped_column(ForeignKey("taxonomy_nodes.id"), nullable=True)
+    depth: Mapped[int] = mapped_column(nullable=False)  # 0=root, 1=game, 2=tournament, 3=team
+    node_type: Mapped[str] = mapped_column(String(20), nullable=False)  # root/game/tournament/team
+    patterns_json: Mapped[str] = mapped_column(String(2000), nullable=False)  # JSON-encoded list
+    created_at: Mapped[datetime] = mapped_column(default=datetime.utcnow, nullable=False)
+
+    __table_args__ = (
+        Index("ix_taxonomy_parent", "parent_id"),
+        Index("ix_taxonomy_depth", "depth"),
+        Index("ix_taxonomy_slug", "slug", unique=True),
+    )
+
+
+class MarketClassification(Base):
+    """Market classification result linking markets to taxonomy nodes.
+
+    Stores the classification outcome for each market, including the matched
+    taxonomy path, market type, and whether it was flagged for review.
+    """
+
+    __tablename__ = "market_classifications"
+
+    id: Mapped[int] = mapped_column(primary_key=True, autoincrement=True)
+    market_id: Mapped[str] = mapped_column(String(100), nullable=False, unique=True)  # condition_id
+    taxonomy_node_id: Mapped[int | None] = mapped_column(ForeignKey("taxonomy_nodes.id"), nullable=True)
+    node_path: Mapped[str | None] = mapped_column(String(300), nullable=True)  # e.g., "eSports.CS2.IEM Katowice.NaVi"
+    market_type: Mapped[str | None] = mapped_column(String(10), nullable=True)  # "match" or "prop"
+    matched_pattern: Mapped[str | None] = mapped_column(String(200), nullable=True)
+    flagged_for_review: Mapped[bool] = mapped_column(default=False, nullable=False)
+    classified_at: Mapped[datetime] = mapped_column(default=datetime.utcnow, nullable=False)
+
+    __table_args__ = (
+        Index("ix_classification_node", "taxonomy_node_id"),
+        Index("ix_classification_flagged", "flagged_for_review"),
+    )
+
+
+class Position(Base):
+    """Computed trader position in a specific market.
+
+    Stores the result of position calculation from trade history.
+    Updated on each position refresh to reflect current state.
+    """
+
+    __tablename__ = "positions"
+
+    id: Mapped[int] = mapped_column(primary_key=True, autoincrement=True)
+    market_id: Mapped[str] = mapped_column(String(100), nullable=False)
+    trader_address: Mapped[str] = mapped_column(String(42), nullable=False)
+    size: Mapped[Decimal] = mapped_column(Numeric(20, 6), nullable=False)
+    direction: Mapped[str] = mapped_column(String(5), nullable=False)  # "LONG", "SHORT", or "FLAT"
+    avg_entry_price: Mapped[Decimal | None] = mapped_column(Numeric(10, 6), nullable=True)
+    entry_timestamp: Mapped[datetime | None] = mapped_column(nullable=True)
+    first_trade_timestamp: Mapped[datetime | None] = mapped_column(nullable=True)
+    last_trade_timestamp: Mapped[datetime | None] = mapped_column(nullable=True)
+    trade_count: Mapped[int] = mapped_column(default=0, nullable=False)
+    resolved: Mapped[bool] = mapped_column(default=False, nullable=False)
+    outcome: Mapped[str | None] = mapped_column(String(50), nullable=True)  # win/loss/void/flat
+    pnl: Mapped[Decimal | None] = mapped_column(Numeric(20, 6), nullable=True)
+    computed_at: Mapped[datetime] = mapped_column(default=datetime.utcnow, nullable=False)
+
+    __table_args__ = (
+        Index("ix_position_trader_market", "trader_address", "market_id", unique=True),
+        Index("ix_position_resolved", "resolved"),
+        Index("ix_position_trader", "trader_address"),
+    )
