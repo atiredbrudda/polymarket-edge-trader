@@ -31,11 +31,11 @@ Requirements for initial release. Each maps to roadmap phases.
 
 ### Scoring Engine
 
-- [ ] **SCOR-01**: System calculates specialization depth score (0-100) per trader per eSports category
-- [ ] **SCOR-02**: Score incorporates category concentration, category win rate, sample size, and recency
-- [ ] **SCOR-03**: System enforces minimum sample size (5+ resolved eSports markets) before scoring
-- [ ] **SCOR-04**: System applies recency weighting so recent performance counts more than old
-- [ ] **SCOR-05**: System produces ranked leaderboard of traders per eSports niche
+- [x] **SCOR-01**: System calculates specialization depth score (0-100) per trader per eSports category
+- [x] **SCOR-02**: Score incorporates category concentration, category win rate, sample size, and recency
+- [x] **SCOR-03**: System enforces minimum sample size (5+ resolved eSports markets) before scoring
+- [x] **SCOR-04**: System applies recency weighting so recent performance counts more than old
+- [x] **SCOR-05**: System produces ranked leaderboard of traders per eSports niche
 
 ### Signal Detection
 
@@ -121,11 +121,11 @@ Which phases cover which requirements. Updated during roadmap creation.
 | PERF-02 | Phase 2 | Complete |
 | PERF-03 | Phase 3 | Complete |
 | PERF-04 | Phase 3 | Complete |
-| SCOR-01 | Phase 4 | Pending |
-| SCOR-02 | Phase 4 | Pending |
-| SCOR-03 | Phase 4 | Pending |
-| SCOR-04 | Phase 4 | Pending |
-| SCOR-05 | Phase 4 | Pending |
+| SCOR-01 | Phase 4 | Complete |
+| SCOR-02 | Phase 4 | Complete |
+| SCOR-03 | Phase 4 | Complete |
+| SCOR-04 | Phase 4 | Complete |
+| SCOR-05 | Phase 4 | Complete |
 | SGNL-01 | Phase 5 | Pending |
 | SGNL-02 | Phase 5 | Pending |
 | SGNL-03 | Phase 5 | Pending |

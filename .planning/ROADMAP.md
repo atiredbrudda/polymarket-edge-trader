@@ -15,7 +15,7 @@ Decimal phases appear between their surrounding integers in numeric order.
 - [x] **Phase 1: Foundation** - Data collection and storage infrastructure
 - [x] **Phase 2: Classification & Discovery** - Taxonomy system and trader identification
 - [x] **Phase 3: Historical Evaluation** - Performance tracking and validation framework
-- [ ] **Phase 4: Scoring Engine** - Specialization depth and expertise calculation
+- [x] **Phase 4: Scoring Engine** - Specialization depth and expertise calculation
 - [ ] **Phase 5: Signal Detection** - Consensus identification and herding filters
 - [ ] **Phase 6: Alerting System** - Multi-channel alert delivery
 - [ ] **Phase 7: CLI Interface** - User commands and presentation layer
@@ -86,9 +86,9 @@ Plans:
 **Plans**: 3 plans
 
 Plans:
-- [ ] 04-01-PLAN.md — Concentration metrics and specialization classification (TDD)
-- [ ] 04-02-PLAN.md — Composite expertise scoring engine (TDD)
-- [ ] 04-03-PLAN.md — DB models, leaderboard queries, and scoring pipeline
+- [x] 04-01-PLAN.md — Concentration metrics and specialization classification (TDD)
+- [x] 04-02-PLAN.md — Composite expertise scoring engine (TDD)
+- [x] 04-03-PLAN.md — DB models, leaderboard queries, and scoring pipeline
 
 ### Phase 5: Signal Detection
 **Goal**: Identify expert consensus while filtering herding behavior
@@ -144,7 +144,7 @@ Phases execute in numeric order: 1 → 2 → 3 → 4 → 5 → 6 → 7
 | 1. Foundation | 4/4 | Complete | 2026-02-06 |
 | 2. Classification & Discovery | 3/3 | Complete | 2026-02-06 |
 | 3. Historical Evaluation | 5/5 | Complete | 2026-02-06 |
-| 4. Scoring Engine | 0/3 | Not started | - |
+| 4. Scoring Engine | 3/3 | Complete | 2026-02-06 |
 | 5. Signal Detection | 0/TBD | Not started | - |
 | 6. Alerting System | 0/TBD | Not started | - |
 | 7. CLI Interface | 0/TBD | Not started | - |
