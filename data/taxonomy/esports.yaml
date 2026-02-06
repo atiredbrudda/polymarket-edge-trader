@@ -1,0 +1,199 @@
+name: eSports
+games:
+  - name: CS2
+    patterns:
+      - "\\bCS2\\b"
+      - "\\bCounter-Strike\\s+2\\b"
+      - "\\bCounter\\s*Strike\\s*2\\b"
+    tournaments:
+      - name: IEM Katowice
+        patterns:
+          - "\\bIEM\\s+Katowice\\b"
+          - "\\bIntel\\s+Extreme\\s+Masters\\s+Katowice\\b"
+        tier: major
+        teams:
+          - name: Natus Vincere
+            patterns:
+              - "\\bNaVi\\b"
+              - "\\bNatus\\s+Vincere\\b"
+              - "\\bNa'Vi\\b"
+            aliases: ["NaVi", "Na'Vi"]
+          - name: FaZe Clan
+            patterns:
+              - "\\bFaZe\\b"
+              - "\\bFaZe\\s+Clan\\b"
+            aliases: ["FaZe"]
+          - name: Team Liquid
+            patterns:
+              - "\\bLiquid\\b"
+              - "\\bTeam\\s+Liquid\\b"
+              - "\\bTL\\b"
+            aliases: ["TL", "Liquid"]
+      - name: BLAST Premier
+        patterns:
+          - "\\bBLAST\\s+Premier\\b"
+          - "\\bBLAST\\b"
+        tier: major
+        teams:
+          - name: Natus Vincere
+            patterns:
+              - "\\bNaVi\\b"
+              - "\\bNatus\\s+Vincere\\b"
+          - name: Cloud9
+            patterns:
+              - "\\bCloud9\\b"
+              - "\\bC9\\b"
+            aliases: ["C9"]
+          - name: G2 Esports
+            patterns:
+              - "\\bG2\\b"
+              - "\\bG2\\s+Esports\\b"
+            aliases: ["G2"]
+
+  - name: Dota 2
+    patterns:
+      - "\\bDota\\s+2\\b"
+      - "\\bDota2\\b"
+      - "\\bDOTA2\\b"
+    tournaments:
+      - name: The International
+        patterns:
+          - "\\bThe\\s+International\\b"
+          - "\\bTI\\s*\\d+\\b"
+          - "\\bTI\\b"
+        tier: major
+        teams:
+          - name: Team Liquid
+            patterns:
+              - "\\bLiquid\\b"
+              - "\\bTeam\\s+Liquid\\b"
+            aliases: ["Liquid"]
+          - name: Natus Vincere
+            patterns:
+              - "\\bNaVi\\b"
+              - "\\bNatus\\s+Vincere\\b"
+            aliases: ["NaVi"]
+          - name: OG
+            patterns:
+              - "\\bOG\\b"
+            aliases: ["OG"]
+      - name: DreamLeague
+        patterns:
+          - "\\bDreamLeague\\b"
+          - "\\bDream\\s+League\\b"
+        tier: minor
+        teams:
+          - name: Team Spirit
+            patterns:
+              - "\\bSpirit\\b"
+              - "\\bTeam\\s+Spirit\\b"
+            aliases: ["Spirit"]
+          - name: PSG.LGD
+            patterns:
+              - "\\bLGD\\b"
+              - "\\bPSG\\.LGD\\b"
+            aliases: ["LGD"]
+
+  - name: League of Legends
+    patterns:
+      - "\\bLeague\\s+of\\s+Legends\\b"
+      - "\\bLoL\\b"
+      - "\\bLOL\\b"
+    tournaments:
+      - name: World Championship
+        patterns:
+          - "\\bWorlds\\b"
+          - "\\bWorld\\s+Championship\\b"
+          - "\\bLoL\\s+Worlds\\b"
+        tier: major
+        teams:
+          - name: T1
+            patterns:
+              - "\\bT1\\b"
+              - "\\bSK\\s+Telecom\\b"
+            aliases: ["SKT", "SKT T1"]
+          - name: Cloud9
+            patterns:
+              - "\\bCloud9\\b"
+              - "\\bC9\\b"
+            aliases: ["C9"]
+          - name: Team Liquid
+            patterns:
+              - "\\bLiquid\\b"
+              - "\\bTeam\\s+Liquid\\b"
+            aliases: ["TL", "Liquid"]
+      - name: LCS
+        patterns:
+          - "\\bLCS\\b"
+          - "\\bLeague\\s+Championship\\s+Series\\b"
+        tier: minor
+        teams:
+          - name: TSM
+            patterns:
+              - "\\bTSM\\b"
+              - "\\bTeam\\s+SoloMid\\b"
+            aliases: ["Team SoloMid"]
+          - name: 100 Thieves
+            patterns:
+              - "\\b100\\s+Thieves\\b"
+              - "\\b100T\\b"
+            aliases: ["100T"]
+      - name: LEC
+        patterns:
+          - "\\bLEC\\b"
+          - "\\bLeague\\s+of\\s+Legends\\s+European\\s+Championship\\b"
+        tier: minor
+        teams:
+          - name: Fnatic
+            patterns:
+              - "\\bFnatic\\b"
+              - "\\bFNC\\b"
+            aliases: ["FNC"]
+          - name: G2 Esports
+            patterns:
+              - "\\bG2\\b"
+              - "\\bG2\\s+Esports\\b"
+            aliases: ["G2"]
+
+  - name: Valorant
+    patterns:
+      - "\\bValorant\\b"
+      - "\\bVALORANT\\b"
+    tournaments:
+      - name: VCT Masters
+        patterns:
+          - "\\bVCT\\s+Masters\\b"
+          - "\\bValorant\\s+Champions\\s+Tour\\s+Masters\\b"
+          - "\\bMasters\\b"
+        tier: major
+        teams:
+          - name: T1
+            patterns:
+              - "\\bT1\\b"
+            aliases: ["T1"]
+          - name: FaZe Clan
+            patterns:
+              - "\\bFaZe\\b"
+              - "\\bFaZe\\s+Clan\\b"
+            aliases: ["FaZe"]
+          - name: Cloud9
+            patterns:
+              - "\\bCloud9\\b"
+              - "\\bC9\\b"
+            aliases: ["C9"]
+      - name: VCT Champions
+        patterns:
+          - "\\bVCT\\s+Champions\\b"
+          - "\\bValorant\\s+Champions\\b"
+          - "\\bChampions\\b"
+        tier: major
+        teams:
+          - name: LOUD
+            patterns:
+              - "\\bLOUD\\b"
+            aliases: ["LOUD"]
+          - name: Paper Rex
+            patterns:
+              - "\\bPaper\\s+Rex\\b"
+              - "\\bPRX\\b"
+            aliases: ["PRX"]
