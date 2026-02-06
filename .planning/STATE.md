@@ -10,18 +10,18 @@ See: .planning/PROJECT.md (updated 2026-02-05)
 ## Current Position
 
 Phase: 3 of 7 (Historical Evaluation)
-Plan: 03 of 5 complete
+Plan: 04 of 5 complete
 Status: Phase 3 IN PROGRESS
-Last activity: 2026-02-06 — Completed 03-03-PLAN.md
+Last activity: 2026-02-06 — Completed 03-04-PLAN.md
 
-Progress: [██░░░░░░░░] 27% (10/37 total plans complete)
+Progress: [██░░░░░░░░] 30% (11/37 total plans complete)
 
 ## Performance Metrics
 
 **Velocity:**
-- Total plans completed: 10
-- Average duration: 5.4 min
-- Total execution time: 0.9 hours
+- Total plans completed: 11
+- Average duration: 5.3 min
+- Total execution time: 0.97 hours
 
 **By Phase:**
 
@@ -29,11 +29,11 @@ Progress: [██░░░░░░░░] 27% (10/37 total plans complete)
 |-------|-------|-------|----------|
 | 1 - Foundation | 4/4 | 30min | 7.5min |
 | 2 - Classification & Discovery | 3/3 | 15min | 5min |
-| 3 - Historical Evaluation | 3/5 | 10.35min | 3.45min |
+| 3 - Historical Evaluation | 4/5 | 15.35min | 3.84min |
 
 **Recent Trend:**
-- Last 5 plans: 5min (02-03), 3min (03-01), 3.6min (03-02), 3.75min (03-03)
-- Trend: TDD + pure functions consistently fast (3-6min range), established patterns accelerate development
+- Last 5 plans: 3min (03-01), 3.6min (03-02), 3.75min (03-03), 5min (03-04)
+- Trend: TDD + pure functions consistently fast (3-5min range), established patterns accelerate development
 
 *Updated after each plan completion*
 
@@ -83,6 +83,9 @@ Recent decisions affecting current work:
 - **[03-03] 7d window excluded from consistency:** Too noisy for meaningful cross-timeframe comparison, only 30d/90d/all used
 - **[03-03] Sparse threshold: 5 resolved markets:** Minimum for statistical confidence, windows with < 5 flagged as low-confidence
 - **[03-03] Alternation rate threshold: 0.4:** >= 0.4 is alternating (consistent), < 0.4 is clustered (streaky)
+- **[03-04] Grace period for resolved positions: 4 hours:** 2x UMA 2-hour challenge period for safety
+- **[03-04] Composite unique index on (trader_address, timeframe):** Enables efficient PerformanceSnapshot upsert operations
+- **[03-04] Chronological outcome ordering (ASC):** For streak analysis vs DESC for recent positions display
 
 ### Pending Todos
 
@@ -108,8 +111,9 @@ None yet.
 - ✓ [03-01] Performance metrics calculator complete - realized/unrealized PnL, win rate, volume (27 tests)
 - ✓ [03-02] Timeframe windows and profile classification complete - 7d/30d/90d/all filtering, selective vs active (26 tests)
 - ✓ [03-03] Consistency detection complete - cross-timeframe stability, streak analysis, profile-specific bars (20 tests)
-- Total project tests: 186 (62 Phase 1 + 51 Phase 2 + 73 Phase 3)
-- Next: Calibration scoring, expertise weighting
+- ✓ [03-04] Evaluation storage & queries complete - PerformanceSnapshot/TraderProfile models, time-windowed queries (20 tests)
+- Total project tests: 206 (62 Phase 1 + 51 Phase 2 + 93 Phase 3)
+- Next: Validation framework (walk-forward, calibration)
 
 **Phase 4 (Expertise Scoring):**
 - Expertise score weighting: Formula coefficients require tuning via backtests on historical data
@@ -125,6 +129,6 @@ None yet.
 ## Session Continuity
 
 Last session: 2026-02-06
-Stopped at: Completed 03-03-PLAN.md
+Stopped at: Completed 03-04-PLAN.md
 Resume file: None
-Next: Continue Phase 3 execution (03-04 through 03-05)
+Next: Complete Phase 3 with 03-05 (validation framework)
