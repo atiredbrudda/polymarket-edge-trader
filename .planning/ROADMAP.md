@@ -64,10 +64,14 @@ Plans:
   2. System identifies traders with consistent performance vs lucky streaks using cross-timeframe analysis
   3. System tracks market resolution states and excludes disputed/unresolved markets from performance metrics
   4. System provides out-of-sample validation framework for testing expertise scores on historical data
-**Plans**: TBD
+**Plans**: 5 plans
 
 Plans:
-- [ ] TBD during planning
+- [ ] 03-01-PLAN.md — Performance metrics: PnL, win rate, volume (TDD)
+- [ ] 03-02-PLAN.md — Timeframes and trader profiles (TDD)
+- [ ] 03-03-PLAN.md — Consistency detection: cross-timeframe stability (TDD)
+- [ ] 03-04-PLAN.md — DB models, time-windowed queries, and evaluation pipeline
+- [ ] 03-05-PLAN.md — Out-of-sample validation framework (TDD)
 
 ### Phase 4: Scoring Engine
 **Goal**: Calculate specialization depth scores that identify domain experts
@@ -137,7 +141,7 @@ Phases execute in numeric order: 1 → 2 → 3 → 4 → 5 → 6 → 7
 |-------|----------------|--------|-----------|
 | 1. Foundation | 4/4 | Complete | 2026-02-06 |
 | 2. Classification & Discovery | 3/3 | Complete | 2026-02-06 |
-| 3. Historical Evaluation | 0/TBD | Not started | - |
+| 3. Historical Evaluation | 0/5 | Planned | - |
 | 4. Scoring Engine | 0/TBD | Not started | - |
 | 5. Signal Detection | 0/TBD | Not started | - |
 | 6. Alerting System | 0/TBD | Not started | - |
