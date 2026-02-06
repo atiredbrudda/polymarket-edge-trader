@@ -48,10 +48,12 @@ Plans:
   2. System discovers traders participating in active eSports markets from order books
   3. Adding a new eSports category requires only YAML changes, not code modification
   4. System tracks current open positions with size, direction, and entry price
-**Plans**: TBD
+**Plans**: 3 plans
 
 Plans:
-- [ ] TBD during planning
+- [ ] 02-01-PLAN.md — Taxonomy YAML schema, loader, and classifier (TDD)
+- [ ] 02-02-PLAN.md — Stateless position tracker (TDD)
+- [ ] 02-03-PLAN.md — DB models, classification pipeline, and trader discovery
 
 ### Phase 3: Historical Evaluation
 **Goal**: Enable historical performance analysis with validation framework
@@ -134,7 +136,7 @@ Phases execute in numeric order: 1 → 2 → 3 → 4 → 5 → 6 → 7
 | Phase | Plans Complete | Status | Completed |
 |-------|----------------|--------|-----------|
 | 1. Foundation | 4/4 | Complete | 2026-02-06 |
-| 2. Classification & Discovery | 0/TBD | Not started | - |
+| 2. Classification & Discovery | 0/3 | Not started | - |
 | 3. Historical Evaluation | 0/TBD | Not started | - |
 | 4. Scoring Engine | 0/TBD | Not started | - |
 | 5. Signal Detection | 0/TBD | Not started | - |
