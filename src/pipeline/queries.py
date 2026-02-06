@@ -12,11 +12,20 @@ for optimal performance on time-series data.
 """
 
 from datetime import datetime, timedelta
+from decimal import Decimal
 
 from sqlalchemy import select, func
 from sqlalchemy.orm import Session
 
-from src.db.models import Market, Position, Trade, TraderCategorySummary
+from src.db.models import (
+    ExpertiseScore,
+    Market,
+    MarketClassification,
+    Position,
+    TaxonomyNode,
+    Trade,
+    TraderCategorySummary,
+)
 
 
 def get_trades_by_date_range(
@@ -323,3 +332,162 @@ def get_trader_outcomes_chronological(session: Session, trader_address: str) -> 
 
     result = session.execute(query)
     return [outcome for outcome in result.scalars().all()]
+
+
+def get_game_leaderboard(
+    session: Session, game_slug: str, top_n: int = 20, min_score: Decimal | None = None
+) -> list[ExpertiseScore]:
+    """Query latest expertise scores for a game leaderboard.
+
+    Returns the most recent score snapshot for each trader in a game,
+    ordered by percentile_rank (or raw_score if percentile_rank is None).
+
+    Args:
+        session: SQLAlchemy session
+        game_slug: Game identifier (e.g., "esports.cs2")
+        top_n: Maximum number of entries to return (default: 20)
+        min_score: Optional minimum raw_score filter
+
+    Returns:
+        List of ExpertiseScore ORM objects, ordered by rank DESC
+
+    Example:
+        # Get top 20 traders in CS2
+        leaderboard = get_game_leaderboard(session, "esports.cs2", top_n=20)
+
+        # Get traders with score >= 70
+        high_performers = get_game_leaderboard(session, "esports.cs2", min_score=Decimal("70"))
+    """
+    # Subquery to find max(computed_at) per trader per game
+    subquery = (
+        select(
+            ExpertiseScore.trader_address,
+            func.max(ExpertiseScore.computed_at).label("max_computed_at"),
+        )
+        .where(ExpertiseScore.game_slug == game_slug)
+        .group_by(ExpertiseScore.trader_address)
+        .subquery()
+    )
+
+    # Main query: join to get latest scores
+    query = (
+        select(ExpertiseScore)
+        .join(
+            subquery,
+            (ExpertiseScore.trader_address == subquery.c.trader_address)
+            & (ExpertiseScore.computed_at == subquery.c.max_computed_at),
+        )
+        .where(ExpertiseScore.game_slug == game_slug)
+    )
+
+    # Apply min_score filter if provided
+    if min_score is not None:
+        query = query.where(ExpertiseScore.raw_score >= min_score)
+
+    # Order by percentile_rank DESC (or raw_score if percentile_rank is None)
+    # Use COALESCE to handle None percentile_rank by falling back to raw_score
+    query = query.order_by(
+        func.coalesce(ExpertiseScore.percentile_rank, ExpertiseScore.raw_score).desc()
+    )
+
+    # Limit results
+    query = query.limit(top_n)
+
+    result = session.execute(query)
+    return list(result.scalars().all())
+
+
+def get_trader_score_history(
+    session: Session, trader_address: str, game_slug: str | None = None, limit: int = 50
+) -> list[ExpertiseScore]:
+    """Query score history for a trader.
+
+    Returns all score snapshots for a trader, optionally filtered by game.
+
+    Args:
+        session: SQLAlchemy session
+        trader_address: Trader wallet address
+        game_slug: Optional game filter (e.g., "esports.cs2")
+        limit: Maximum number of entries to return (default: 50)
+
+    Returns:
+        List of ExpertiseScore ORM objects, ordered by computed_at DESC
+
+    Example:
+        # Get trader's score history across all games
+        history = get_trader_score_history(session, "0xTrader1")
+
+        # Get trader's CS2 score history
+        cs2_history = get_trader_score_history(session, "0xTrader1", game_slug="esports.cs2")
+    """
+    query = select(ExpertiseScore).where(ExpertiseScore.trader_address == trader_address)
+
+    if game_slug is not None:
+        query = query.where(ExpertiseScore.game_slug == game_slug)
+
+    query = query.order_by(ExpertiseScore.computed_at.desc()).limit(limit)
+
+    result = session.execute(query)
+    return list(result.scalars().all())
+
+
+def get_all_game_slugs_with_positions(session: Session) -> list[str]:
+    """Query distinct game slugs that have Position + MarketClassification data.
+
+    Args:
+        session: SQLAlchemy session
+
+    Returns:
+        List of game slug strings (e.g., ["esports.cs2", "esports.dota2"])
+
+    Example:
+        # Get all games with positions
+        games = get_all_game_slugs_with_positions(session)
+    """
+    query = (
+        select(TaxonomyNode.slug)
+        .join(MarketClassification, MarketClassification.taxonomy_node_id == TaxonomyNode.id)
+        .join(Position, Position.market_id == MarketClassification.market_id)
+        .where(TaxonomyNode.node_type == "game")
+        .distinct()
+    )
+
+    result = session.execute(query)
+    return list(result.scalars().all())
+
+
+def get_positions_for_game(
+    session: Session, game_slug: str, trader_address: str | None = None
+) -> list[Position]:
+    """Query positions in markets classified under a specific game slug.
+
+    Joins Position -> MarketClassification -> TaxonomyNode to filter by game.
+    Uses slug LIKE pattern to capture game and sub-nodes (tournaments, teams).
+
+    Args:
+        session: SQLAlchemy session
+        game_slug: Game identifier (e.g., "esports.cs2")
+        trader_address: Optional trader address filter
+
+    Returns:
+        List of Position ORM objects
+
+    Example:
+        # Get all positions for CS2
+        positions = get_positions_for_game(session, "esports.cs2")
+
+        # Get trader's positions in CS2
+        trader_positions = get_positions_for_game(session, "esports.cs2", trader_address="0xTrader1")
+    """
+    query = (
+        select(Position)
+        .join(MarketClassification, Position.market_id == MarketClassification.market_id)
+        .join(TaxonomyNode, MarketClassification.taxonomy_node_id == TaxonomyNode.id)
+        .where(TaxonomyNode.slug.like(f"{game_slug}%"))
+    )
+
+    if trader_address is not None:
+        query = query.where(Position.trader_address == trader_address)
+
+    result = session.execute(query)
+    return list(result.scalars().all())

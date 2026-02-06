@@ -254,3 +254,33 @@ class PerformanceSnapshot(Base):
         Index("ix_snapshot_trader", "trader_address"),
         Index("ix_snapshot_timeframe", "timeframe"),
     )
+
+
+class ExpertiseScore(Base):
+    """Expertise score snapshot for a trader in a specific game.
+
+    Stores score history for trend analysis and leaderboard generation.
+    Each row is a point-in-time snapshot — new rows inserted on each scoring run.
+    """
+
+    __tablename__ = "expertise_scores"
+
+    id: Mapped[int] = mapped_column(primary_key=True, autoincrement=True)
+    trader_address: Mapped[str] = mapped_column(String(42), nullable=False)
+    game_slug: Mapped[str] = mapped_column(String(100), nullable=False)
+    raw_score: Mapped[Decimal] = mapped_column(Numeric(10, 6), nullable=False)
+    percentile_rank: Mapped[Decimal | None] = mapped_column(Numeric(10, 6), nullable=True)
+    win_rate_component: Mapped[Decimal] = mapped_column(Numeric(10, 6), nullable=False)
+    concentration_component: Mapped[Decimal] = mapped_column(Numeric(10, 6), nullable=False)
+    recency_component: Mapped[Decimal] = mapped_column(Numeric(10, 6), nullable=False)
+    sample_size_component: Mapped[Decimal] = mapped_column(Numeric(10, 6), nullable=False)
+    consistency_multiplier: Mapped[Decimal] = mapped_column(Numeric(10, 6), nullable=False)
+    specialization_label: Mapped[str] = mapped_column(String(50), nullable=False)
+    resolved_market_count: Mapped[int] = mapped_column(nullable=False)
+    computed_at: Mapped[datetime] = mapped_column(default=datetime.utcnow, nullable=False)
+
+    __table_args__ = (
+        Index("ix_expertise_trader_game", "trader_address", "game_slug"),
+        Index("ix_expertise_game_score", "game_slug", "raw_score"),
+        Index("ix_expertise_computed_at", "computed_at"),
+    )
