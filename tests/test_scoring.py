@@ -261,7 +261,7 @@ class TestCalculateExpertiseScore:
         assert result.win_rate_component == Decimal("90")  # 90% win rate
         assert result.concentration_component == Decimal("80")  # 0.8 * 100
         assert result.recency_component == Decimal("100")  # Recent
-        assert result.consistency_multiplier == Decimal("1.0")  # No bonus (score=90 but need >= 80 AND stable)
+        assert result.consistency_multiplier == Decimal("1.05")  # Bonus (score=90 >= 80 AND stable)
 
     def test_low_performance_trader(self):
         """Low win rate + low concentration + old activity = low score."""
