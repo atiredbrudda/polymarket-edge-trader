@@ -14,7 +14,7 @@ Decimal phases appear between their surrounding integers in numeric order.
 
 - [x] **Phase 1: Foundation** - Data collection and storage infrastructure
 - [x] **Phase 2: Classification & Discovery** - Taxonomy system and trader identification
-- [ ] **Phase 3: Historical Evaluation** - Performance tracking and validation framework
+- [x] **Phase 3: Historical Evaluation** - Performance tracking and validation framework
 - [ ] **Phase 4: Scoring Engine** - Specialization depth and expertise calculation
 - [ ] **Phase 5: Signal Detection** - Consensus identification and herding filters
 - [ ] **Phase 6: Alerting System** - Multi-channel alert delivery
@@ -67,11 +67,11 @@ Plans:
 **Plans**: 5 plans
 
 Plans:
-- [ ] 03-01-PLAN.md — Performance metrics: PnL, win rate, volume (TDD)
-- [ ] 03-02-PLAN.md — Timeframes and trader profiles (TDD)
-- [ ] 03-03-PLAN.md — Consistency detection: cross-timeframe stability (TDD)
-- [ ] 03-04-PLAN.md — DB models, time-windowed queries, and evaluation pipeline
-- [ ] 03-05-PLAN.md — Out-of-sample validation framework (TDD)
+- [x] 03-01-PLAN.md — Performance metrics: PnL, win rate, volume (TDD)
+- [x] 03-02-PLAN.md — Timeframes and trader profiles (TDD)
+- [x] 03-03-PLAN.md — Consistency detection: cross-timeframe stability (TDD)
+- [x] 03-04-PLAN.md — DB models, time-windowed queries, and evaluation pipeline
+- [x] 03-05-PLAN.md — Out-of-sample validation framework (TDD)
 
 ### Phase 4: Scoring Engine
 **Goal**: Calculate specialization depth scores that identify domain experts
@@ -141,7 +141,7 @@ Phases execute in numeric order: 1 → 2 → 3 → 4 → 5 → 6 → 7
 |-------|----------------|--------|-----------|
 | 1. Foundation | 4/4 | Complete | 2026-02-06 |
 | 2. Classification & Discovery | 3/3 | Complete | 2026-02-06 |
-| 3. Historical Evaluation | 0/5 | Planned | - |
+| 3. Historical Evaluation | 5/5 | Complete | 2026-02-06 |
 | 4. Scoring Engine | 0/TBD | Not started | - |
 | 5. Signal Detection | 0/TBD | Not started | - |
 | 6. Alerting System | 0/TBD | Not started | - |

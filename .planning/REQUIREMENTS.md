@@ -24,10 +24,10 @@ Requirements for initial release. Each maps to roadmap phases.
 
 ### Performance Analytics
 
-- [ ] **PERF-01**: System calculates PnL, win rate, and total volume for each trader
+- [x] **PERF-01**: System calculates PnL, win rate, and total volume for each trader
 - [x] **PERF-02**: System tracks current open positions with size, direction (YES/NO), and entry price
-- [ ] **PERF-03**: System calculates metrics across multiple timeframes (7d, 30d, 90d, all-time)
-- [ ] **PERF-04**: System identifies traders with consistent performance vs lucky streaks across timeframes
+- [x] **PERF-03**: System calculates metrics across multiple timeframes (7d, 30d, 90d, all-time)
+- [x] **PERF-04**: System identifies traders with consistent performance vs lucky streaks across timeframes
 
 ### Scoring Engine
 
@@ -117,10 +117,10 @@ Which phases cover which requirements. Updated during roadmap creation.
 | TAXO-01 | Phase 2 | Complete |
 | TAXO-02 | Phase 2 | Complete |
 | TAXO-03 | Phase 2 | Complete |
-| PERF-01 | Phase 3 | Pending |
+| PERF-01 | Phase 3 | Complete |
 | PERF-02 | Phase 2 | Complete |
-| PERF-03 | Phase 3 | Pending |
-| PERF-04 | Phase 3 | Pending |
+| PERF-03 | Phase 3 | Complete |
+| PERF-04 | Phase 3 | Complete |
 | SCOR-01 | Phase 4 | Pending |
 | SCOR-02 | Phase 4 | Pending |
 | SCOR-03 | Phase 4 | Pending |

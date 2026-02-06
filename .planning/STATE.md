@@ -5,7 +5,7 @@
 See: .planning/PROJECT.md (updated 2026-02-05)
 
 **Core value:** Surface where smart money is moving in eSports markets so the user can see what informed traders are doing and factor that into their own thinking.
-**Current focus:** Phase 3 - Historical Evaluation
+**Current focus:** Phase 4 - Scoring Engine
 
 ## Current Position
 
