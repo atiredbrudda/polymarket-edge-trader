@@ -10,28 +10,28 @@ See: .planning/PROJECT.md (updated 2026-02-05)
 ## Current Position
 
 Phase: 1 of 7 (Foundation)
-Plan: Ready to plan
-Status: Ready to plan
-Last activity: 2026-02-06 — Roadmap created with 7 phases covering all 35 v1 requirements
+Plan: 1 of 4 complete (Wave 1 complete)
+Status: In progress
+Last activity: 2026-02-06 — Completed 01-01-PLAN.md
 
-Progress: [░░░░░░░░░░] 0%
+Progress: [██░░░░░░░░] 25% (Phase 1: 1/4 plans complete)
 
 ## Performance Metrics
 
 **Velocity:**
-- Total plans completed: 0
-- Average duration: - min
-- Total execution time: 0.0 hours
+- Total plans completed: 1
+- Average duration: 4 min
+- Total execution time: 0.07 hours
 
 **By Phase:**
 
 | Phase | Plans | Total | Avg/Plan |
 |-------|-------|-------|----------|
-| - | - | - | - |
+| 1 - Foundation | 1/4 | 4min | 4min |
 
 **Recent Trend:**
-- Last 5 plans: -
-- Trend: Not yet established
+- Last 5 plans: 4min
+- Trend: Baseline established
 
 *Updated after each plan completion*
 
@@ -47,6 +47,10 @@ Recent decisions affecting current work:
 - Hourly polling, not real-time: Awareness tool doesn't need sub-minute latency; reduces API pressure
 - CLI + webhooks, no web UI: Prove signal quality first before investing in UI
 - SQLite local-first storage: No external database infrastructure for v1
+- **[01-01] Numeric columns for Decimal precision:** Use Numeric(20,6) for volumes, Numeric(10,6) for prices to avoid float errors
+- **[01-01] SQLite WAL mode enabled:** Better write concurrency for data ingestion pipeline
+- **[01-01] Category-agnostic data model:** detail_categories list configurable, no hardcoded eSports in business logic
+- **[01-01] Virtual environment required:** Homebrew Python externally-managed, requires .venv/ activation
 
 ### Pending Todos
 
@@ -75,6 +79,7 @@ None yet.
 
 ## Session Continuity
 
-Last session: 2026-02-06
-Stopped at: Roadmap and STATE.md created, ready to begin Phase 1 planning
+Last session: 2026-02-06T00:29:23Z
+Stopped at: Completed 01-01-PLAN.md (Foundation scaffolding)
 Resume file: None
+Next: Execute 01-02-PLAN.md (API client) and 01-03-PLAN.md (Data pipeline) in Wave 2 parallel
