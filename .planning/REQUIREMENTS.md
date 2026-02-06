@@ -9,12 +9,12 @@ Requirements for initial release. Each maps to roadmap phases.
 
 ### Data Foundation
 
-- [ ] **DATA-01**: System can fetch active eSports events and markets from Polymarket CLOB API
-- [ ] **DATA-02**: System can discover traders participating in active eSports markets
-- [ ] **DATA-03**: System can retrieve complete trade history for a given trader address
-- [ ] **DATA-04**: System can filter trade history by date range and market resolution status
-- [ ] **DATA-05**: System stores market, trader, and position data in local SQLite database
-- [ ] **DATA-06**: System respects Polymarket API rate limits with built-in rate limiter
+- [x] **DATA-01**: System can fetch active eSports events and markets from Polymarket CLOB API
+- [x] **DATA-02**: System can discover traders participating in active eSports markets
+- [x] **DATA-03**: System can retrieve complete trade history for a given trader address
+- [x] **DATA-04**: System can filter trade history by date range and market resolution status
+- [x] **DATA-05**: System stores market, trader, and position data in local SQLite database
+- [x] **DATA-06**: System respects Polymarket API rate limits with built-in rate limiter
 
 ### Taxonomy
 
@@ -108,12 +108,12 @@ Which phases cover which requirements. Updated during roadmap creation.
 
 | Requirement | Phase | Status |
 |-------------|-------|--------|
-| DATA-01 | Phase 1 | Pending |
-| DATA-02 | Phase 1 | Pending |
-| DATA-03 | Phase 1 | Pending |
-| DATA-04 | Phase 1 | Pending |
-| DATA-05 | Phase 1 | Pending |
-| DATA-06 | Phase 1 | Pending |
+| DATA-01 | Phase 1 | Complete |
+| DATA-02 | Phase 1 | Complete |
+| DATA-03 | Phase 1 | Complete |
+| DATA-04 | Phase 1 | Complete |
+| DATA-05 | Phase 1 | Complete |
+| DATA-06 | Phase 1 | Complete |
 | TAXO-01 | Phase 2 | Pending |
 | TAXO-02 | Phase 2 | Pending |
 | TAXO-03 | Phase 2 | Pending |

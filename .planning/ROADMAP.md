@@ -12,7 +12,7 @@ This roadmap delivers an intelligence tool that identifies expert eSports trader
 
 Decimal phases appear between their surrounding integers in numeric order.
 
-- [ ] **Phase 1: Foundation** - Data collection and storage infrastructure
+- [x] **Phase 1: Foundation** - Data collection and storage infrastructure
 - [ ] **Phase 2: Classification & Discovery** - Taxonomy system and trader identification
 - [ ] **Phase 3: Historical Evaluation** - Performance tracking and validation framework
 - [ ] **Phase 4: Scoring Engine** - Specialization depth and expertise calculation
@@ -34,10 +34,10 @@ Decimal phases appear between their surrounding integers in numeric order.
 **Plans**: 4 plans
 
 Plans:
-- [ ] 01-01-PLAN.md — Project scaffolding, configuration, and database schema
-- [ ] 01-02-PLAN.md — API client with rate limiting and retry (TDD)
-- [ ] 01-03-PLAN.md — Category filter and trade aggregation (TDD)
-- [ ] 01-04-PLAN.md — Ingestion pipeline and query layer
+- [x] 01-01-PLAN.md — Project scaffolding, configuration, and database schema
+- [x] 01-02-PLAN.md — API client with rate limiting and retry (TDD)
+- [x] 01-03-PLAN.md — Category filter and trade aggregation (TDD)
+- [x] 01-04-PLAN.md — Ingestion pipeline and query layer
 
 ### Phase 2: Classification & Discovery
 **Goal**: Classify markets into eSports taxonomy and identify active traders
@@ -133,7 +133,7 @@ Phases execute in numeric order: 1 → 2 → 3 → 4 → 5 → 6 → 7
 
 | Phase | Plans Complete | Status | Completed |
 |-------|----------------|--------|-----------|
-| 1. Foundation | 0/4 | Planned | - |
+| 1. Foundation | 4/4 | Complete | 2026-02-06 |
 | 2. Classification & Discovery | 0/TBD | Not started | - |
 | 3. Historical Evaluation | 0/TBD | Not started | - |
 | 4. Scoring Engine | 0/TBD | Not started | - |
