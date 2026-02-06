@@ -10,18 +10,18 @@ See: .planning/PROJECT.md (updated 2026-02-05)
 ## Current Position
 
 Phase: 4 of 7 (Scoring Engine)
-Plan: 01 of 3 complete
+Plan: 02 of 3 complete
 Status: In progress
-Last activity: 2026-02-06 — Completed 04-01-PLAN.md
+Last activity: 2026-02-06 — Completed 04-02-PLAN.md
 
-Progress: [███░░░░░░░] 35% (13/37 total plans complete)
+Progress: [███░░░░░░░] 38% (14/37 total plans complete)
 
 ## Performance Metrics
 
 **Velocity:**
-- Total plans completed: 13
-- Average duration: 4.8 min
-- Total execution time: 1.09 hours
+- Total plans completed: 14
+- Average duration: 4.85 min
+- Total execution time: 1.18 hours
 
 **By Phase:**
 
@@ -30,12 +30,12 @@ Progress: [███░░░░░░░] 35% (13/37 total plans complete)
 | 1 - Foundation | 4/4 | 30min | 7.5min |
 | 2 - Classification & Discovery | 3/3 | 15min | 5min |
 | 3 - Historical Evaluation | 5/5 | 19.45min | 3.89min |
-| 4 - Scoring Engine | 1/3 | 2.7min | 2.7min |
+| 4 - Scoring Engine | 2/3 | 8.2min | 4.1min |
 
 **Recent Trend:**
-- Last 5 plans: 3.75min (03-03), 5min (03-04), 4.1min (03-05), 2.7min (04-01)
-- Trend: TDD + pure functions consistently fast (2.7-5min range), established patterns accelerate development
-- Phase 4 started: Plan 04-01 completed in 2.7min with 22 new tests
+- Last 5 plans: 5min (03-04), 4.1min (03-05), 2.7min (04-01), 5.5min (04-02)
+- Trend: TDD + pure functions consistently fast (2.7-5.5min range), established patterns accelerate development
+- Phase 4 on track: Plans 04-01 (2.7min, 22 tests) and 04-02 (5.5min, 38 tests) completed
 
 *Updated after each plan completion*
 
@@ -95,6 +95,10 @@ Recent decisions affecting current work:
 - **[04-01] Game threshold lower than eSports threshold:** 0.5 vs 0.7 allows multi-game specialists (trader with 55% CS2, 45% Valorant qualifies for both)
 - **[04-01] Independent per-game classification:** Same trader evaluated separately for each game, can be specialist in multiple games
 - **[04-01] primary_game only for specialists:** None for generalists, game slug for specialists - clear API contract for downstream logic
+- **[04-02] Recency < 1 day gets full weight:** Same-day trading (e.g., 8am to 12pm) shouldn't be penalized by exponential decay
+- **[04-02] Sample size confidence n - min + 1:** Ensures positive confidence at exactly minimum threshold (avoids 1-exp(0)=0 edge case)
+- **[04-02] Consistency multiplier bonus-only:** 1.05x for score >= 80 AND stable, 1.0x baseline for all others, never penalty below 1.0
+- **[04-02] Percentile rank None until batch normalization:** Population-relative ranks computed in batch via normalize_scores_to_percentiles for efficiency
 
 ### Pending Todos
 
@@ -128,12 +132,13 @@ None yet.
 
 **Phase 4 (Scoring Engine):**
 - ✓ [04-01] Concentration metrics complete - two-tier eSports/game concentration with specialist classification (22 tests)
+- ✓ [04-02] Composite scoring engine complete - weighted components with consistency multiplier and percentile normalization (38 tests)
 - ✓ Validation framework ready: temporal holdout with walk-forward testing available for weight tuning
-- Expertise score weighting: Formula coefficients require tuning via backtests on historical data (validation framework ready)
+- Expertise score weighting: DEFAULT_WEIGHTS set to win_rate 40%, concentration 25%, recency 20%, sample_size 15% (tunable via validation framework)
 - Game patch tracking integration: Need reliable source for patch releases to tag markets with game versions
-- Phase 4 tests: 22 (04-01)
-- Total project tests: 256 (62 Phase 1 + 51 Phase 2 + 121 Phase 3 + 22 Phase 4)
-- Next: 04-02 Composite scoring engine, 04-03 Leaderboard queries
+- Phase 4 tests: 60 (22 from 04-01, 38 from 04-02)
+- Total project tests: 294 (62 Phase 1 + 51 Phase 2 + 121 Phase 3 + 60 Phase 4)
+- Next: 04-03 Leaderboard queries
 
 **Phase 5 (Signal Detection):**
 - Consensus threshold calibration: 75% expert agreement is hypothesis, needs validation
@@ -143,6 +148,6 @@ None yet.
 ## Session Continuity
 
 Last session: 2026-02-06
-Stopped at: Completed 04-01-PLAN.md
+Stopped at: Completed 04-02-PLAN.md
 Resume file: None
-Next: 04-02 Composite scoring engine (combine concentration, win rate, consistency, volume)
+Next: 04-03 Leaderboard queries (rank traders by expertise scores)
