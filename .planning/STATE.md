@@ -10,18 +10,18 @@ See: .planning/PROJECT.md (updated 2026-02-05)
 ## Current Position
 
 Phase: 4 of 7 (Scoring Engine)
-Plan: 02 of 3 complete
-Status: In progress
-Last activity: 2026-02-06 — Completed 04-02-PLAN.md
+Plan: 03 of 3 complete
+Status: Phase complete
+Last activity: 2026-02-06 — Completed 04-03-PLAN.md
 
-Progress: [███░░░░░░░] 38% (14/37 total plans complete)
+Progress: [████░░░░░░] 41% (15/37 total plans complete)
 
 ## Performance Metrics
 
 **Velocity:**
-- Total plans completed: 14
-- Average duration: 4.85 min
-- Total execution time: 1.18 hours
+- Total plans completed: 15
+- Average duration: 4.83 min
+- Total execution time: 1.27 hours
 
 **By Phase:**
 
@@ -30,12 +30,12 @@ Progress: [███░░░░░░░] 38% (14/37 total plans complete)
 | 1 - Foundation | 4/4 | 30min | 7.5min |
 | 2 - Classification & Discovery | 3/3 | 15min | 5min |
 | 3 - Historical Evaluation | 5/5 | 19.45min | 3.89min |
-| 4 - Scoring Engine | 2/3 | 8.2min | 4.1min |
+| 4 - Scoring Engine | 3/3 | 13.4min | 4.47min |
 
 **Recent Trend:**
-- Last 5 plans: 5min (03-04), 4.1min (03-05), 2.7min (04-01), 5.5min (04-02)
+- Last 5 plans: 4.1min (03-05), 2.7min (04-01), 5.5min (04-02), 5.2min (04-03)
 - Trend: TDD + pure functions consistently fast (2.7-5.5min range), established patterns accelerate development
-- Phase 4 on track: Plans 04-01 (2.7min, 22 tests) and 04-02 (5.5min, 38 tests) completed
+- Phase 4 COMPLETE: 3 plans (13.4min total, 4.47min avg) - concentration metrics, composite scoring, leaderboard pipeline
 
 *Updated after each plan completion*
 
@@ -99,6 +99,10 @@ Recent decisions affecting current work:
 - **[04-02] Sample size confidence n - min + 1:** Ensures positive confidence at exactly minimum threshold (avoids 1-exp(0)=0 edge case)
 - **[04-02] Consistency multiplier bonus-only:** 1.05x for score >= 80 AND stable, 1.0x baseline for all others, never penalty below 1.0
 - **[04-02] Percentile rank None until batch normalization:** Population-relative ranks computed in batch via normalize_scores_to_percentiles for efficiency
+- **[04-03] ExpertiseScore rows append-only:** New INSERT on each scoring run, no updates - enables score history for trend analysis
+- **[04-03] Volume proxy fallback:** abs(size * avg_entry_price) when available, abs(size) when avg_entry_price is None
+- **[04-03] Consistency from PerformanceSnapshot:** Retrieve consistency_score and consistency_signal from timeframe="all" snapshot
+- **[04-03] Leaderboard max(computed_at) subquery:** Retrieve latest scores per trader using subquery pattern for efficiency
 
 ### Pending Todos
 
@@ -131,14 +135,16 @@ None yet.
 - Total project tests: 234 (62 Phase 1 + 51 Phase 2 + 121 Phase 3)
 
 **Phase 4 (Scoring Engine):**
+- ✓ COMPLETE - All Phase 4 plans finished
 - ✓ [04-01] Concentration metrics complete - two-tier eSports/game concentration with specialist classification (22 tests)
 - ✓ [04-02] Composite scoring engine complete - weighted components with consistency multiplier and percentile normalization (38 tests)
+- ✓ [04-03] Leaderboard pipeline complete - ExpertiseScore model, leaderboard queries, full scoring orchestration (13 tests)
 - ✓ Validation framework ready: temporal holdout with walk-forward testing available for weight tuning
 - Expertise score weighting: DEFAULT_WEIGHTS set to win_rate 40%, concentration 25%, recency 20%, sample_size 15% (tunable via validation framework)
 - Game patch tracking integration: Need reliable source for patch releases to tag markets with game versions
-- Phase 4 tests: 60 (22 from 04-01, 38 from 04-02)
-- Total project tests: 294 (62 Phase 1 + 51 Phase 2 + 121 Phase 3 + 60 Phase 4)
-- Next: 04-03 Leaderboard queries
+- Phase 4 tests: 73 (22 from 04-01, 38 from 04-02, 13 from 04-03)
+- Total project tests: 307 (62 Phase 1 + 51 Phase 2 + 121 Phase 3 + 73 Phase 4)
+- Ready for Phase 5 (Signal Detection)
 
 **Phase 5 (Signal Detection):**
 - Consensus threshold calibration: 75% expert agreement is hypothesis, needs validation
@@ -148,6 +154,6 @@ None yet.
 ## Session Continuity
 
 Last session: 2026-02-06
-Stopped at: Completed 04-02-PLAN.md
+Stopped at: Completed 04-03-PLAN.md
 Resume file: None
-Next: 04-03 Leaderboard queries (rank traders by expertise scores)
+Next: Phase 5 (Signal Detection) - Consensus detection and herding analysis
