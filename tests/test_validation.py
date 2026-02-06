@@ -134,13 +134,13 @@ class TestWalkForwardValidate:
 
     def test_generates_correct_number_of_folds_with_sufficient_data(self):
         """With sufficient data, generates requested number of folds."""
-        # 450 days of data, 90-day test windows, should fit 5 folds
+        # 600 days of data, 90-day test windows, should fit 5 folds with min 90-day train
         latest = datetime(2026, 2, 6)
-        earliest = latest - timedelta(days=450)
+        earliest = latest - timedelta(days=600)
 
         positions = [
-            MockPosition("0xa", f"m{i}", earliest + timedelta(days=i*10), True, "win", Decimal("10"), Decimal("100"), "LONG", Decimal("0.5"))
-            for i in range(45)
+            MockPosition("0xa", f"m{i}", earliest + timedelta(days=i*12), True, "win", Decimal("10"), Decimal("100"), "LONG", Decimal("0.5"))
+            for i in range(50)
         ]
 
         folds = walk_forward_validate(positions, n_folds=5, test_window_days=90, min_train_days=90)
