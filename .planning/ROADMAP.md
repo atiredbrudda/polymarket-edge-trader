@@ -31,10 +31,13 @@ Decimal phases appear between their surrounding integers in numeric order.
   2. System can retrieve complete trade histories for any trader address
   3. System persists market, trader, and position data in SQLite with proper indexing
   4. System filters trade history by date range and resolution status
-**Plans**: TBD
+**Plans**: 4 plans
 
 Plans:
-- [ ] TBD during planning
+- [ ] 01-01-PLAN.md — Project scaffolding, configuration, and database schema
+- [ ] 01-02-PLAN.md — API client with rate limiting and retry (TDD)
+- [ ] 01-03-PLAN.md — Category filter and trade aggregation (TDD)
+- [ ] 01-04-PLAN.md — Ingestion pipeline and query layer
 
 ### Phase 2: Classification & Discovery
 **Goal**: Classify markets into eSports taxonomy and identify active traders
@@ -130,7 +133,7 @@ Phases execute in numeric order: 1 → 2 → 3 → 4 → 5 → 6 → 7
 
 | Phase | Plans Complete | Status | Completed |
 |-------|----------------|--------|-----------|
-| 1. Foundation | 0/TBD | Not started | - |
+| 1. Foundation | 0/4 | Planned | - |
 | 2. Classification & Discovery | 0/TBD | Not started | - |
 | 3. Historical Evaluation | 0/TBD | Not started | - |
 | 4. Scoring Engine | 0/TBD | Not started | - |
