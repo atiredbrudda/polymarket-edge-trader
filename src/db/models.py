@@ -199,3 +199,58 @@ class Position(Base):
         Index("ix_position_resolved", "resolved"),
         Index("ix_position_trader", "trader_address"),
     )
+
+
+class TraderProfileDB(Base):
+    """Trader profile classification result.
+
+    Stores profile type (selective vs active) based on unique market count.
+    Named TraderProfileDB to avoid conflict with TraderProfile dataclass in profiles.py.
+    """
+
+    __tablename__ = "trader_profiles"
+
+    id: Mapped[int] = mapped_column(primary_key=True, autoincrement=True)
+    trader_address: Mapped[str] = mapped_column(String(42), unique=True, nullable=False, index=True)
+    profile_type: Mapped[str] = mapped_column(String(10), nullable=False)  # "selective" or "active"
+    unique_markets: Mapped[int] = mapped_column(nullable=False)
+    total_trades: Mapped[int] = mapped_column(nullable=False)
+    threshold_used: Mapped[int] = mapped_column(nullable=False)
+    computed_at: Mapped[datetime] = mapped_column(default=datetime.utcnow, nullable=False)
+
+    __table_args__ = (Index("ix_trader_profile_address", "trader_address", unique=True),)
+
+
+class PerformanceSnapshot(Base):
+    """Performance snapshot for a trader over a specific timeframe.
+
+    Stores realized/unrealized PnL, win rate, volume, and consistency metrics.
+    Used for historical evaluation and time-windowed analysis.
+    """
+
+    __tablename__ = "performance_snapshots"
+
+    id: Mapped[int] = mapped_column(primary_key=True, autoincrement=True)
+    trader_address: Mapped[str] = mapped_column(String(42), nullable=False)
+    timeframe: Mapped[str] = mapped_column(String(10), nullable=False)  # "7d", "30d", "90d", "all"
+    realized_pnl: Mapped[Decimal] = mapped_column(Numeric(20, 6), nullable=False, default=0)
+    unrealized_pnl: Mapped[Decimal] = mapped_column(Numeric(20, 6), nullable=False, default=0)
+    total_pnl: Mapped[Decimal] = mapped_column(Numeric(20, 6), nullable=False, default=0)
+    wins: Mapped[int] = mapped_column(nullable=False, default=0)
+    losses: Mapped[int] = mapped_column(nullable=False, default=0)
+    total_resolved: Mapped[int] = mapped_column(nullable=False, default=0)
+    win_rate: Mapped[Decimal | None] = mapped_column(Numeric(10, 6), nullable=True)
+    total_volume: Mapped[Decimal] = mapped_column(Numeric(20, 6), nullable=False, default=0)
+    resolved_markets: Mapped[int] = mapped_column(nullable=False, default=0)
+    unresolved_markets: Mapped[int] = mapped_column(nullable=False, default=0)
+    is_low_confidence: Mapped[bool] = mapped_column(nullable=False, default=False)
+    consistency_score: Mapped[Decimal | None] = mapped_column(Numeric(10, 6), nullable=True)
+    consistency_signal: Mapped[str | None] = mapped_column(String(20), nullable=True)
+    profile_type: Mapped[str | None] = mapped_column(String(10), nullable=True)
+    computed_at: Mapped[datetime] = mapped_column(default=datetime.utcnow, nullable=False)
+
+    __table_args__ = (
+        Index("ix_snapshot_trader_timeframe", "trader_address", "timeframe", unique=True),
+        Index("ix_snapshot_trader", "trader_address"),
+        Index("ix_snapshot_timeframe", "timeframe"),
+    )
