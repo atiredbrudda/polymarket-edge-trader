@@ -9,19 +9,19 @@ See: .planning/PROJECT.md (updated 2026-02-05)
 
 ## Current Position
 
-Phase: 3 of 7 (Historical Evaluation)
-Plan: 05 of 5 complete
-Status: Phase 3 COMPLETE
-Last activity: 2026-02-06 — Completed 03-05-PLAN.md
+Phase: 4 of 7 (Scoring Engine)
+Plan: 01 of 3 complete
+Status: In progress
+Last activity: 2026-02-06 — Completed 04-01-PLAN.md
 
-Progress: [███░░░░░░░] 32% (12/37 total plans complete)
+Progress: [███░░░░░░░] 35% (13/37 total plans complete)
 
 ## Performance Metrics
 
 **Velocity:**
-- Total plans completed: 12
-- Average duration: 5.1 min
-- Total execution time: 1.04 hours
+- Total plans completed: 13
+- Average duration: 4.8 min
+- Total execution time: 1.09 hours
 
 **By Phase:**
 
@@ -30,11 +30,12 @@ Progress: [███░░░░░░░] 32% (12/37 total plans complete)
 | 1 - Foundation | 4/4 | 30min | 7.5min |
 | 2 - Classification & Discovery | 3/3 | 15min | 5min |
 | 3 - Historical Evaluation | 5/5 | 19.45min | 3.89min |
+| 4 - Scoring Engine | 1/3 | 2.7min | 2.7min |
 
 **Recent Trend:**
-- Last 5 plans: 3.6min (03-02), 3.75min (03-03), 5min (03-04), 4.1min (03-05)
-- Trend: TDD + pure functions consistently fast (3-5min range), established patterns accelerate development
-- Phase 3 complete: 5 plans in ~19min with 93 new tests
+- Last 5 plans: 3.75min (03-03), 5min (03-04), 4.1min (03-05), 2.7min (04-01)
+- Trend: TDD + pure functions consistently fast (2.7-5min range), established patterns accelerate development
+- Phase 4 started: Plan 04-01 completed in 2.7min with 22 new tests
 
 *Updated after each plan completion*
 
@@ -91,6 +92,9 @@ Recent decisions affecting current work:
 - **[03-05] Walk-forward with 90-day test windows:** Expanding training windows simulate realistic re-training as data accumulates
 - **[03-05] Manual Spearman correlation:** No scipy dependency, Decimal precision throughout
 - **[03-05] metric_fn parameter for extensibility:** Enables Phase 4 scoring engine to plug in custom evaluation logic
+- **[04-01] Game threshold lower than eSports threshold:** 0.5 vs 0.7 allows multi-game specialists (trader with 55% CS2, 45% Valorant qualifies for both)
+- **[04-01] Independent per-game classification:** Same trader evaluated separately for each game, can be specialist in multiple games
+- **[04-01] primary_game only for specialists:** None for generalists, game slug for specialists - clear API contract for downstream logic
 
 ### Pending Todos
 
@@ -121,13 +125,15 @@ None yet.
 - ✓ [03-05] Validation framework complete - temporal holdout, walk-forward, Spearman correlation (28 tests)
 - Phase 3 tests: 121 (27 + 26 + 20 + 20 + 28)
 - Total project tests: 234 (62 Phase 1 + 51 Phase 2 + 121 Phase 3)
-- Ready for Phase 4 (Expertise Scoring)
 
-**Phase 4 (Expertise Scoring):**
+**Phase 4 (Scoring Engine):**
+- ✓ [04-01] Concentration metrics complete - two-tier eSports/game concentration with specialist classification (22 tests)
 - ✓ Validation framework ready: temporal holdout with walk-forward testing available for weight tuning
 - Expertise score weighting: Formula coefficients require tuning via backtests on historical data (validation framework ready)
 - Game patch tracking integration: Need reliable source for patch releases to tag markets with game versions
-- Research flag: HIGH priority for scoring algorithm design
+- Phase 4 tests: 22 (04-01)
+- Total project tests: 256 (62 Phase 1 + 51 Phase 2 + 121 Phase 3 + 22 Phase 4)
+- Next: 04-02 Composite scoring engine, 04-03 Leaderboard queries
 
 **Phase 5 (Signal Detection):**
 - Consensus threshold calibration: 75% expert agreement is hypothesis, needs validation
@@ -137,6 +143,6 @@ None yet.
 ## Session Continuity
 
 Last session: 2026-02-06
-Stopped at: Completed 03-05-PLAN.md (Phase 3 complete)
+Stopped at: Completed 04-01-PLAN.md
 Resume file: None
-Next: Begin Phase 4 (Expertise Scoring)
+Next: 04-02 Composite scoring engine (combine concentration, win rate, consistency, volume)
