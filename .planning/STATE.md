@@ -10,18 +10,18 @@ See: .planning/PROJECT.md (updated 2026-02-05)
 ## Current Position
 
 Phase: 3 of 7 (Historical Evaluation)
-Plan: 04 of 5 complete
-Status: Phase 3 IN PROGRESS
-Last activity: 2026-02-06 — Completed 03-04-PLAN.md
+Plan: 05 of 5 complete
+Status: Phase 3 COMPLETE
+Last activity: 2026-02-06 — Completed 03-05-PLAN.md
 
-Progress: [██░░░░░░░░] 30% (11/37 total plans complete)
+Progress: [███░░░░░░░] 32% (12/37 total plans complete)
 
 ## Performance Metrics
 
 **Velocity:**
-- Total plans completed: 11
-- Average duration: 5.3 min
-- Total execution time: 0.97 hours
+- Total plans completed: 12
+- Average duration: 5.1 min
+- Total execution time: 1.04 hours
 
 **By Phase:**
 
@@ -29,11 +29,12 @@ Progress: [██░░░░░░░░] 30% (11/37 total plans complete)
 |-------|-------|-------|----------|
 | 1 - Foundation | 4/4 | 30min | 7.5min |
 | 2 - Classification & Discovery | 3/3 | 15min | 5min |
-| 3 - Historical Evaluation | 4/5 | 15.35min | 3.84min |
+| 3 - Historical Evaluation | 5/5 | 19.45min | 3.89min |
 
 **Recent Trend:**
-- Last 5 plans: 3min (03-01), 3.6min (03-02), 3.75min (03-03), 5min (03-04)
+- Last 5 plans: 3.6min (03-02), 3.75min (03-03), 5min (03-04), 4.1min (03-05)
 - Trend: TDD + pure functions consistently fast (3-5min range), established patterns accelerate development
+- Phase 3 complete: 5 plans in ~19min with 93 new tests
 
 *Updated after each plan completion*
 
@@ -86,6 +87,10 @@ Recent decisions affecting current work:
 - **[03-04] Grace period for resolved positions: 4 hours:** 2x UMA 2-hour challenge period for safety
 - **[03-04] Composite unique index on (trader_address, timeframe):** Enables efficient PerformanceSnapshot upsert operations
 - **[03-04] Chronological outcome ordering (ASC):** For streak analysis vs DESC for recent positions display
+- **[03-05] Temporal holdout over k-fold:** Strict time-based splits prevent lookahead bias per research best practices
+- **[03-05] Walk-forward with 90-day test windows:** Expanding training windows simulate realistic re-training as data accumulates
+- **[03-05] Manual Spearman correlation:** No scipy dependency, Decimal precision throughout
+- **[03-05] metric_fn parameter for extensibility:** Enables Phase 4 scoring engine to plug in custom evaluation logic
 
 ### Pending Todos
 
@@ -108,16 +113,19 @@ None yet.
 - Ready for Phase 3 (Evaluation & Scoring)
 
 **Phase 3 (Historical Evaluation):**
+- ✓ COMPLETE - All Phase 3 plans finished
 - ✓ [03-01] Performance metrics calculator complete - realized/unrealized PnL, win rate, volume (27 tests)
 - ✓ [03-02] Timeframe windows and profile classification complete - 7d/30d/90d/all filtering, selective vs active (26 tests)
 - ✓ [03-03] Consistency detection complete - cross-timeframe stability, streak analysis, profile-specific bars (20 tests)
 - ✓ [03-04] Evaluation storage & queries complete - PerformanceSnapshot/TraderProfile models, time-windowed queries (20 tests)
-- Total project tests: 206 (62 Phase 1 + 51 Phase 2 + 93 Phase 3)
-- Next: Validation framework (walk-forward, calibration)
+- ✓ [03-05] Validation framework complete - temporal holdout, walk-forward, Spearman correlation (28 tests)
+- Phase 3 tests: 121 (27 + 26 + 20 + 20 + 28)
+- Total project tests: 234 (62 Phase 1 + 51 Phase 2 + 121 Phase 3)
+- Ready for Phase 4 (Expertise Scoring)
 
 **Phase 4 (Expertise Scoring):**
-- Expertise score weighting: Formula coefficients require tuning via backtests on historical data
-- Out-of-sample validation strategy needed to avoid overfitting
+- ✓ Validation framework ready: temporal holdout with walk-forward testing available for weight tuning
+- Expertise score weighting: Formula coefficients require tuning via backtests on historical data (validation framework ready)
 - Game patch tracking integration: Need reliable source for patch releases to tag markets with game versions
 - Research flag: HIGH priority for scoring algorithm design
 
@@ -129,6 +137,6 @@ None yet.
 ## Session Continuity
 
 Last session: 2026-02-06
-Stopped at: Completed 03-04-PLAN.md
+Stopped at: Completed 03-05-PLAN.md (Phase 3 complete)
 Resume file: None
-Next: Complete Phase 3 with 03-05 (validation framework)
+Next: Begin Phase 4 (Expertise Scoring)
