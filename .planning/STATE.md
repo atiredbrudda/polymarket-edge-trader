@@ -10,29 +10,29 @@ See: .planning/PROJECT.md (updated 2026-02-05)
 ## Current Position
 
 Phase: 2 of 7 (Classification & Discovery)
-Plan: 01 of 3 complete
+Plan: 02 of 3 complete
 Status: Phase 2 in progress
-Last activity: 2026-02-06 — Completed 02-01-PLAN.md (YAML taxonomy system)
+Last activity: 2026-02-06 — Completed 02-02-PLAN.md (Stateless Position Tracker)
 
-Progress: [█░░░░░░░░░] 14% (5/35 total plans complete)
+Progress: [█░░░░░░░░░] 17% (6/35 total plans complete)
 
 ## Performance Metrics
 
 **Velocity:**
-- Total plans completed: 5
-- Average duration: 6.8 min
-- Total execution time: 0.57 hours
+- Total plans completed: 6
+- Average duration: 6.5 min
+- Total execution time: 0.7 hours
 
 **By Phase:**
 
 | Phase | Plans | Total | Avg/Plan |
 |-------|-------|-------|----------|
 | 1 - Foundation | 4/4 | 30min | 7.5min |
-| 2 - Classification & Discovery | 1/3 | 4min | 4min |
+| 2 - Classification & Discovery | 2/3 | 10min | 5min |
 
 **Recent Trend:**
-- Last 5 plans: 6min, 3min, 17min, 4min (02-01)
-- Trend: TDD plans execute efficiently with clear test-driven flow
+- Last 5 plans: 3min, 17min, 4min (02-01), 6min (02-02)
+- Trend: Phase 2 TDD plans efficient (5min avg), pure functions enable fast iteration
 
 *Updated after each plan completion*
 
@@ -66,6 +66,9 @@ Recent decisions affecting current work:
 - **[02-01] Deepest-match-wins classification:** Title matching multiple taxonomy levels returns deepest match for maximum specificity
 - **[02-01] Context-aware dash detection:** Pattern \w+\s+-\s+\w+ matches team separators but avoids false positives
 - **[02-01] Review flagging strategy:** Partial matches (game found, "vs" present, no team) flagged for taxonomy gaps
+- **[02-02] Pure functions for position tracking:** Stateless calculation, no classes, easier to test and reason about
+- **[02-02] Duck-typed trade input:** No SQLAlchemy imports, works with any object having right attributes
+- **[02-02] Proportional cost basis reduction:** Partial closures maintain original weighted average entry price
 
 ### Pending Todos
 
@@ -79,9 +82,11 @@ None yet.
 - ✓ 62 tests passing across all foundation components
 
 **Phase 2 (Classification & Discovery):**
-- ✓ [02-01] YAML taxonomy system complete - 4 games, 40+ teams, pattern matching operational
-- Taxonomy expansion: Initial 4-game taxonomy will need additions as more eSports markets appear on Polymarket
-- Pattern tuning: Real market titles may require regex pattern adjustments based on actual data
+- ✓ [02-01] YAML taxonomy system complete - 4 games, 40+ teams, pattern matching operational (18 tests)
+- ✓ [02-02] Stateless position tracker complete - weighted average, entry timing, PnL calculation (21 tests)
+- Phase 2 tests: 39 (18 from 02-01, 21 from 02-02)
+- Total project tests: 101 (62 Phase 1 + 39 Phase 2)
+- Next: 02-03 (Niche detection) to complete Phase 2
 
 **Phase 3-4 (Evaluation & Scoring):**
 - Expertise score weighting: Formula coefficients require tuning via backtests on historical data
@@ -97,6 +102,6 @@ None yet.
 ## Session Continuity
 
 Last session: 2026-02-06
-Stopped at: Completed 02-01-PLAN.md (YAML taxonomy system with 101 passing tests)
+Stopped at: Completed 02-02-PLAN.md (Position tracker with 21 tests, 101 total passing)
 Resume file: None
-Next: Plan 02-02 (Market classifier integration) or 02-03 (Niche detection)
+Next: Plan 02-03 (Niche detection) to complete Phase 2
