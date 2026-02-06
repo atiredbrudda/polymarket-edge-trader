@@ -10,9 +10,9 @@ See: .planning/PROJECT.md (updated 2026-02-05)
 ## Current Position
 
 Phase: 1 of 7 (Foundation)
-Plan: 2 of 4 complete (Wave 2 in progress)
+Plan: 2 of 4 complete (Wave 2 complete)
 Status: In progress
-Last activity: 2026-02-06 — Completed 01-03-PLAN.md
+Last activity: 2026-02-06 — Completed 01-02-PLAN.md
 
 Progress: [████░░░░░░] 50% (Phase 1: 2/4 plans complete)
 
@@ -20,17 +20,17 @@ Progress: [████░░░░░░] 50% (Phase 1: 2/4 plans complete)
 
 **Velocity:**
 - Total plans completed: 2
-- Average duration: 3.5 min
-- Total execution time: 0.12 hours
+- Average duration: 5 min
+- Total execution time: 0.17 hours
 
 **By Phase:**
 
 | Phase | Plans | Total | Avg/Plan |
 |-------|-------|-------|----------|
-| 1 - Foundation | 2/4 | 7min | 3.5min |
+| 1 - Foundation | 2/4 | 10min | 5min |
 
 **Recent Trend:**
-- Last 5 plans: 4min, 3min
+- Last 5 plans: 4min, 6min
 - Trend: Consistent pace
 
 *Updated after each plan completion*
@@ -51,9 +51,10 @@ Recent decisions affecting current work:
 - **[01-01] SQLite WAL mode enabled:** Better write concurrency for data ingestion pipeline
 - **[01-01] Category-agnostic data model:** detail_categories list configurable, no hardcoded eSports in business logic
 - **[01-01] Virtual environment required:** Homebrew Python externally-managed, requires .venv/ activation
-- **[01-03] Set-based category lookup:** CategoryFilter uses lowercased set for O(1) case-insensitive matching
-- **[01-03] TradeWithCategory wrapper:** Associates trades with categories without modifying API-mirrored TradeResponse
-- **[01-03] Decimal arithmetic throughout:** All financial calculations use Decimal type to preserve precision
+- **[01-02] Token bucket rate limiting:** Deque-based timestamp tracking with threading.Lock for thread safety
+- **[01-02] Pydantic field validators:** Handle both ISO strings and Unix timestamps for dates
+- **[01-02] Price validation range:** 0 < price < 1 (exclusive bounds) per Polymarket constraints
+- **[01-02] Pagination cursor handling:** Terminates on next_cursor == 'LTE' or empty string
 
 ### Pending Todos
 
@@ -82,7 +83,7 @@ None yet.
 
 ## Session Continuity
 
-Last session: 2026-02-06T00:35:42Z
-Stopped at: Completed 01-03-PLAN.md (Category filter and aggregation)
+Last session: 2026-02-06T00:38:27Z
+Stopped at: Completed 01-02-PLAN.md (API client with retry and rate limiting)
 Resume file: None
-Next: Execute 01-02-PLAN.md (API client) - Wave 2 remaining
+Next: Wave 2 complete - 2 of 4 plans in Phase 1 complete
