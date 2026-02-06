@@ -27,7 +27,9 @@ from typing import Any
 
 from sqlalchemy.orm import Session
 
-from src.db.models import ExpertiseScore, PerformanceSnapshot
+from sqlalchemy import select
+
+from src.db.models import ExpertiseScore, MarketClassification, PerformanceSnapshot, Position, TaxonomyNode
 from src.evaluation.concentration import (
     calculate_esports_concentration,
     calculate_game_concentration,
@@ -86,6 +88,46 @@ def _compute_position_volume(position: Any) -> Decimal:
         return abs(position.size)
 
 
+def _get_all_trader_positions(session: Session, trader_address: str) -> list[Any]:
+    """Query ALL positions for a trader (across all categories).
+
+    Used to compute total_volume for eSports concentration ratio.
+
+    Args:
+        session: SQLAlchemy session
+        trader_address: Trader wallet address
+
+    Returns:
+        List of Position ORM objects
+    """
+    query = select(Position).where(Position.trader_address == trader_address)
+    result = session.execute(query)
+    return list(result.scalars().all())
+
+
+def _get_esports_positions(session: Session, trader_address: str) -> list[Any]:
+    """Query all eSports positions for a trader.
+
+    Joins Position -> MarketClassification -> TaxonomyNode where slug LIKE 'esports%'.
+
+    Args:
+        session: SQLAlchemy session
+        trader_address: Trader wallet address
+
+    Returns:
+        List of Position ORM objects in eSports markets
+    """
+    query = (
+        select(Position)
+        .join(MarketClassification, Position.market_id == MarketClassification.market_id)
+        .join(TaxonomyNode, MarketClassification.taxonomy_node_id == TaxonomyNode.id)
+        .where(TaxonomyNode.slug.like("esports%"))
+        .where(Position.trader_address == trader_address)
+    )
+    result = session.execute(query)
+    return list(result.scalars().all())
+
+
 def _get_consistency_data(session: Session, trader_address: str) -> tuple[Decimal, str]:
     """Retrieve consistency data from PerformanceSnapshot.
 
@@ -100,8 +142,6 @@ def _get_consistency_data(session: Session, trader_address: str) -> tuple[Decima
         Tuple of (consistency_score, consistency_signal)
         Defaults: (Decimal("50"), "insufficient_data")
     """
-    from sqlalchemy import select
-
     query = (
         select(PerformanceSnapshot)
         .where(PerformanceSnapshot.trader_address == trader_address)
@@ -173,21 +213,25 @@ def compute_game_scores(
         if len(resolved_positions) < 5:
             continue
 
-        # Calculate concentrations
-        # First, we need esports positions and total positions for this trader
-        # For simplicity in this game-level scoring, we'll use the game positions
-        # as both esports and game volumes (100% concentration at both levels)
-        # Real implementation would query all trader positions across all categories
+        # Calculate concentrations from actual trader position volumes
+        game_volume = sum(
+            (_compute_position_volume(p) for p in trader_positions), Decimal("0")
+        )
 
-        # Calculate volumes using position volume proxy
-        game_volumes = [_compute_position_volume(p) for p in trader_positions]
-        game_volume = sum(game_volumes, Decimal("0"))
+        # Get all eSports positions and total positions for this trader
+        esports_positions = _get_esports_positions(session, trader_address)
+        esports_volume = sum(
+            (_compute_position_volume(p) for p in esports_positions), Decimal("0")
+        )
 
-        # For now, assume eSports concentration = 1.0 (100%) since we're scoring within a game
-        # Game concentration = 1.0 (100%) since all positions are in this game
-        # This is a simplification; real implementation would query across categories
-        esports_concentration = Decimal("1.0")
-        game_concentration = Decimal("1.0")
+        all_positions = _get_all_trader_positions(session, trader_address)
+        total_volume = sum(
+            (_compute_position_volume(p) for p in all_positions), Decimal("0")
+        )
+
+        # Compute concentration ratios
+        esports_concentration = calculate_esports_concentration(esports_volume, total_volume)
+        game_concentration = calculate_game_concentration(game_volume, esports_volume)
 
         # Retrieve consistency data
         consistency_score, consistency_signal = _get_consistency_data(session, trader_address)
