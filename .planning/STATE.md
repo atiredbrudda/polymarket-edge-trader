@@ -10,18 +10,18 @@ See: .planning/PROJECT.md (updated 2026-02-05)
 ## Current Position
 
 Phase: 3 of 7 (Historical Evaluation)
-Plan: 01 of 5 complete
+Plan: 02 of 5 complete
 Status: Phase 3 IN PROGRESS
-Last activity: 2026-02-06 — Completed 03-01-PLAN.md
+Last activity: 2026-02-06 — Completed 03-02-PLAN.md
 
-Progress: [██░░░░░░░░] 21% (8/37 total plans complete)
+Progress: [██░░░░░░░░] 24% (9/37 total plans complete)
 
 ## Performance Metrics
 
 **Velocity:**
-- Total plans completed: 8
-- Average duration: 5.9 min
-- Total execution time: 0.78 hours
+- Total plans completed: 9
+- Average duration: 5.6 min
+- Total execution time: 0.84 hours
 
 **By Phase:**
 
@@ -29,10 +29,10 @@ Progress: [██░░░░░░░░] 21% (8/37 total plans complete)
 |-------|-------|-------|----------|
 | 1 - Foundation | 4/4 | 30min | 7.5min |
 | 2 - Classification & Discovery | 3/3 | 15min | 5min |
-| 3 - Historical Evaluation | 1/5 | 3min | 3min |
+| 3 - Historical Evaluation | 2/5 | 6.6min | 3.3min |
 
 **Recent Trend:**
-- Last 5 plans: 4min (02-01), 6min (02-02), 5min (02-03), 3min (03-01)
+- Last 5 plans: 6min (02-02), 5min (02-03), 3min (03-01), 3.6min (03-02)
 - Trend: TDD + pure functions consistently fast (3-6min range), established patterns accelerate development
 
 *Updated after each plan completion*
@@ -77,6 +77,9 @@ Recent decisions affecting current work:
 - **[03-01] Voided market exclusion:** Voided markets excluded from all metrics calculations per resolution handling rules
 - **[03-01] Win rate returns None for no data:** Distinguishes "no positions" from "0% win rate" for downstream logic
 - **[03-01] Mark-to-market unrealized PnL:** Unresolved positions valued at current market price, flagged as unrealized
+- **[03-02] Rolling windows from current time:** 7d/30d/90d windows calculated from current time, not calendar periods
+- **[03-02] Classification by unique markets:** Selective vs active based on unique markets entered, not trade count (50 trades on 3 markets = selective)
+- **[03-02] Profile-specific consistency bars:** Selective traders get looser variance (100), active traders tighter (50) per data volume
 
 ### Pending Todos
 
@@ -100,8 +103,9 @@ None yet.
 
 **Phase 3 (Historical Evaluation):**
 - ✓ [03-01] Performance metrics calculator complete - realized/unrealized PnL, win rate, volume (27 tests)
-- Total project tests: 140 (62 Phase 1 + 51 Phase 2 + 27 Phase 3)
-- Next: Timeframe windows, consistency analysis, trader profiles
+- ✓ [03-02] Timeframe windows and profile classification complete - 7d/30d/90d/all filtering, selective vs active (26 tests)
+- Total project tests: 166 (62 Phase 1 + 51 Phase 2 + 53 Phase 3)
+- Next: Consistency analysis, calibration scoring, expertise weighting
 
 **Phase 4 (Expertise Scoring):**
 - Expertise score weighting: Formula coefficients require tuning via backtests on historical data
@@ -117,6 +121,6 @@ None yet.
 ## Session Continuity
 
 Last session: 2026-02-06
-Stopped at: Completed 03-01-PLAN.md
+Stopped at: Completed 03-02-PLAN.md
 Resume file: None
-Next: Continue Phase 3 execution (03-02 through 03-05)
+Next: Continue Phase 3 execution (03-03 through 03-05)
