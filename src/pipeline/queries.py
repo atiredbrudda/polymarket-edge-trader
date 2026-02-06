@@ -5,17 +5,18 @@ Provides functions for:
 - Resolution status filtering
 - Trader-specific queries
 - Active market queries
+- Time-windowed evaluation queries
 
 All queries use SQLAlchemy 2.0 select() syntax and leverage composite indexes
 for optimal performance on time-series data.
 """
 
-from datetime import datetime
+from datetime import datetime, timedelta
 
-from sqlalchemy import select
+from sqlalchemy import select, func
 from sqlalchemy.orm import Session
 
-from src.db.models import Market, Trade, TraderCategorySummary
+from src.db.models import Market, Position, Trade, TraderCategorySummary
 
 
 def get_trades_by_date_range(
@@ -184,3 +185,141 @@ def get_active_markets(session: Session, category: str | None = None) -> list[Ma
 
     result = session.execute(query)
     return list(result.scalars().all())
+
+
+def get_positions_by_timeframe(
+    session: Session,
+    trader_address: str,
+    window_key: str,
+    now: datetime | None = None,
+) -> list[Position]:
+    """Query positions within a timeframe window.
+
+    Uses get_timeframe_bounds from src.evaluation.timeframes to calculate bounds.
+    Filters positions by last_trade_timestamp within the window.
+
+    Args:
+        session: SQLAlchemy session
+        trader_address: Trader wallet address
+        window_key: Window identifier ("7d", "30d", "90d", "all")
+        now: Current time for window calculation (defaults to utcnow)
+
+    Returns:
+        List of Position ORM objects ordered by last_trade_timestamp DESC
+
+    Example:
+        # Get trader's positions from last 7 days
+        positions = get_positions_by_timeframe(session, "0xTrader1", "7d")
+
+        # Get all trader's positions
+        all_positions = get_positions_by_timeframe(session, "0xTrader1", "all")
+    """
+    from src.evaluation.timeframes import get_timeframe_bounds
+
+    start, end = get_timeframe_bounds(window_key, now=now)
+
+    query = select(Position).where(Position.trader_address == trader_address)
+
+    if start is not None:
+        query = query.where(Position.last_trade_timestamp >= start)
+
+    query = query.where(Position.last_trade_timestamp <= end)
+    query = query.order_by(Position.last_trade_timestamp.desc())
+
+    result = session.execute(query)
+    return list(result.scalars().all())
+
+
+def get_resolved_positions(
+    session: Session,
+    trader_address: str,
+    grace_period_hours: int = 4,
+) -> list[Position]:
+    """Query resolved positions excluding grace period.
+
+    Filters out positions on markets resolved within the last grace_period_hours
+    to allow for UMA challenge period (2 hours) and processing time.
+
+    Args:
+        session: SQLAlchemy session
+        trader_address: Trader wallet address
+        grace_period_hours: Hours to exclude after resolution (default: 4)
+
+    Returns:
+        List of Position ORM objects ordered by last_trade_timestamp DESC
+
+    Example:
+        # Get trader's resolved positions (excluding last 4 hours)
+        resolved = get_resolved_positions(session, "0xTrader1")
+
+        # Use custom grace period
+        resolved = get_resolved_positions(session, "0xTrader1", grace_period_hours=8)
+    """
+    now = datetime.utcnow()
+    grace_cutoff = now - timedelta(hours=grace_period_hours)
+
+    query = (
+        select(Position)
+        .join(Market, Position.market_id == Market.condition_id)
+        .where(Position.trader_address == trader_address)
+        .where(Position.resolved == True)
+        .where(Market.updated_at < grace_cutoff)
+        .order_by(Position.last_trade_timestamp.desc())
+    )
+
+    result = session.execute(query)
+    return list(result.scalars().all())
+
+
+def get_trader_unique_markets(session: Session, trader_address: str) -> int:
+    """Count unique markets a trader has entered.
+
+    Args:
+        session: SQLAlchemy session
+        trader_address: Trader wallet address
+
+    Returns:
+        Integer count of distinct market_id values
+
+    Example:
+        # Get count of markets trader participated in
+        count = get_trader_unique_markets(session, "0xTrader1")
+    """
+    query = (
+        select(func.count(func.distinct(Position.market_id)))
+        .where(Position.trader_address == trader_address)
+    )
+
+    result = session.execute(query)
+    return result.scalar() or 0
+
+
+def get_trader_outcomes_chronological(session: Session, trader_address: str) -> list[str]:
+    """Get trader's position outcomes in chronological order.
+
+    Excludes void and flat outcomes for consistency analysis.
+    Used for streak detection and pattern analysis.
+
+    Args:
+        session: SQLAlchemy session
+        trader_address: Trader wallet address
+
+    Returns:
+        List of outcome strings ["win", "loss", "win", ...] ordered by last_trade_timestamp ASC
+
+    Example:
+        # Get trader's outcome history
+        outcomes = get_trader_outcomes_chronological(session, "0xTrader1")
+        # ["win", "loss", "win", "win", "loss"]
+    """
+    query = (
+        select(Position.outcome)
+        .where(Position.trader_address == trader_address)
+        .where(Position.resolved == True)
+        .where(Position.outcome.is_not(None))
+        .where(Position.outcome.not_in(["void", "flat"]))
+        .order_by(Position.last_trade_timestamp.asc())
+    )
+
+    result = session.execute(query)
+    return [outcome for outcome in result.scalars().all()]
