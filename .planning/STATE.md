@@ -10,18 +10,18 @@ See: .planning/PROJECT.md (updated 2026-02-05)
 ## Current Position
 
 Phase: 3 of 7 (Historical Evaluation)
-Plan: 00 of 5 complete
-Status: Phase 3 PLANNED — ready for execution
-Last activity: 2026-02-06 — Phase 3 planned (5 plans, verified PASS)
+Plan: 01 of 5 complete
+Status: Phase 3 IN PROGRESS
+Last activity: 2026-02-06 — Completed 03-01-PLAN.md
 
-Progress: [██░░░░░░░░] 20% (7/37 total plans complete)
+Progress: [██░░░░░░░░] 21% (8/37 total plans complete)
 
 ## Performance Metrics
 
 **Velocity:**
-- Total plans completed: 7
-- Average duration: 6.4 min
-- Total execution time: 0.75 hours
+- Total plans completed: 8
+- Average duration: 5.9 min
+- Total execution time: 0.78 hours
 
 **By Phase:**
 
@@ -29,10 +29,11 @@ Progress: [██░░░░░░░░] 20% (7/37 total plans complete)
 |-------|-------|-------|----------|
 | 1 - Foundation | 4/4 | 30min | 7.5min |
 | 2 - Classification & Discovery | 3/3 | 15min | 5min |
+| 3 - Historical Evaluation | 1/5 | 3min | 3min |
 
 **Recent Trend:**
-- Last 5 plans: 17min, 4min (02-01), 6min (02-02), 5min (02-03)
-- Trend: Phase 2 consistently fast (5min avg), pure functions + TDD enable rapid iteration
+- Last 5 plans: 4min (02-01), 6min (02-02), 5min (02-03), 3min (03-01)
+- Trend: TDD + pure functions consistently fast (3-6min range), established patterns accelerate development
 
 *Updated after each plan completion*
 
@@ -73,6 +74,9 @@ Recent decisions affecting current work:
 - **[02-03] Dual threshold enforcement (AND not OR):** 5+ trades AND $500+ volume both required to prevent noise
 - **[02-03] Position upsert maintains all fields:** Refresh updates all computed fields, not just size/direction
 - **[02-03] eSports filtering via slug prefix:** slug LIKE 'esports%' captures all taxonomy descendants efficiently
+- **[03-01] Voided market exclusion:** Voided markets excluded from all metrics calculations per resolution handling rules
+- **[03-01] Win rate returns None for no data:** Distinguishes "no positions" from "0% win rate" for downstream logic
+- **[03-01] Mark-to-market unrealized PnL:** Unresolved positions valued at current market price, flagged as unrealized
 
 ### Pending Todos
 
@@ -94,7 +98,12 @@ None yet.
 - Total project tests: 113 (62 Phase 1 + 51 Phase 2)
 - Ready for Phase 3 (Evaluation & Scoring)
 
-**Phase 3-4 (Evaluation & Scoring):**
+**Phase 3 (Historical Evaluation):**
+- ✓ [03-01] Performance metrics calculator complete - realized/unrealized PnL, win rate, volume (27 tests)
+- Total project tests: 140 (62 Phase 1 + 51 Phase 2 + 27 Phase 3)
+- Next: Timeframe windows, consistency analysis, trader profiles
+
+**Phase 4 (Expertise Scoring):**
 - Expertise score weighting: Formula coefficients require tuning via backtests on historical data
 - Out-of-sample validation strategy needed to avoid overfitting
 - Game patch tracking integration: Need reliable source for patch releases to tag markets with game versions
@@ -108,6 +117,6 @@ None yet.
 ## Session Continuity
 
 Last session: 2026-02-06
-Stopped at: Phase 3 planned (5 plans, verified PASS). Ready for execution.
+Stopped at: Completed 03-01-PLAN.md
 Resume file: None
-Next: /gsd:execute-phase 3
+Next: Continue Phase 3 execution (03-02 through 03-05)
