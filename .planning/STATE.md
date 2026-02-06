@@ -10,28 +10,29 @@ See: .planning/PROJECT.md (updated 2026-02-05)
 ## Current Position
 
 Phase: 2 of 7 (Classification & Discovery)
-Plan: Ready to plan
-Status: Phase 1 complete, Phase 2 ready
-Last activity: 2026-02-06 — Phase 1 complete (4/4 plans, verified, 62 tests passing)
+Plan: 01 of 3 complete
+Status: Phase 2 in progress
+Last activity: 2026-02-06 — Completed 02-01-PLAN.md (YAML taxonomy system)
 
-Progress: [█░░░░░░░░░] 14% (1/7 phases complete)
+Progress: [█░░░░░░░░░] 14% (5/35 total plans complete)
 
 ## Performance Metrics
 
 **Velocity:**
-- Total plans completed: 4
-- Average duration: 7.5 min
-- Total execution time: 0.5 hours
+- Total plans completed: 5
+- Average duration: 6.8 min
+- Total execution time: 0.57 hours
 
 **By Phase:**
 
 | Phase | Plans | Total | Avg/Plan |
 |-------|-------|-------|----------|
 | 1 - Foundation | 4/4 | 30min | 7.5min |
+| 2 - Classification & Discovery | 1/3 | 4min | 4min |
 
 **Recent Trend:**
-- Last 5 plans: 4min, 6min, 3min, 17min
-- Trend: Increasing complexity (plan 04 integration layer)
+- Last 5 plans: 6min, 3min, 17min, 4min (02-01)
+- Trend: TDD plans execute efficiently with clear test-driven flow
 
 *Updated after each plan completion*
 
@@ -61,6 +62,10 @@ Recent decisions affecting current work:
 - **[01-04] Per-trader transactions:** Each trader ingestion commits independently to prevent cascade failures
 - **[01-04] Multi-level deduplication:** Markets (condition_id), trades (trade_id), summaries (trader+category)
 - **[01-04] Batch commit optimization:** Markets committed every 100 records for efficiency
+- **[02-01] Cross-game team duplication:** Teams appear under multiple games separately for simpler path queries
+- **[02-01] Deepest-match-wins classification:** Title matching multiple taxonomy levels returns deepest match for maximum specificity
+- **[02-01] Context-aware dash detection:** Pattern \w+\s+-\s+\w+ matches team separators but avoids false positives
+- **[02-01] Review flagging strategy:** Partial matches (game found, "vs" present, no team) flagged for taxonomy gaps
 
 ### Pending Todos
 
@@ -74,8 +79,9 @@ None yet.
 - ✓ 62 tests passing across all foundation components
 
 **Phase 2 (Classification & Discovery):**
-- eSports taxonomy structure: Need specific understanding of how Polymarket categorizes eSports markets (tournament naming conventions, regional splits)
-- Research flag: MEDIUM priority for domain knowledge validation
+- ✓ [02-01] YAML taxonomy system complete - 4 games, 40+ teams, pattern matching operational
+- Taxonomy expansion: Initial 4-game taxonomy will need additions as more eSports markets appear on Polymarket
+- Pattern tuning: Real market titles may require regex pattern adjustments based on actual data
 
 **Phase 3-4 (Evaluation & Scoring):**
 - Expertise score weighting: Formula coefficients require tuning via backtests on historical data
@@ -91,6 +97,6 @@ None yet.
 ## Session Continuity
 
 Last session: 2026-02-06
-Stopped at: Phase 1 complete and verified, ready for Phase 2
+Stopped at: Completed 02-01-PLAN.md (YAML taxonomy system with 101 passing tests)
 Resume file: None
-Next: Phase 2 (Classification & Discovery) — plan or discuss
+Next: Plan 02-02 (Market classifier integration) or 02-03 (Niche detection)
