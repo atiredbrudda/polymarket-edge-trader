@@ -13,7 +13,7 @@ This roadmap delivers an intelligence tool that identifies expert eSports trader
 Decimal phases appear between their surrounding integers in numeric order.
 
 - [x] **Phase 1: Foundation** - Data collection and storage infrastructure
-- [ ] **Phase 2: Classification & Discovery** - Taxonomy system and trader identification
+- [x] **Phase 2: Classification & Discovery** - Taxonomy system and trader identification
 - [ ] **Phase 3: Historical Evaluation** - Performance tracking and validation framework
 - [ ] **Phase 4: Scoring Engine** - Specialization depth and expertise calculation
 - [ ] **Phase 5: Signal Detection** - Consensus identification and herding filters
@@ -51,9 +51,9 @@ Plans:
 **Plans**: 3 plans
 
 Plans:
-- [ ] 02-01-PLAN.md — Taxonomy YAML schema, loader, and classifier (TDD)
-- [ ] 02-02-PLAN.md — Stateless position tracker (TDD)
-- [ ] 02-03-PLAN.md — DB models, classification pipeline, and trader discovery
+- [x] 02-01-PLAN.md — Taxonomy YAML schema, loader, and classifier (TDD)
+- [x] 02-02-PLAN.md — Stateless position tracker (TDD)
+- [x] 02-03-PLAN.md — DB models, classification pipeline, and trader discovery
 
 ### Phase 3: Historical Evaluation
 **Goal**: Enable historical performance analysis with validation framework
@@ -136,7 +136,7 @@ Phases execute in numeric order: 1 → 2 → 3 → 4 → 5 → 6 → 7
 | Phase | Plans Complete | Status | Completed |
 |-------|----------------|--------|-----------|
 | 1. Foundation | 4/4 | Complete | 2026-02-06 |
-| 2. Classification & Discovery | 0/3 | Not started | - |
+| 2. Classification & Discovery | 3/3 | Complete | 2026-02-06 |
 | 3. Historical Evaluation | 0/TBD | Not started | - |
 | 4. Scoring Engine | 0/TBD | Not started | - |
 | 5. Signal Detection | 0/TBD | Not started | - |

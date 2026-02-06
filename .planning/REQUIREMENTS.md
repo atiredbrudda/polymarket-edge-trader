@@ -18,14 +18,14 @@ Requirements for initial release. Each maps to roadmap phases.
 
 ### Taxonomy
 
-- [ ] **TAXO-01**: System uses YAML-based taxonomy definitions for eSports categories (game-level granularity)
-- [ ] **TAXO-02**: System classifies Polymarket markets into taxonomy categories via keyword matching
-- [ ] **TAXO-03**: Adding a new category requires only a YAML file change, not code changes
+- [x] **TAXO-01**: System uses YAML-based taxonomy definitions for eSports categories (game-level granularity)
+- [x] **TAXO-02**: System classifies Polymarket markets into taxonomy categories via keyword matching
+- [x] **TAXO-03**: Adding a new category requires only a YAML file change, not code changes
 
 ### Performance Analytics
 
 - [ ] **PERF-01**: System calculates PnL, win rate, and total volume for each trader
-- [ ] **PERF-02**: System tracks current open positions with size, direction (YES/NO), and entry price
+- [x] **PERF-02**: System tracks current open positions with size, direction (YES/NO), and entry price
 - [ ] **PERF-03**: System calculates metrics across multiple timeframes (7d, 30d, 90d, all-time)
 - [ ] **PERF-04**: System identifies traders with consistent performance vs lucky streaks across timeframes
 
@@ -114,11 +114,11 @@ Which phases cover which requirements. Updated during roadmap creation.
 | DATA-04 | Phase 1 | Complete |
 | DATA-05 | Phase 1 | Complete |
 | DATA-06 | Phase 1 | Complete |
-| TAXO-01 | Phase 2 | Pending |
-| TAXO-02 | Phase 2 | Pending |
-| TAXO-03 | Phase 2 | Pending |
+| TAXO-01 | Phase 2 | Complete |
+| TAXO-02 | Phase 2 | Complete |
+| TAXO-03 | Phase 2 | Complete |
 | PERF-01 | Phase 3 | Pending |
-| PERF-02 | Phase 3 | Pending |
+| PERF-02 | Phase 2 | Complete |
 | PERF-03 | Phase 3 | Pending |
 | PERF-04 | Phase 3 | Pending |
 | SCOR-01 | Phase 4 | Pending |
