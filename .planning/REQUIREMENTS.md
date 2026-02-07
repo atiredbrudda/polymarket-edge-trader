@@ -39,11 +39,11 @@ Requirements for initial release. Each maps to roadmap phases.
 
 ### Signal Detection
 
-- [ ] **SGNL-01**: System detects consensus when 2+ expert traders (score >70) take same position
-- [ ] **SGNL-02**: System calculates consensus strength weighted by expertise scores
-- [ ] **SGNL-03**: System detects potential herding by analyzing bet timing (cluster vs independent)
-- [ ] **SGNL-04**: System surfaces markets ranked by expert activity in past 1/6/24 hours
-- [ ] **SGNL-05**: System generates signal confidence score (0-100) combining agreement and sample size
+- [x] **SGNL-01**: System detects consensus when 2+ expert traders (score >70) take same position
+- [x] **SGNL-02**: System calculates consensus strength weighted by expertise scores
+- [x] **SGNL-03**: System detects potential herding by analyzing bet timing (cluster vs independent)
+- [x] **SGNL-04**: System surfaces markets ranked by expert activity in past 1/6/24 hours
+- [x] **SGNL-05**: System generates signal confidence score (0-100) combining agreement and sample size
 
 ### Alerting
 
@@ -126,11 +126,11 @@ Which phases cover which requirements. Updated during roadmap creation.
 | SCOR-03 | Phase 4 | Complete |
 | SCOR-04 | Phase 4 | Complete |
 | SCOR-05 | Phase 4 | Complete |
-| SGNL-01 | Phase 5 | Pending |
-| SGNL-02 | Phase 5 | Pending |
-| SGNL-03 | Phase 5 | Pending |
-| SGNL-04 | Phase 5 | Pending |
-| SGNL-05 | Phase 5 | Pending |
+| SGNL-01 | Phase 5 | Complete |
+| SGNL-02 | Phase 5 | Complete |
+| SGNL-03 | Phase 5 | Complete |
+| SGNL-04 | Phase 5 | Complete |
+| SGNL-05 | Phase 5 | Complete |
 | ALRT-01 | Phase 6 | Pending |
 | ALRT-02 | Phase 6 | Pending |
 | ALRT-03 | Phase 6 | Pending |

@@ -16,7 +16,7 @@ Decimal phases appear between their surrounding integers in numeric order.
 - [x] **Phase 2: Classification & Discovery** - Taxonomy system and trader identification
 - [x] **Phase 3: Historical Evaluation** - Performance tracking and validation framework
 - [x] **Phase 4: Scoring Engine** - Specialization depth and expertise calculation
-- [ ] **Phase 5: Signal Detection** - Consensus identification and herding filters
+- [x] **Phase 5: Signal Detection** - Consensus identification and herding filters
 - [ ] **Phase 6: Alerting System** - Multi-channel alert delivery
 - [ ] **Phase 7: CLI Interface** - User commands and presentation layer
 
@@ -103,9 +103,9 @@ Plans:
 **Plans**: 3 plans
 
 Plans:
-- [ ] 05-01-PLAN.md — Consensus detection and confidence scoring (TDD)
-- [ ] 05-02-PLAN.md — SignalSnapshot model and signal queries
-- [ ] 05-03-PLAN.md — Signal detection pipeline orchestration
+- [x] 05-01-PLAN.md — Consensus detection and confidence scoring (TDD)
+- [x] 05-02-PLAN.md — SignalSnapshot model and signal queries
+- [x] 05-03-PLAN.md — Signal detection pipeline orchestration
 
 ### Phase 6: Alerting System
 **Goal**: Deliver consensus signals via Telegram and Discord with retry reliability
@@ -147,6 +147,6 @@ Phases execute in numeric order: 1 -> 2 -> 3 -> 4 -> 5 -> 6 -> 7
 | 2. Classification & Discovery | 3/3 | Complete | 2026-02-06 |
 | 3. Historical Evaluation | 5/5 | Complete | 2026-02-06 |
 | 4. Scoring Engine | 3/3 | Complete | 2026-02-06 |
-| 5. Signal Detection | 0/3 | Not started | - |
+| 5. Signal Detection | 3/3 | Complete | 2026-02-07 |
 | 6. Alerting System | 0/TBD | Not started | - |
 | 7. CLI Interface | 0/TBD | Not started | - |
