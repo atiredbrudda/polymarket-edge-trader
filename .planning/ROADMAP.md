@@ -91,19 +91,21 @@ Plans:
 - [x] 04-03-PLAN.md — DB models, leaderboard queries, and scoring pipeline
 
 ### Phase 5: Signal Detection
-**Goal**: Identify expert consensus while filtering herding behavior
+**Goal**: Detect expert consensus on markets with confidence scoring and first-mover tracking
 **Depends on**: Phase 4
 **Requirements**: SGNL-01, SGNL-02, SGNL-03, SGNL-04, SGNL-05
 **Success Criteria** (what must be TRUE):
-  1. System detects consensus when 2+ expert traders (score >70) independently take the same position
-  2. System calculates consensus strength weighted by expertise scores and generates 0-100 confidence score
-  3. System identifies potential herding by analyzing bet timing clusters vs independent decisions
+  1. System detects consensus when 3+ expert traders (score >70) take the same position with 75%+ supermajority
+  2. System calculates 0-100 confidence score combining agreement %, sample size, and position sizes
+  3. System provides herding assessment stub (deferred to future phase if needed)
   4. System surfaces markets ranked by expert activity in past 1/6/24 hours
   5. System distinguishes first movers from fast-followers in consensus detection
-**Plans**: TBD
+**Plans**: 3 plans
 
 Plans:
-- [ ] TBD during planning
+- [ ] 05-01-PLAN.md — Consensus detection and confidence scoring (TDD)
+- [ ] 05-02-PLAN.md — SignalSnapshot model and signal queries
+- [ ] 05-03-PLAN.md — Signal detection pipeline orchestration
 
 ### Phase 6: Alerting System
 **Goal**: Deliver consensus signals via Telegram and Discord with retry reliability
@@ -137,7 +139,7 @@ Plans:
 ## Progress
 
 **Execution Order:**
-Phases execute in numeric order: 1 → 2 → 3 → 4 → 5 → 6 → 7
+Phases execute in numeric order: 1 -> 2 -> 3 -> 4 -> 5 -> 6 -> 7
 
 | Phase | Plans Complete | Status | Completed |
 |-------|----------------|--------|-----------|
@@ -145,6 +147,6 @@ Phases execute in numeric order: 1 → 2 → 3 → 4 → 5 → 6 → 7
 | 2. Classification & Discovery | 3/3 | Complete | 2026-02-06 |
 | 3. Historical Evaluation | 5/5 | Complete | 2026-02-06 |
 | 4. Scoring Engine | 3/3 | Complete | 2026-02-06 |
-| 5. Signal Detection | 0/TBD | Not started | - |
+| 5. Signal Detection | 0/3 | Not started | - |
 | 6. Alerting System | 0/TBD | Not started | - |
 | 7. CLI Interface | 0/TBD | Not started | - |
