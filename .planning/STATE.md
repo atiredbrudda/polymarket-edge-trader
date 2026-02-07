@@ -9,19 +9,19 @@ See: .planning/PROJECT.md (updated 2026-02-05)
 
 ## Current Position
 
-Phase: 4 of 7 (Scoring Engine)
-Plan: 03 of 3 complete
-Status: Phase 4 COMPLETE
-Last activity: 2026-02-06 — Phase 4 verified (5/5 must-haves)
+Phase: 5 of 7 (Signal Detection)
+Plan: 02 of 3 in progress
+Status: In progress
+Last activity: 2026-02-07 — Completed 05-02-PLAN.md
 
-Progress: [████░░░░░░] 41% (15/37 total plans complete)
+Progress: [█████░░░░░] 43% (16/37 total plans complete)
 
 ## Performance Metrics
 
 **Velocity:**
-- Total plans completed: 15
-- Average duration: 4.83 min
-- Total execution time: 1.27 hours
+- Total plans completed: 16
+- Average duration: 4.8 min
+- Total execution time: 1.35 hours
 
 **By Phase:**
 
@@ -31,11 +31,12 @@ Progress: [████░░░░░░] 41% (15/37 total plans complete)
 | 2 - Classification & Discovery | 3/3 | 15min | 5min |
 | 3 - Historical Evaluation | 5/5 | 19.45min | 3.89min |
 | 4 - Scoring Engine | 3/3 | 13.4min | 4.47min |
+| 5 - Signal Detection | 1/3 | 4.5min | 4.5min |
 
 **Recent Trend:**
-- Last 5 plans: 4.1min (03-05), 2.7min (04-01), 5.5min (04-02), 5.2min (04-03)
-- Trend: TDD + pure functions consistently fast (2.7-5.5min range), established patterns accelerate development
-- Phase 4 COMPLETE: 3 plans (13.4min total, 4.47min avg) - concentration metrics, composite scoring, leaderboard pipeline
+- Last 5 plans: 2.7min (04-01), 5.5min (04-02), 5.2min (04-03), 4.5min (05-02)
+- Trend: Query pattern reuse accelerates database layer development (4.5min for 4 queries + 15 tests)
+- Phase 5 IN PROGRESS: 1 of 3 plans complete - signal database layer operational
 
 *Updated after each plan completion*
 
@@ -103,6 +104,10 @@ Recent decisions affecting current work:
 - **[04-03] Volume proxy fallback:** abs(size * avg_entry_price) when available, abs(size) when avg_entry_price is None
 - **[04-03] Consistency from PerformanceSnapshot:** Retrieve consistency_score and consistency_signal from timeframe="all" snapshot
 - **[04-03] Leaderboard max(computed_at) subquery:** Retrieve latest scores per trader using subquery pattern for efficiency
+- **[05-02] SignalSnapshot append-only design:** Matches ExpertiseScore pattern with computed_at field for history tracking
+- **[05-02] Position market+timestamp index:** ix_position_market_last_trade for time-window expert activity queries
+- **[05-02] Conditional module imports:** signals/__init__.py uses try/except for parallel plan execution support
+- **[05-02] UTC-aware datetime in queries:** datetime.now(UTC) avoids utcnow() deprecation warnings
 
 ### Pending Todos
 
@@ -147,13 +152,15 @@ None yet.
 - Ready for Phase 5 (Signal Detection)
 
 **Phase 5 (Signal Detection):**
+- ✓ [05-02] Signal database layer complete - SignalSnapshot model, 4 query functions, 15 integration tests
 - Consensus threshold calibration: 75% expert agreement is hypothesis, needs validation
 - Herding detection timing thresholds: 2-hour window and 6-hour gaps are heuristics requiring historical validation
 - Research flag: MEDIUM priority for threshold tuning
+- Parallel plan execution: Plan 05-01 and 05-02 run independently via conditional imports
 
 ## Session Continuity
 
-Last session: 2026-02-06
-Stopped at: Phase 4 complete and verified (5/5 must-haves)
+Last session: 2026-02-07
+Stopped at: Completed 05-02-PLAN.md
 Resume file: None
-Next: Begin Phase 5 (Signal Detection) - Consensus detection and herding analysis
+Next: Plan 05-03 (Signal Pipeline) - integrate detection functions with database queries
