@@ -10,18 +10,18 @@ See: .planning/PROJECT.md (updated 2026-02-05)
 ## Current Position
 
 Phase: 5 of 7 (Signal Detection)
-Plan: 02 of 3 in progress
+Plan: 02 of 3 complete
 Status: In progress
-Last activity: 2026-02-07 — Completed 05-02-PLAN.md
+Last activity: 2026-02-07 — Completed 05-01 and 05-02 (parallel execution)
 
-Progress: [█████░░░░░] 43% (16/37 total plans complete)
+Progress: [█████░░░░░] 46% (17/37 total plans complete)
 
 ## Performance Metrics
 
 **Velocity:**
-- Total plans completed: 16
-- Average duration: 4.8 min
-- Total execution time: 1.35 hours
+- Total plans completed: 17
+- Average duration: 4.85 min
+- Total execution time: 1.41 hours
 
 **By Phase:**
 
@@ -31,12 +31,12 @@ Progress: [█████░░░░░] 43% (16/37 total plans complete)
 | 2 - Classification & Discovery | 3/3 | 15min | 5min |
 | 3 - Historical Evaluation | 5/5 | 19.45min | 3.89min |
 | 4 - Scoring Engine | 3/3 | 13.4min | 4.47min |
-| 5 - Signal Detection | 1/3 | 4.5min | 4.5min |
+| 5 - Signal Detection | 2/3 | 10min | 5min |
 
 **Recent Trend:**
-- Last 5 plans: 2.7min (04-01), 5.5min (04-02), 5.2min (04-03), 4.5min (05-02)
-- Trend: Query pattern reuse accelerates database layer development (4.5min for 4 queries + 15 tests)
-- Phase 5 IN PROGRESS: 1 of 3 plans complete - signal database layer operational
+- Last 5 plans: 5.5min (04-02), 5.2min (04-03), 5.5min (05-01), 4.5min (05-02)
+- Trend: TDD + pure functions consistently fast (4.5-5.5min), parallel execution works well
+- Phase 5 IN PROGRESS: 2 of 3 plans complete - consensus detection and database layer operational
 
 *Updated after each plan completion*
 
@@ -104,6 +104,12 @@ Recent decisions affecting current work:
 - **[04-03] Volume proxy fallback:** abs(size * avg_entry_price) when available, abs(size) when avg_entry_price is None
 - **[04-03] Consistency from PerformanceSnapshot:** Retrieve consistency_score and consistency_signal from timeframe="all" snapshot
 - **[04-03] Leaderboard max(computed_at) subquery:** Retrieve latest scores per trader using subquery pattern for efficiency
+- **[05-01] Expert threshold for consensus:** raw_score > 70 matches Phase 4 scoring engine convention
+- **[05-01] Agreement denominator includes all directions:** 4 LONG + 1 SHORT = 80% agreement (not 100%), prevents inflated confidence
+- **[05-01] FLAT positions excluded from consensus:** Consensus is about directional alignment (LONG vs SHORT), FLAT is neutral exit
+- **[05-01] Confidence formula weights:** 60% agreement + 30% sample size + 10% uniformity (from user research)
+- **[05-01] Asymptotic sample size component:** (1 - exp(-(n - min_experts) / 10)) rewards larger samples with diminishing returns
+- **[05-01] Fast follower window: 6 hours:** Metadata classification only, doesn't affect consensus or confidence calculations
 - **[05-02] SignalSnapshot append-only design:** Matches ExpertiseScore pattern with computed_at field for history tracking
 - **[05-02] Position market+timestamp index:** ix_position_market_last_trade for time-window expert activity queries
 - **[05-02] Conditional module imports:** signals/__init__.py uses try/except for parallel plan execution support
@@ -152,7 +158,13 @@ None yet.
 - Ready for Phase 5 (Signal Detection)
 
 **Phase 5 (Signal Detection):**
+- ✓ [05-01] Consensus detection and confidence scoring complete - pure functions for expert consensus (27 tests)
 - ✓ [05-02] Signal database layer complete - SignalSnapshot model, 4 query functions, 15 integration tests
+- Pure functions: detect_consensus, identify_first_mover, classify_followers, calculate_confidence_score
+- Consensus thresholds: min_experts=3, min_agreement_pct=75% (configurable defaults from research)
+- Confidence formula: 60% agreement + 30% sample size (asymptotic) + 10% uniformity (CV)
+- FLAT positions excluded from consensus calculation (numerator and denominator)
+- First-mover identification via earliest entry_timestamp, fast follower window: 6 hours
 - Consensus threshold calibration: 75% expert agreement is hypothesis, needs validation
 - Herding detection timing thresholds: 2-hour window and 6-hour gaps are heuristics requiring historical validation
 - Research flag: MEDIUM priority for threshold tuning
