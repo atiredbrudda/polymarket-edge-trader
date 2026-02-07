@@ -189,7 +189,7 @@ def refresh_market_signal(
             expert_count=consensus.expert_count,
             total_experts_in_market=consensus.total_experts_in_market,
             agreement_percentage=consensus.agreement_percentage,
-            expert_addresses=expert_addresses_str,
+            expert_addresses_json=expert_addresses_str,
             first_mover_address=consensus.first_mover_address,
             status=status,
             computed_at=now,
@@ -257,7 +257,7 @@ def _handle_signal_lost(
                 expert_count=0,
                 total_experts_in_market=0,
                 agreement_percentage=Decimal("0"),
-                expert_addresses="",
+                expert_addresses_json="",
                 first_mover_address=None,
                 status="inactive",
                 computed_at=now,
@@ -297,7 +297,7 @@ def _handle_signal_lost_all_directions(
                 expert_count=0,
                 total_experts_in_market=0,
                 agreement_percentage=Decimal("0"),
-                expert_addresses="",
+                expert_addresses_json="",
                 first_mover_address=None,
                 status="inactive",
                 computed_at=now,
@@ -410,7 +410,7 @@ def get_ranked_signals(
     for snapshot in snapshots:
         # Parse expert_addresses from comma-separated string
         expert_addresses = (
-            sorted(snapshot.expert_addresses.split(",")) if snapshot.expert_addresses else []
+            sorted(snapshot.expert_addresses_json.split(",")) if snapshot.expert_addresses_json else []
         )
 
         # Build follower_classifications from snapshot metadata
