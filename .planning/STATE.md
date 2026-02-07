@@ -10,18 +10,18 @@ See: .planning/PROJECT.md (updated 2026-02-05)
 ## Current Position
 
 Phase: 5 of 7 (Signal Detection)
-Plan: 02 of 3 complete
-Status: In progress
-Last activity: 2026-02-07 — Completed 05-01 and 05-02 (parallel execution)
+Plan: 3 of 3 complete
+Status: Phase complete
+Last activity: 2026-02-07 — Completed 05-03-PLAN.md
 
-Progress: [█████░░░░░] 46% (17/37 total plans complete)
+Progress: [█████░░░░░] 49% (18/37 total plans complete)
 
 ## Performance Metrics
 
 **Velocity:**
-- Total plans completed: 17
-- Average duration: 4.85 min
-- Total execution time: 1.41 hours
+- Total plans completed: 18
+- Average duration: 4.83 min
+- Total execution time: 1.45 hours
 
 **By Phase:**
 
@@ -31,12 +31,12 @@ Progress: [█████░░░░░] 46% (17/37 total plans complete)
 | 2 - Classification & Discovery | 3/3 | 15min | 5min |
 | 3 - Historical Evaluation | 5/5 | 19.45min | 3.89min |
 | 4 - Scoring Engine | 3/3 | 13.4min | 4.47min |
-| 5 - Signal Detection | 2/3 | 10min | 5min |
+| 5 - Signal Detection | 3/3 | 16min | 5.33min |
 
 **Recent Trend:**
-- Last 5 plans: 5.5min (04-02), 5.2min (04-03), 5.5min (05-01), 4.5min (05-02)
-- Trend: TDD + pure functions consistently fast (4.5-5.5min), parallel execution works well
-- Phase 5 IN PROGRESS: 2 of 3 plans complete - consensus detection and database layer operational
+- Last 5 plans: 5.2min (04-03), 5.5min (05-01), 4.5min (05-02), 6min (05-03)
+- Trend: TDD + pure functions consistently fast (4.5-6min), parallel execution works well
+- Phase 5 COMPLETE: All 3 plans finished - full signal detection pipeline operational
 
 *Updated after each plan completion*
 
@@ -114,6 +114,10 @@ Recent decisions affecting current work:
 - **[05-02] Position market+timestamp index:** ix_position_market_last_trade for time-window expert activity queries
 - **[05-02] Conditional module imports:** signals/__init__.py uses try/except for parallel plan execution support
 - **[05-02] UTC-aware datetime in queries:** datetime.now(UTC) avoids utcnow() deprecation warnings
+- **[05-03] SignalSnapshot field naming:** expert_addresses_json (not expert_addresses) for CSV storage
+- **[05-03] Signal lost detection:** Create inactive snapshot when consensus drops, preserves append-only history for Phase 6 delta analysis
+- **[05-03] Herding stub deferred:** assess_herding returns "not_analyzed" per user decision in CONTEXT.md
+- **[05-03] Time-window filtering at query layer:** get_ranked_signals filters by expert activity windows for 1h/6h/24h views
 
 ### Pending Todos
 
@@ -158,21 +162,27 @@ None yet.
 - Ready for Phase 5 (Signal Detection)
 
 **Phase 5 (Signal Detection):**
+- ✓ COMPLETE - All Phase 5 plans finished
 - ✓ [05-01] Consensus detection and confidence scoring complete - pure functions for expert consensus (27 tests)
 - ✓ [05-02] Signal database layer complete - SignalSnapshot model, 4 query functions, 15 integration tests
+- ✓ [05-03] Signal pipeline orchestration complete - end-to-end refresh and ranking (13 tests)
 - Pure functions: detect_consensus, identify_first_mover, classify_followers, calculate_confidence_score
+- Pipeline functions: refresh_market_signal, refresh_all_signals, get_ranked_signals, assess_herding (stub)
 - Consensus thresholds: min_experts=3, min_agreement_pct=75% (configurable defaults from research)
 - Confidence formula: 60% agreement + 30% sample size (asymptotic) + 10% uniformity (CV)
 - FLAT positions excluded from consensus calculation (numerator and denominator)
 - First-mover identification via earliest entry_timestamp, fast follower window: 6 hours
-- Consensus threshold calibration: 75% expert agreement is hypothesis, needs validation
-- Herding detection timing thresholds: 2-hour window and 6-hour gaps are heuristics requiring historical validation
-- Research flag: MEDIUM priority for threshold tuning
-- Parallel plan execution: Plan 05-01 and 05-02 run independently via conditional imports
+- Signal lost detection: inactive snapshots created when consensus drops below thresholds
+- Time-window ranking: 1h/6h/24h views via get_ranked_signals
+- Append-only history: multiple snapshots per market for Phase 6 delta detection
+- Herding stub: assess_herding returns "not_analyzed" per user decision (deferred)
+- Phase 5 tests: 55 (27 from 05-01, 15 from 05-02, 13 from 05-03)
+- Total project tests: 362 (307 pre-Phase 5 + 55 Phase 5)
+- Ready for Phase 6 (Alerting & Delivery)
 
 ## Session Continuity
 
 Last session: 2026-02-07
-Stopped at: Completed 05-02-PLAN.md
+Stopped at: Completed 05-03-PLAN.md (Phase 5 complete)
 Resume file: None
-Next: Plan 05-03 (Signal Pipeline) - integrate detection functions with database queries
+Next: Phase 6 (Alerting & Delivery) - signal change detection, CLI display, webhook delivery
