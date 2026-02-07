@@ -198,6 +198,7 @@ class Position(Base):
         Index("ix_position_trader_market", "trader_address", "market_id", unique=True),
         Index("ix_position_resolved", "resolved"),
         Index("ix_position_trader", "trader_address"),
+        Index("ix_position_market_last_trade", "market_id", "last_trade_timestamp"),
     )
 
 
@@ -283,4 +284,34 @@ class ExpertiseScore(Base):
         Index("ix_expertise_trader_game", "trader_address", "game_slug"),
         Index("ix_expertise_game_score", "game_slug", "raw_score"),
         Index("ix_expertise_computed_at", "computed_at"),
+    )
+
+
+class SignalSnapshot(Base):
+    """Signal snapshot representing consensus expert opinion at a point in time.
+
+    Stores the result of consensus detection for a market and direction.
+    Each row is a point-in-time snapshot — new rows inserted on each signal computation.
+    Follows the append-only pattern established by ExpertiseScore.
+    """
+
+    __tablename__ = "signal_snapshots"
+
+    id: Mapped[int] = mapped_column(primary_key=True, autoincrement=True)
+    market_id: Mapped[str] = mapped_column(String(100), nullable=False)
+    direction: Mapped[str] = mapped_column(String(5), nullable=False)  # "LONG" or "SHORT"
+    confidence_score: Mapped[Decimal] = mapped_column(Numeric(10, 6), nullable=False)
+    expert_count: Mapped[int] = mapped_column(nullable=False)
+    total_experts_in_market: Mapped[int] = mapped_column(nullable=False)
+    agreement_percentage: Mapped[Decimal] = mapped_column(Numeric(10, 6), nullable=False)
+    expert_addresses_json: Mapped[str] = mapped_column(String(5000), nullable=False)
+    first_mover_address: Mapped[str | None] = mapped_column(String(42), nullable=True)
+    status: Mapped[str] = mapped_column(String(10), nullable=False, default="active")
+    computed_at: Mapped[datetime] = mapped_column(default=datetime.utcnow, nullable=False)
+
+    __table_args__ = (
+        Index("ix_signal_market_direction", "market_id", "direction"),
+        Index("ix_signal_computed_at", "computed_at"),
+        Index("ix_signal_market_computed", "market_id", "computed_at"),
+        Index("ix_signal_status", "status"),
     )
