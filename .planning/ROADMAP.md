@@ -108,18 +108,20 @@ Plans:
 - [x] 05-03-PLAN.md — Signal detection pipeline orchestration
 
 ### Phase 6: Alerting System
-**Goal**: Deliver consensus signals via Telegram and Discord with retry reliability
+**Goal**: Deliver consensus signals via Telegram with retry reliability, signal event classification, and extended metadata
 **Depends on**: Phase 5
 **Requirements**: ALRT-01, ALRT-02, ALRT-03, ALRT-04
 **Success Criteria** (what must be TRUE):
   1. System sends consensus signal alerts to Telegram with market context, expert count, consensus direction, and confidence
-  2. System sends consensus signal alerts to Discord via webhook
+  2. System classifies signal events as NEW, STRENGTHENING, WEAKENING, or LOST via snapshot comparison
   3. System retries failed alert deliveries with exponential backoff
-  4. Alert payloads include complete signal metadata for user decision-making
-**Plans**: TBD
+  4. Alert payloads include complete signal metadata including first-mover identity, expert addresses, and position sizes
+**Plans**: 3 plans
 
 Plans:
-- [ ] TBD during planning
+- [ ] 06-01-PLAN.md — Signal event detection via snapshot comparison (TDD)
+- [ ] 06-02-PLAN.md — Telegram HTML alert formatter with extended metadata (TDD)
+- [ ] 06-03-PLAN.md — Telegram client, delivery orchestration, and deduplication
 
 ### Phase 7: CLI Interface
 **Goal**: Provide command-line tools for market exploration, trader analysis, and signal monitoring
@@ -148,5 +150,5 @@ Phases execute in numeric order: 1 -> 2 -> 3 -> 4 -> 5 -> 6 -> 7
 | 3. Historical Evaluation | 5/5 | Complete | 2026-02-06 |
 | 4. Scoring Engine | 3/3 | Complete | 2026-02-06 |
 | 5. Signal Detection | 3/3 | Complete | 2026-02-07 |
-| 6. Alerting System | 0/TBD | Not started | - |
+| 6. Alerting System | 0/3 | Planned | - |
 | 7. CLI Interface | 0/TBD | Not started | - |
