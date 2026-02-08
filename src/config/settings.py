@@ -49,6 +49,10 @@ class Settings(BaseSettings):
     # Alert Delivery Configuration (Phase 6)
     telegram_bot_token: str | None = None
     telegram_chat_id: str | None = None
+    alert_retry_max_attempts: int = 5
+    alert_retry_min_wait: float = 2.0
+    alert_retry_max_wait: float = 60.0
+    alert_dedup_ttl_minutes: int = 60
 
     # Pydantic v2 configuration
     model_config = SettingsConfigDict(
