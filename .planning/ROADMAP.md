@@ -110,7 +110,7 @@ Plans:
 ### Phase 6: Alerting System
 **Goal**: Deliver consensus signals via Telegram with retry reliability, signal event classification, and extended metadata
 **Depends on**: Phase 5
-**Requirements**: ALRT-01, ALRT-02, ALRT-03, ALRT-04
+**Requirements**: ALRT-01, ALRT-03, ALRT-04
 **Success Criteria** (what must be TRUE):
   1. System sends consensus signal alerts to Telegram with market context, expert count, consensus direction, and confidence
   2. System classifies signal events as NEW, STRENGTHENING, WEAKENING, or LOST via snapshot comparison
