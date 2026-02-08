@@ -46,6 +46,10 @@ class Settings(BaseSettings):
     trader_min_volume: Decimal = Decimal("500")  # Minimum USD volume for discovery
     discovery_sweep_enabled: bool = True  # Whether periodic sweep is active
 
+    # Alert Delivery Configuration (Phase 6)
+    telegram_bot_token: str | None = None
+    telegram_chat_id: str | None = None
+
     # Pydantic v2 configuration
     model_config = SettingsConfigDict(
         env_file=".env",
