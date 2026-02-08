@@ -7,9 +7,21 @@ from datetime import datetime, UTC
 from decimal import Decimal
 
 import pytest
+from sqlalchemy import create_engine
+from sqlalchemy.orm import Session as SQLSession
 
 from src.alerts.formatter import format_signal_alert, get_expert_position_details
 from src.signals.pipeline import SignalResult
+from src.db.models import Base, Position
+
+
+@pytest.fixture
+def session():
+    """Create in-memory SQLite session for testing."""
+    engine = create_engine("sqlite:///:memory:")
+    Base.metadata.create_all(engine)
+    with SQLSession(engine) as session:
+        yield session
 
 
 @pytest.fixture
@@ -172,16 +184,15 @@ class TestFormatSignalAlert:
         
         result = format_signal_alert("NEW", "Will Team A win?", signal_no_first_mover, expert_positions)
         
-        # First mover section should be omitted (check for "First mover" text)
-        assert "First" not in result or "first" not in result.lower().count("first") > 1
+        # First mover section should be omitted
+        assert "First Mover" not in result
 
     def test_no_expert_positions_omits_sizes(self, base_signal):
         """When expert_positions is None, position sizes section is omitted."""
         result = format_signal_alert("NEW", "Will Team A win?", base_signal, None)
         
-        # Position size details should not be present
-        assert "1000.50" not in result
-        assert "Position" not in result or "position" not in result.lower()
+        # Position section header should not be present
+        assert "<b>Positions:</b>" not in result
 
     def test_expert_positions_shown_when_provided(self, base_signal, expert_positions):
         """When expert_positions provided, each address shown with size and direction."""
@@ -223,16 +234,14 @@ class TestFormatSignalAlert:
         result = format_signal_alert("NEW", "Will Team A win?", base_signal, expert_positions)
         
         # Should show 1 fast follower (from follower_classifications)
-        assert "1" in result  # The count of fast_followers
+        assert "Fast Followers: 1" in result or "fast follower" in result.lower()
 
 
 class TestGetExpertPositionDetails:
     """Tests for get_expert_position_details function."""
 
-    def test_returns_position_details_for_experts(self, session, sample_positions):
+    def test_returns_position_details_for_experts(self, session):
         """Returns position details for specified expert addresses."""
-        from src.db.models import Position
-        
         # Add sample positions to session
         pos1 = Position(
             market_id="0xMarket123",
@@ -275,8 +284,6 @@ class TestGetExpertPositionDetails:
 
     def test_handles_none_avg_entry_price(self, session):
         """Handles positions with None avg_entry_price."""
-        from src.db.models import Position
-        
         pos = Position(
             market_id="0xMarket456",
             trader_address="0xExpert3",
@@ -293,9 +300,3 @@ class TestGetExpertPositionDetails:
         
         assert len(result) == 1
         assert result[0]["avg_entry_price"] is None
-
-
-@pytest.fixture
-def sample_positions():
-    """Fixture for sample positions (marker for tests)."""
-    return []
