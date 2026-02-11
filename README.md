@@ -297,6 +297,27 @@ The same expertise scoring, consensus detection, and alerting logic applies to a
 - **API rate**: 50 req/s with automatic retry on 429
 - **Memory footprint**: ~200 MB typical
 
+## Debugging
+
+All CLI commands automatically log to `logs/cli_session.log` for debugging and monitoring.
+
+**View logs in real-time:**
+```bash
+./view_logs.sh tail
+```
+
+**Quick check (last 50 lines):**
+```bash
+./view_logs.sh last
+```
+
+**Search for errors:**
+```bash
+grep ERROR logs/cli_session.log
+```
+
+See [LOGGING.md](LOGGING.md) for complete logging documentation.
+
 ## Troubleshooting
 
 ### "No module named 'src'"

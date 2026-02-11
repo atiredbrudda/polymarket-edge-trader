@@ -17,7 +17,7 @@ import pytest
 from sqlalchemy import create_engine
 from sqlalchemy.orm import sessionmaker
 
-from src.api.models import EventResponse, MarketResponse, TradeResponse
+from src.api.models import MarketResponse, TradeResponse
 from src.db.models import Base, Market, Trader, Trade, TraderCategorySummary
 from src.pipeline.filters import CategoryFilter
 from src.pipeline.ingest import IngestionPipeline
@@ -55,45 +55,25 @@ def test_ingest_active_markets_persists(pipeline, mock_client, in_memory_db):
     """Test that active markets are fetched and persisted to database."""
     _, session_factory = in_memory_db
 
-    # Mock API response with 2 events, each with 1 market
-    mock_client.get_events.return_value = [
-        EventResponse(
-            id="event1",
-            title="CS:GO Tournament",
-            slug="csgo-tournament",
+    # Mock API response with 2 markets
+    mock_client.get_markets.return_value = [
+        MarketResponse(
+            condition_id="market1",
+            question="Will Team A win?",
             category="eSports",
-            end_date=datetime(2025, 12, 31),
             active=True,
-            markets=[
-                MarketResponse(
-                    condition_id="market1",
-                    question="Will Team A win?",
-                    category="eSports",
-                    active=True,
-                    outcome=None,
-                    end_date_iso="2025-12-31T00:00:00Z",
-                    tokens=[{"token_id": "123"}],
-                )
-            ],
+            outcome=None,
+            end_date_iso="2025-12-31T00:00:00Z",
+            tokens=[{"token_id": "123"}],
         ),
-        EventResponse(
-            id="event2",
-            title="Dota 2 Match",
-            slug="dota2-match",
+        MarketResponse(
+            condition_id="market2",
+            question="Will Team B win?",
             category="eSports",
-            end_date=datetime(2025, 11, 30),
             active=True,
-            markets=[
-                MarketResponse(
-                    condition_id="market2",
-                    question="Will Team B win?",
-                    category="eSports",
-                    active=True,
-                    outcome=None,
-                    end_date_iso="2025-11-30T00:00:00Z",
-                    tokens=None,
-                )
-            ],
+            outcome=None,
+            end_date_iso="2025-11-30T00:00:00Z",
+            tokens=None,
         ),
     ]
 
@@ -137,25 +117,15 @@ def test_ingest_active_markets_upserts(pipeline, mock_client, in_memory_db):
     session.close()
 
     # Mock API response with updated market
-    mock_client.get_events.return_value = [
-        EventResponse(
-            id="event1",
-            title="Updated Event",
-            slug="updated-event",
+    mock_client.get_markets.return_value = [
+        MarketResponse(
+            condition_id="market1",
+            question="Updated question",
             category="eSports",
-            end_date=None,
-            active=True,
-            markets=[
-                MarketResponse(
-                    condition_id="market1",
-                    question="Updated question",
-                    category="eSports",
-                    active=False,  # Changed to inactive
-                    outcome="YES",  # Now resolved
-                    end_date_iso=None,
-                    tokens=None,
-                )
-            ],
+            active=False,  # Changed to inactive
+            outcome="YES",  # Now resolved
+            end_date_iso=None,
+            tokens=None,
         )
     ]
 

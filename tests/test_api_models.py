@@ -6,7 +6,7 @@ from decimal import Decimal
 import pytest
 from pydantic import ValidationError
 
-from src.api.models import EventResponse, MarketResponse, TradeResponse
+from src.api.models import MarketResponse, TradeResponse
 
 
 class TestMarketResponse:
@@ -63,71 +63,6 @@ class TestMarketResponse:
         errors = exc_info.value.errors()
         missing_fields = {error["loc"][0] for error in errors}
         assert "condition_id" in missing_fields
-
-
-class TestEventResponse:
-    """Test suite for EventResponse validation."""
-
-    def test_event_response_validates_complete_data(self):
-        """Test that complete event data validates correctly."""
-        data = {
-            "id": "event-123",
-            "title": "IEM Katowice 2026",
-            "slug": "iem-katowice-2026",
-            "category": "eSports",
-            "end_date": "2026-02-20T23:59:59Z",
-            "active": True,
-            "markets": [
-                {
-                    "condition_id": "0x123",
-                    "question": "Will Liquid win?",
-                    "category": "eSports",
-                    "active": True,
-                }
-            ]
-        }
-
-        event = EventResponse(**data)
-
-        assert event.id == "event-123"
-        assert event.title == "IEM Katowice 2026"
-        assert event.category == "eSports"
-        assert len(event.markets) == 1
-        assert event.markets[0].question == "Will Liquid win?"
-
-    def test_event_response_handles_unix_timestamp(self):
-        """Test that end_date accepts Unix timestamp."""
-        data = {
-            "id": "event-123",
-            "title": "IEM Katowice 2026",
-            "slug": "iem-katowice-2026",
-            "category": "eSports",
-            "end_date": 1739404799,  # Unix timestamp
-            "active": True,
-            "markets": []
-        }
-
-        event = EventResponse(**data)
-
-        assert isinstance(event.end_date, datetime)
-        # Verify it's approximately the right date (Feb 2026)
-        assert event.end_date.year == 2025
-
-    def test_event_response_handles_null_end_date(self):
-        """Test that end_date can be null."""
-        data = {
-            "id": "event-123",
-            "title": "Open-ended event",
-            "slug": "open-ended",
-            "category": "Politics",
-            "end_date": None,
-            "active": True,
-            "markets": []
-        }
-
-        event = EventResponse(**data)
-
-        assert event.end_date is None
 
 
 class TestTradeResponse:

@@ -8,7 +8,7 @@ import pytest
 from tenacity import RetryError
 
 from src.api.client import PolymarketClient
-from src.api.models import EventResponse, MarketResponse, TradeResponse
+from src.api.models import MarketResponse, TradeResponse
 from src.config.settings import Settings
 
 
@@ -37,50 +37,6 @@ class TestPolymarketClient:
 
         # Should still initialize ClobClient
         assert mock_clob_client.called
-
-    @patch("src.api.client.ClobClient")
-    def test_get_events_returns_validated_models(self, mock_clob_client):
-        """Test that get_events returns list of EventResponse models."""
-        # Mock API response
-        mock_api_response = [
-            {
-                "id": "event-1",
-                "title": "IEM Katowice 2026",
-                "slug": "iem-katowice-2026",
-                "category": "eSports",
-                "end_date": 1739404799,
-                "active": True,
-                "markets": [
-                    {
-                        "condition_id": "0x123",
-                        "question": "Will Liquid win?",
-                        "category": "eSports",
-                        "active": True,
-                    }
-                ]
-            },
-            {
-                "id": "event-2",
-                "title": "CS:GO Major",
-                "slug": "csgo-major",
-                "category": "eSports",
-                "end_date": None,
-                "active": True,
-                "markets": []
-            }
-        ]
-
-        mock_instance = mock_clob_client.return_value
-        mock_instance.get_events.return_value = mock_api_response
-
-        client = PolymarketClient()
-        events = client.get_events(active=True)
-
-        # Verify returns list of EventResponse
-        assert len(events) == 2
-        assert all(isinstance(e, EventResponse) for e in events)
-        assert events[0].title == "IEM Katowice 2026"
-        assert events[1].title == "CS:GO Major"
 
     @patch("src.api.client.ClobClient")
     def test_get_markets_returns_validated_models(self, mock_clob_client):
@@ -248,48 +204,6 @@ class TestPolymarketClient:
 
             # Verify rate limiter was called
             mock_acquire.assert_called()
-
-    @patch("src.api.client.ClobClient")
-    def test_get_events_pagination(self, mock_clob_client):
-        """Test that get_events handles pagination correctly."""
-        # Mock paginated responses
-        page1 = {
-            "data": [
-                {
-                    "id": "event-1",
-                    "title": "Event 1",
-                    "slug": "event-1",
-                    "category": "eSports",
-                    "active": True,
-                    "markets": []
-                }
-            ],
-            "next_cursor": "cursor_page2"
-        }
-        page2 = {
-            "data": [
-                {
-                    "id": "event-2",
-                    "title": "Event 2",
-                    "slug": "event-2",
-                    "category": "Politics",
-                    "active": True,
-                    "markets": []
-                }
-            ],
-            "next_cursor": ""  # Empty cursor = end
-        }
-
-        mock_instance = mock_clob_client.return_value
-        mock_instance.get_events.side_effect = [page1, page2]
-
-        client = PolymarketClient()
-        events = client.get_events(active=True)
-
-        # Verify both pages were fetched
-        assert len(events) == 2
-        assert events[0].title == "Event 1"
-        assert events[1].title == "Event 2"
 
     @patch("src.api.client.ClobClient")
     def test_get_market_trades_pagination(self, mock_clob_client):

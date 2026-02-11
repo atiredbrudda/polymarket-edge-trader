@@ -4,7 +4,7 @@ from datetime import datetime
 from decimal import Decimal
 from typing import Any
 
-from pydantic import BaseModel, ConfigDict, Field, field_validator
+from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 
 
 class MarketResponse(BaseModel):
@@ -17,12 +17,41 @@ class MarketResponse(BaseModel):
     condition_id: str
     question: str
     end_date_iso: str | None = None
-    category: str
+    category: str | None = None  # Derived from tags
+    tags: list[str] | None = None
     outcome: str | None = None
     active: bool
     tokens: list[dict] | None = None
 
     model_config = ConfigDict(populate_by_name=True)
+
+    @model_validator(mode="after")
+    def derive_category_from_tags(self) -> "MarketResponse":
+        """Derive category from tags if not provided.
+
+        Maps tags like ['Sports', 'Esports', ...] to category='eSports'.
+        """
+        if self.category is not None:
+            return self
+
+        if not self.tags:
+            return self
+
+        # Map tags to categories
+        tags_lower = [tag.lower() for tag in self.tags]
+        if "esports" in tags_lower:
+            self.category = "eSports"
+        elif "sports" in tags_lower:
+            self.category = "Sports"
+        elif "politics" in tags_lower:
+            self.category = "Politics"
+        elif "crypto" in tags_lower:
+            self.category = "Crypto"
+        else:
+            # Default: use first tag capitalized
+            self.category = self.tags[0] if self.tags else None
+
+        return self
 
 
 class EventResponse(BaseModel):

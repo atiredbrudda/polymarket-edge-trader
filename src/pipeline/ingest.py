@@ -17,7 +17,7 @@ from loguru import logger
 from sqlalchemy.orm import sessionmaker
 
 from src.api.client import PolymarketClient
-from src.api.models import EventResponse, MarketResponse, TradeResponse
+from src.api.models import MarketResponse, TradeResponse
 from src.db.models import Market, Trader, Trade, TraderCategorySummary
 from src.pipeline.aggregators import group_and_aggregate
 from src.pipeline.filters import CategoryFilter, TradeWithCategory
@@ -70,15 +70,30 @@ class IngestionPipeline:
         """
         logger.info("Starting active market ingestion")
 
-        # Fetch active events (which contain markets)
-        events: list[EventResponse] = self.client.get_events(active=True)
+        # TEMPORARY DEBUG MODE: Use hardcoded test market instead of full scan
+        # TODO: Remove this after debugging - this is ONLY for testing the pipeline
+        # Market: LoL: Dragons Esports vs GnG Amazigh (BO3) - Arabian League
+        # https://polymarket.com/event/lol-drg-gng-2026-02-11
+        test_condition_ids = [
+            "0xd6f59f7f6dd3fa5e30e20b12cb13579dad60f4c61243e4dfd40636c3112fab1d",
+        ]
 
-        # Extract all markets from events
         all_markets: list[MarketResponse] = []
-        for event in events:
-            all_markets.extend(event.markets)
 
-        logger.info(f"Found {len(all_markets)} markets across {len(events)} events")
+        if test_condition_ids:
+            logger.info(f"DEBUG MODE: Testing with {len(test_condition_ids)} hardcoded markets")
+            for condition_id in test_condition_ids:
+                market = self.client.get_market(condition_id)
+                if market:
+                    all_markets.append(market)
+            logger.info(f"Loaded {len(all_markets)} test markets")
+        else:
+            # Full scan mode (slow)
+            logger.info("Full scan mode - fetching ALL markets (this will be slow)")
+            all_markets_full: list[MarketResponse] = self.client.get_markets(active=True)
+            esports_markets = [m for m in all_markets_full if m.category == "eSports"]
+            logger.info(f"Found {len(all_markets_full)} total markets, {len(esports_markets)} eSports markets")
+            all_markets = esports_markets
 
         # Persist markets in batches
         batch_size = 100
@@ -160,10 +175,11 @@ class IngestionPipeline:
         return markets_processed
 
     def discover_traders_from_market(self, condition_id: str) -> list[str]:
-        """Discover trader addresses from market trades.
+        """Discover trader addresses from market trades and store their trades.
 
-        Fetches all trades for a market and extracts unique trader addresses.
-        Creates Trader records for new addresses.
+        Fetches all trades for a market, extracts unique trader addresses,
+        creates Trader records, and IMMEDIATELY stores their trades from this market.
+        This ensures we capture the trades that led to discovery.
 
         Args:
             condition_id: Market condition ID
@@ -182,11 +198,21 @@ class IngestionPipeline:
         # Extract unique trader addresses
         trader_addresses = {trade.trader for trade in trades}
 
-        # Find which traders are new
+        # Get market metadata to determine category
         session = self.session_factory()
         new_traders: list[str] = []
 
         try:
+            # Get market category
+            market = session.query(Market).filter_by(condition_id=condition_id).first()
+            if not market:
+                logger.warning(f"Market {condition_id} not found in database during discovery")
+                session.close()
+                return []
+
+            market_category = market.category
+
+            # Process each trader
             for address in trader_addresses:
                 existing = session.query(Trader).filter_by(address=address).first()
 
@@ -201,9 +227,34 @@ class IngestionPipeline:
                     session.add(trader)
                     new_traders.append(address)
 
+                # Store trades from this market for this trader (whether new or existing)
+                trader_trades = [t for t in trades if t.trader == address]
+
+                for trade_response in trader_trades:
+                    # Check if trade already exists (deduplication)
+                    existing_trade = (
+                        session.query(Trade).filter_by(trade_id=trade_response.id).first()
+                    )
+
+                    if not existing_trade:
+                        # Only store if this is a detail category
+                        if self.category_filter.requires_detail(market_category):
+                            trade = Trade(
+                                market_id=trade_response.market,
+                                trader_address=trade_response.trader,
+                                side=trade_response.side,
+                                size=trade_response.size,
+                                price=trade_response.price,
+                                timestamp=trade_response.timestamp,
+                                asset_ticker=trade_response.asset_ticker,
+                                trade_id=trade_response.id,
+                            )
+                            session.add(trade)
+
             session.commit()
             logger.info(
-                f"Discovered {len(new_traders)} new traders from market {condition_id}"
+                f"Discovered {len(new_traders)} new traders from market {condition_id}, "
+                f"stored trades for {len(trader_addresses)} total traders"
             )
 
         except Exception as e:
@@ -245,33 +296,77 @@ class IngestionPipeline:
         stats = {"detail_count": 0, "summary_count": 0, "categories": set()}
 
         try:
-            # Get all markets to find those this trader participated in
-            # In production, we'd fetch trader's markets from API
-            # For now, we'll fetch trades from known markets in database
-            markets = session.query(Market).all()
+            # FIXED: Fetch ALL trades for this trader from API
+            all_trader_trades = self.client.get_trader_trades(trader_address)
 
+            if not all_trader_trades:
+                logger.info(f"No trades found for trader {trader_address[:8]}...")
+                # Still mark as backfill complete
+                trader = session.query(Trader).filter_by(address=trader_address).first()
+                if trader:
+                    trader.backfill_complete = True
+                    trader.last_active = datetime.utcnow()
+                session.commit()
+                return stats
+
+            # Extract unique market IDs from trades
+            market_ids = list(set(trade.market for trade in all_trader_trades))
+            logger.debug(f"Trader participated in {len(market_ids)} unique markets")
+
+            # Fetch market metadata for each market (if not already in database)
+            market_metadata = {}
+            for market_id in market_ids:
+                # Check if market exists in database
+                existing_market = (
+                    session.query(Market).filter_by(condition_id=market_id).first()
+                )
+
+                if existing_market:
+                    market_metadata[market_id] = existing_market.category
+                else:
+                    # Fetch market metadata from API
+                    try:
+                        market_response = self.client.get_market(market_id)
+                        if market_response:
+                            # Store new market in database
+                            new_market = Market(
+                                condition_id=market_response.condition_id,
+                                question=market_response.question,
+                                category=market_response.category,
+                                active=market_response.active,
+                                outcome=market_response.outcome,
+                            )
+
+                            if market_response.end_date_iso:
+                                try:
+                                    new_market.end_date = datetime.fromisoformat(
+                                        market_response.end_date_iso.replace("Z", "+00:00")
+                                    )
+                                except Exception:
+                                    pass
+
+                            if market_response.tokens:
+                                new_market.tokens = json.dumps(market_response.tokens)
+
+                            session.add(new_market)
+                            market_metadata[market_id] = market_response.category
+                            logger.debug(
+                                f"Discovered new market: {market_response.question[:40]}... ({market_response.category})"
+                            )
+                    except Exception as e:
+                        logger.warning(f"Failed to fetch market {market_id[:8]}...: {e}")
+                        # Skip this market if we can't fetch metadata
+                        continue
+
+            # Associate trades with categories
             all_trades_with_category: list[TradeWithCategory] = []
-
-            # Fetch trades from each market and associate with category
-            for market in markets:
-                try:
-                    trades = self.client.get_market_trades(market.condition_id)
-
-                    # Filter to this trader's trades
-                    trader_trades = [t for t in trades if t.trader == trader_address]
-
-                    # Associate each trade with market's category
-                    for trade in trader_trades:
-                        all_trades_with_category.append(
-                            TradeWithCategory(trade=trade, category=market.category)
-                        )
-                        stats["categories"].add(market.category)
-
-                except Exception as e:
-                    logger.warning(
-                        f"Failed to fetch trades for market {market.condition_id}: {e}"
+            for trade in all_trader_trades:
+                category = market_metadata.get(trade.market)
+                if category:
+                    all_trades_with_category.append(
+                        TradeWithCategory(trade=trade, category=category)
                     )
-                    continue
+                    stats["categories"].add(category)
 
             if not all_trades_with_category:
                 logger.info(f"No trades found for trader {trader_address[:8]}...")

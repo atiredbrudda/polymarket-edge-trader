@@ -12,7 +12,9 @@ from tenacity import (
     wait_exponential,
 )
 
-from src.api.models import EventResponse, MarketResponse, TradeResponse
+from py_clob_client.clob_types import TradeParams
+
+from src.api.models import MarketResponse, TradeResponse
 from src.api.rate_limiter import RateLimiter
 from src.config.settings import Settings, get_settings
 
@@ -85,61 +87,6 @@ class PolymarketClient:
         )
         return retryer(func)
 
-    def get_events(self, active: bool = True) -> List[EventResponse]:
-        """Fetch events from Polymarket CLOB API.
-
-        Handles pagination automatically by following next_cursor until
-        pagination is complete.
-
-        Args:
-            active: If True, only return active events
-
-        Returns:
-            List of validated EventResponse models
-
-        Raises:
-            RetryError: If all retry attempts are exhausted
-        """
-        self.rate_limiter.acquire()
-
-        all_events = []
-        next_cursor = None
-
-        while True:
-            logger.debug(f"Fetching events (active={active}, cursor={next_cursor})")
-
-            # Make API call
-            response = self.client.get_events(next_cursor=next_cursor)
-
-            # Handle both dict response and list response
-            if isinstance(response, dict):
-                events_data = response.get("data", [])
-                next_cursor = response.get("next_cursor")
-            else:
-                # Direct list response (no pagination)
-                events_data = response
-                next_cursor = None
-
-            # Validate and collect events
-            for event_data in events_data:
-                try:
-                    event = EventResponse(**event_data)
-                    if not active or event.active:
-                        all_events.append(event)
-                except Exception as e:
-                    logger.warning(f"Failed to validate event: {e}")
-                    continue
-
-            # Check pagination termination
-            if not next_cursor or next_cursor == "LTE" or next_cursor == "":
-                break
-
-            # Rate limit before next page
-            self.rate_limiter.acquire()
-
-        logger.info(f"Fetched {len(all_events)} events")
-        return all_events
-
     def get_markets(self, active: bool = True) -> List[MarketResponse]:
         """Fetch simplified markets from Polymarket CLOB API.
 
@@ -157,7 +104,7 @@ class PolymarketClient:
         """
         def _fetch_markets():
             all_markets = []
-            next_cursor = None
+            next_cursor = "MA=="  # Start with default cursor
 
             while True:
                 self.rate_limiter.acquire()
@@ -194,20 +141,41 @@ class PolymarketClient:
 
         return self._retry_call(_fetch_markets)
 
-    def get_market_trades(
-        self, condition_id: str, limit: int = 500
-    ) -> List[TradeResponse]:
-        """Fetch trades for a specific market.
-
-        This discovers traders by seeing who trades on a market (public data).
-        Note: py-clob-client's get_trades() returns only authenticated user's
-        trades. To discover traders, we fetch trades on specific markets.
-
-        Handles pagination automatically.
+    def get_market(self, condition_id: str) -> MarketResponse | None:
+        """Fetch a single market by condition ID.
 
         Args:
             condition_id: Market condition ID
-            limit: Maximum trades per page
+
+        Returns:
+            MarketResponse or None if not found
+
+        Raises:
+            RetryError: If all retry attempts are exhausted
+        """
+        self.rate_limiter.acquire()
+        logger.debug(f"Fetching market {condition_id}")
+
+        try:
+            response = self.client.get_market(condition_id)
+            market = MarketResponse(**response)
+            logger.info(f"Fetched market: {market.question}")
+            return market
+        except Exception as e:
+            logger.warning(f"Failed to fetch market {condition_id}: {e}")
+            return None
+
+    def get_market_trades(
+        self, condition_id: str, limit: int = 500
+    ) -> List[TradeResponse]:
+        """Fetch trades for a specific market using public Data API.
+
+        Uses Polymarket's public data API at https://data-api.polymarket.com/trades
+        which doesn't require authentication.
+
+        Args:
+            condition_id: Market condition ID
+            limit: Maximum trades to fetch (default 500)
 
         Returns:
             List of validated TradeResponse models
@@ -216,48 +184,109 @@ class PolymarketClient:
             RetryError: If all retry attempts are exhausted
         """
         self.rate_limiter.acquire()
+        logger.debug(f"Fetching trades for market {condition_id}")
 
-        all_trades = []
-        next_cursor = None
+        try:
+            # Use public Data API
+            url = f"https://data-api.polymarket.com/trades?market={condition_id}"
+            response = httpx.get(url, timeout=30.0)
+            response.raise_for_status()
 
-        while True:
-            logger.debug(
-                f"Fetching trades for market {condition_id} "
-                f"(limit={limit}, cursor={next_cursor})"
-            )
-
-            # Make API call
-            response = self.client.get_trades(
-                market=condition_id,
-                next_cursor=next_cursor
-            )
-
-            # Handle both dict response and list response
-            if isinstance(response, dict):
-                trades_data = response.get("data", [])
-                next_cursor = response.get("next_cursor")
-            else:
-                # Direct list response (no pagination)
-                trades_data = response
-                next_cursor = None
+            trades_data = response.json()
 
             # Validate and collect trades
-            for trade_data in trades_data:
+            all_trades = []
+            for trade_data in trades_data[:limit]:
                 try:
-                    trade = TradeResponse(**trade_data)
+                    # CRITICAL FIX: The API may return trades from multiple markets
+                    # We must filter to only include trades from the requested market
+                    trade_market_id = trade_data.get("conditionId", "")
+
+                    if trade_market_id.lower() != condition_id.lower():
+                        # Skip trades from other markets
+                        continue
+
+                    # Map public API fields to TradeResponse fields
+                    mapped_data = {
+                        "id": trade_data.get("transactionHash", ""),
+                        "market": trade_market_id,
+                        "maker": trade_data.get("proxyWallet", ""),
+                        "side": trade_data.get("side", ""),
+                        "size": str(trade_data.get("size", 0)),
+                        "price": str(trade_data.get("price", 0)),
+                        "timestamp": trade_data.get("timestamp", 0),
+                        "asset_ticker": trade_data.get("outcome", ""),
+                    }
+                    trade = TradeResponse(**mapped_data)
                     all_trades.append(trade)
                 except Exception as e:
                     logger.warning(f"Failed to validate trade: {e}")
                     continue
 
-            # Check pagination termination
-            if not next_cursor or next_cursor == "LTE" or next_cursor == "":
-                break
+            logger.info(
+                f"Fetched {len(all_trades)} trades for market {condition_id}"
+            )
+            return all_trades
 
-            # Rate limit before next page
-            self.rate_limiter.acquire()
+        except Exception as e:
+            logger.error(f"Failed to fetch trades for market {condition_id}: {e}")
+            return []
 
-        logger.info(
-            f"Fetched {len(all_trades)} trades for market {condition_id}"
-        )
-        return all_trades
+    def get_trader_trades(
+        self, trader_address: str, limit: int = 1000
+    ) -> List[TradeResponse]:
+        """Fetch all trades for a specific trader using public Data API.
+
+        Uses Polymarket's public data API at https://data-api.polymarket.com/trades
+        to fetch a trader's complete trading history.
+
+        Args:
+            trader_address: Trader wallet address (proxyWallet)
+            limit: Maximum trades to fetch (default 1000)
+
+        Returns:
+            List of validated TradeResponse models
+
+        Raises:
+            RetryError: If all retry attempts are exhausted
+        """
+        self.rate_limiter.acquire()
+        logger.debug(f"Fetching trades for trader {trader_address[:8]}...")
+
+        try:
+            # Use public Data API with proxyWallet parameter
+            url = f"https://data-api.polymarket.com/trades?proxyWallet={trader_address}"
+            response = httpx.get(url, timeout=30.0)
+            response.raise_for_status()
+
+            trades_data = response.json()
+
+            # Validate and collect trades
+            all_trades = []
+            for trade_data in trades_data[:limit]:
+                try:
+                    # Map public API fields to TradeResponse fields
+                    mapped_data = {
+                        "id": trade_data.get("transactionHash", ""),
+                        "market": trade_data.get("conditionId", ""),
+                        "maker": trade_data.get("proxyWallet", ""),
+                        "side": trade_data.get("side", ""),
+                        "size": str(trade_data.get("size", 0)),
+                        "price": str(trade_data.get("price", 0)),
+                        "timestamp": trade_data.get("timestamp", 0),
+                        "asset_ticker": trade_data.get("outcome", ""),
+                    }
+                    trade = TradeResponse(**mapped_data)
+                    all_trades.append(trade)
+                except Exception as e:
+                    logger.warning(f"Failed to validate trade: {e}")
+                    continue
+
+            logger.info(
+                f"Fetched {len(all_trades)} trades for trader {trader_address[:8]}..."
+            )
+            return all_trades
+
+        except Exception as e:
+            logger.error(f"Failed to fetch trades for trader {trader_address[:8]}...: {e}")
+            return []

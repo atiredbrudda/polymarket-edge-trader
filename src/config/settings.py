@@ -37,6 +37,8 @@ class Settings(BaseSettings):
     # Logging Configuration
     log_level: str = "INFO"
     log_dir: str = "logs"
+    # CLI session log file for debugging (captures all terminal output)
+    cli_log_file: str = "logs/cli_session.log"
 
     # Taxonomy Configuration
     taxonomy_path: str = "data/taxonomy/esports.yaml"

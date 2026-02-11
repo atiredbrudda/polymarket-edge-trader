@@ -13,6 +13,7 @@ All commands delegate formatting to src.cli.formatters for clean separation.
 
 import sys
 from decimal import Decimal
+from pathlib import Path
 
 import click
 from loguru import logger
@@ -113,13 +114,57 @@ def find_trader_by_prefix(session, partial_address: str) -> str | None:
         return None
 
 
+def _setup_cli_logging():
+    """Setup CLI session logging to file for debugging.
+
+    Creates logs directory if needed and configures loguru to write:
+    - All CLI output to logs/cli_session.log (rotating, persistent across sessions)
+    - Includes timestamps, command names, and full output
+    """
+    from src.config.settings import get_settings
+    settings = get_settings()
+
+    # Create logs directory if it doesn't exist
+    log_path = Path(settings.cli_log_file)
+    log_path.parent.mkdir(parents=True, exist_ok=True)
+
+    # Configure loguru for CLI session logging
+    # Remove default handler to avoid duplicate stderr output
+    logger.remove()
+
+    # Add file handler with rotation (10 MB max, keep 3 files)
+    logger.add(
+        settings.cli_log_file,
+        rotation="10 MB",
+        retention=3,
+        level="DEBUG",
+        format="{time:YYYY-MM-DD HH:mm:ss} | {level: <8} | {message}",
+        enqueue=True,  # Thread-safe
+    )
+
+    # Add stderr handler for WARNING and above (don't clutter terminal with DEBUG/INFO)
+    logger.add(
+        sys.stderr,
+        level="WARNING",
+        format="<red>{level}</red>: {message}",
+    )
+
+    logger.info("=" * 80)
+    logger.info("CLI SESSION START")
+    logger.info("=" * 80)
+
+
 @click.group()
-def cli():
+@click.pass_context
+def cli(ctx):
     """Polymarket Smart Money Tracker CLI.
 
     Track expert trader consensus and market signals in eSports prediction markets.
     """
-    pass
+    # Only setup logging if not --help
+    if ctx.invoked_subcommand is not None or '--help' not in sys.argv:
+        _setup_cli_logging()
+        logger.info(f"Command invoked: {' '.join(sys.argv)}")
 
 
 @cli.command()
@@ -132,6 +177,8 @@ def markets(category, verbose):
         polymarket markets
         polymarket markets --category eSports
     """
+    logger.info(f"MARKETS command started (category={category}, verbose={verbose})")
+
     if verbose:
         logger.remove()
         logger.add(sys.stderr, level="DEBUG")
@@ -166,9 +213,14 @@ def markets(category, verbose):
                     "active": market.active,
                 })
 
+    logger.info(f"Found {len(market_data)} active markets")
+    for market in market_data:
+        logger.debug(f"  - {market['slug']}: {market['question'][:80]}")
+
     # Format and display
     table = format_markets_table(market_data)
     console.print(table)
+    logger.info("MARKETS command completed")
 
 
 @cli.command()
@@ -183,6 +235,8 @@ def trader(address, verbose):
         polymarket trader 0xTrader123456
         polymarket trader 0xAbc
     """
+    logger.info(f"TRADER command started (address={address}, verbose={verbose})")
+
     if verbose:
         logger.remove()
         logger.add(sys.stderr, level="DEBUG")
@@ -197,7 +251,9 @@ def trader(address, verbose):
             # Resolve partial address
             full_address = find_trader_by_prefix(session, address)
             if not full_address:
+                logger.warning(f"Trader not found: {address}")
                 return
+            logger.info(f"Resolved trader address: {full_address}")
 
             # Import queries here to avoid circular imports
             from src.pipeline.queries import (
@@ -243,9 +299,12 @@ def trader(address, verbose):
                 for s in scores
             ]
 
+    logger.info(f"Trader profile loaded: {len(summaries_data)} categories, {len(positions_data)} positions, {len(scores_data)} scores")
+
     # Format and display
     profile = format_trader_profile(full_address, summaries_data, positions_data, scores_data)
     console.print(profile)
+    logger.info("TRADER command completed")
 
 
 @cli.command()
@@ -260,6 +319,8 @@ def signals(window, min_confidence, verbose):
         polymarket signals --window 6
         polymarket signals --min-confidence 80
     """
+    logger.info(f"SIGNALS command started (window={window}h, min_confidence={min_confidence}, verbose={verbose})")
+
     if verbose:
         logger.remove()
         logger.add(sys.stderr, level="DEBUG")
@@ -297,9 +358,14 @@ def signals(window, min_confidence, verbose):
                     "first_mover_address": signal.first_mover_address,
                 })
 
+    logger.info(f"Found {len(signals_data)} signals")
+    for signal in signals_data[:5]:  # Log first 5
+        logger.debug(f"  - {signal['market_question'][:60]}: {signal['direction']} (conf={signal['confidence']}, experts={signal['expert_count']})")
+
     # Format and display
     table = format_signals_table(signals_data)
     console.print(table)
+    logger.info("SIGNALS command completed")
 
 
 @cli.command()
@@ -315,6 +381,8 @@ def leaderboard(game_slug, top_n, verbose):
         polymarket leaderboard esports.cs2
         polymarket leaderboard esports.lol --top-n 10
     """
+    logger.info(f"LEADERBOARD command started (game_slug={game_slug}, top_n={top_n}, verbose={verbose})")
+
     if verbose:
         logger.remove()
         logger.add(sys.stderr, level="DEBUG")
@@ -334,6 +402,7 @@ def leaderboard(game_slug, top_n, verbose):
             valid_games = result.scalars().all()
 
             if game_slug not in valid_games:
+                logger.error(f"Invalid game slug: {game_slug}. Valid games: {valid_games}")
                 console.print(f"[bold red]Error: Game '{game_slug}' not found.[/bold red]")
                 console.print("\n[bold]Available games:[/bold]")
                 for game in sorted(valid_games):
@@ -357,9 +426,12 @@ def leaderboard(game_slug, top_n, verbose):
                 for idx, entry in enumerate(leaderboard_entries)
             ]
 
+    logger.info(f"Leaderboard loaded: {len(entries_data)} entries for {game_slug}")
+
     # Format and display
     table = format_leaderboard_table(entries_data, game_slug)
     console.print(table)
+    logger.info("LEADERBOARD command completed")
 
 
 @cli.command()
@@ -374,6 +446,8 @@ def sweep(window, verbose):
         polymarket sweep
         polymarket sweep --window 6
     """
+    logger.info(f"SWEEP command started (window={window}h, verbose={verbose})")
+
     if verbose:
         logger.remove()
         logger.add(sys.stderr, level="DEBUG")
@@ -395,6 +469,8 @@ def sweep(window, verbose):
 
         processing_time = time.time() - start_time
 
+    logger.info(f"Sweep completed: {stats['markets_ingested']} markets, {stats['signals_detected']} signals, {stats['alerts_sent']} alerts in {processing_time:.2f}s")
+
     # Format and display
     summary = format_sweep_summary({
         "processing_time": processing_time,
@@ -403,6 +479,7 @@ def sweep(window, verbose):
         "alerts_sent": stats["alerts_sent"],
     })
     console.print(summary)
+    logger.info("SWEEP command completed")
 
 
 @cli.command()
@@ -420,6 +497,8 @@ def poll(interval, no_alerts, verbose):
         polymarket poll --interval 30
         polymarket poll --no-alerts
     """
+    logger.info(f"POLL command started (interval={interval}min, no_alerts={no_alerts}, verbose={verbose})")
+
     if verbose:
         logger.remove()
         logger.add(sys.stderr, level="DEBUG")
@@ -440,15 +519,19 @@ def poll(interval, no_alerts, verbose):
 
     # Show alert status
     if alerter:
+        logger.info("Alerts enabled (Telegram configured)")
         console.print("[bold blue]Alerts enabled[/bold blue] (Telegram configured)")
     else:
+        logger.info("Alerts disabled (Telegram not configured or --no-alerts)")
         console.print("[bold yellow]Alerts disabled[/bold yellow] (Telegram not configured or --no-alerts)")
 
     # Import scheduler
     from src.cli.scheduler import run_polling_loop
 
     # Run polling loop (blocks until SIGINT/SIGTERM)
+    logger.info(f"Entering polling loop (interval={poll_interval}min)")
     run_polling_loop(session_factory, client, category_filter, alerter, interval_minutes=poll_interval)
+    logger.info("POLL command completed (graceful shutdown)")
 
 
 if __name__ == "__main__":
