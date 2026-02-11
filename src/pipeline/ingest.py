@@ -478,6 +478,256 @@ class IngestionPipeline:
 
         return stats
 
+    def ingest_trader_history_blockchain(
+        self,
+        trader_address: str,
+        use_incremental: bool = True,
+    ) -> dict:
+        """Ingest complete trader history using blockchain (no 100-trade limit!).
+
+        This is the blockchain-powered alternative to ingest_trader_history().
+        Fetches ALL trades from blockchain, not just the 100 most recent.
+
+        Args:
+            trader_address: Trader wallet address
+            use_incremental: If True, resume from last queried block
+
+        Returns:
+            Stats dict with keys:
+            - detail_count: Number of detail trades stored
+            - summary_count: Number of category summaries created
+            - categories: List of categories processed
+            - trades_from_blockchain: Total trades found on blockchain
+            - already_in_db: Trades skipped due to deduplication
+        """
+        if not self.blockchain_client:
+            raise ValueError("Blockchain client not configured. Pass blockchain_client to __init__.")
+
+        # Import here to avoid circular dependency
+        from src.blockchain.client import POLYMARKET_START_BLOCK
+        from src.blockchain.models import BlockchainTrade
+
+        logger.info(f"Ingesting blockchain history for trader {trader_address[:8]}...")
+
+        session = self.session_factory()
+        stats = {
+            "detail_count": 0,
+            "summary_count": 0,
+            "categories": set(),
+            "trades_from_blockchain": 0,
+            "already_in_db": 0,
+        }
+
+        try:
+            # Get sync state for incremental updates
+            sync_state = session.query(BlockchainSyncState).filter_by(
+                trader_address=trader_address
+            ).first()
+
+            if use_incremental and sync_state:
+                from_block = sync_state.last_queried_block + 1
+                logger.info(f"Resuming sync from block {from_block}")
+            else:
+                from_block = POLYMARKET_START_BLOCK
+                logger.info(f"Starting full sync from block {from_block}")
+
+            # Fetch ALL trades from blockchain
+            blockchain_trades = self.blockchain_client.get_trades_by_trader(
+                trader_address=trader_address,
+                from_block=from_block,
+            )
+
+            stats["trades_from_blockchain"] = len(blockchain_trades)
+
+            if not blockchain_trades:
+                logger.info(f"No blockchain trades found for trader {trader_address[:8]}...")
+                # Mark backfill complete even if no trades
+                trader = session.query(Trader).filter_by(address=trader_address).first()
+                if trader:
+                    trader.backfill_complete = True
+                    trader.last_active = datetime.utcnow()
+                session.commit()
+                return stats
+
+            # Get latest block from trades
+            latest_block = max(t.block_number for t in blockchain_trades)
+
+            # Process trades: fetch market metadata and categorize
+            market_metadata = {}
+            all_trades_with_category: list[TradeWithCategory] = []
+
+            for trade in blockchain_trades:
+                # Extract condition ID from trade
+                condition_id = trade.extract_condition_id()
+                if not condition_id:
+                    continue
+
+                # Fetch market metadata if not cached
+                if condition_id not in market_metadata:
+                    existing_market = session.query(Market).filter_by(
+                        condition_id=condition_id
+                    ).first()
+
+                    if existing_market:
+                        market_metadata[condition_id] = existing_market.category
+                    else:
+                        # Fetch from API (blockchain doesn't have market metadata)
+                        try:
+                            market_response = self.client.get_market(condition_id)
+                            if market_response:
+                                # Store new market
+                                new_market = Market(
+                                    condition_id=market_response.condition_id,
+                                    question=market_response.question,
+                                    category=market_response.category,
+                                    active=market_response.active,
+                                    outcome=market_response.outcome,
+                                )
+                                if market_response.end_date_iso:
+                                    try:
+                                        new_market.end_date = datetime.fromisoformat(
+                                            market_response.end_date_iso.replace("Z", "+00:00")
+                                        )
+                                    except Exception:
+                                        pass
+                                if market_response.tokens:
+                                    new_market.tokens = json.dumps(market_response.tokens)
+
+                                session.add(new_market)
+                                market_metadata[condition_id] = market_response.category
+                            else:
+                                market_metadata[condition_id] = None
+                        except Exception as e:
+                            logger.warning(f"Failed to fetch market {condition_id[:8]}...: {e}")
+                            market_metadata[condition_id] = None
+
+                category = market_metadata.get(condition_id)
+                if category:
+                    # Convert BlockchainTrade to TradeWithCategory
+                    # We use the to_api_response() method to get TradeResponse-compatible dict
+                    api_dict = trade.to_api_response()
+                    api_dict["market"] = condition_id  # Ensure market ID is set
+                    api_dict["trader"] = trader_address  # Ensure trader is set
+
+                    try:
+                        trade_response = TradeResponse(**api_dict)
+                        all_trades_with_category.append(
+                            TradeWithCategory(trade=trade_response, category=category)
+                        )
+                        stats["categories"].add(category)
+                    except Exception as e:
+                        logger.warning(f"Failed to validate trade: {e}")
+                        continue
+
+            if not all_trades_with_category:
+                logger.info(f"No valid trades to process for trader {trader_address[:8]}...")
+                trader = session.query(Trader).filter_by(address=trader_address).first()
+                if trader:
+                    trader.backfill_complete = True
+                session.commit()
+                return stats
+
+            # Route trades using CategoryFilter (same as API-based ingestion)
+            detail_trades, summary_trades = self.category_filter.route_trades(
+                all_trades_with_category
+            )
+
+            # Process detail trades with deduplication
+            for trade_with_cat in detail_trades:
+                trade_response = trade_with_cat.trade
+
+                # Deduplication check by trade_id
+                existing = session.query(Trade).filter_by(
+                    trade_id=trade_response.id
+                ).first()
+
+                if existing:
+                    stats["already_in_db"] += 1
+                    continue
+
+                trade = Trade(
+                    market_id=trade_response.market,
+                    trader_address=trade_response.trader,
+                    side=trade_response.side,
+                    size=trade_response.size,
+                    price=trade_response.price,
+                    timestamp=trade_response.timestamp,
+                    asset_ticker=trade_response.asset_ticker,
+                    trade_id=trade_response.id,
+                )
+                session.add(trade)
+                stats["detail_count"] += 1
+
+            # Process summary trades
+            if summary_trades:
+                summaries = group_and_aggregate(summary_trades, trader_address)
+
+                for summary_dict in summaries:
+                    existing_summary = session.query(TraderCategorySummary).filter_by(
+                        trader_address=summary_dict["trader_address"],
+                        category=summary_dict["category"],
+                    ).first()
+
+                    if existing_summary:
+                        existing_summary.total_volume += summary_dict["total_volume"]
+                        existing_summary.trade_count += summary_dict["trade_count"]
+                        if summary_dict["first_trade"] < existing_summary.first_trade:
+                            existing_summary.first_trade = summary_dict["first_trade"]
+                        if summary_dict["last_trade"] > existing_summary.last_trade:
+                            existing_summary.last_trade = summary_dict["last_trade"]
+                        existing_summary.updated_at = datetime.utcnow()
+                    else:
+                        summary = TraderCategorySummary(
+                            trader_address=summary_dict["trader_address"],
+                            category=summary_dict["category"],
+                            total_volume=summary_dict["total_volume"],
+                            trade_count=summary_dict["trade_count"],
+                            first_trade=summary_dict["first_trade"],
+                            last_trade=summary_dict["last_trade"],
+                        )
+                        session.add(summary)
+
+                    stats["summary_count"] += 1
+
+            # Update or create sync state
+            if sync_state:
+                sync_state.last_queried_block = latest_block
+                sync_state.last_sync_at = datetime.utcnow()
+                sync_state.total_trades_found += len(blockchain_trades)
+            else:
+                sync_state = BlockchainSyncState(
+                    trader_address=trader_address,
+                    last_queried_block=latest_block,
+                    total_trades_found=len(blockchain_trades),
+                )
+                session.add(sync_state)
+
+            # Mark trader as backfill complete
+            trader = session.query(Trader).filter_by(address=trader_address).first()
+            if trader:
+                trader.backfill_complete = True
+                trader.last_active = datetime.utcnow()
+
+            session.commit()
+
+            logger.info(
+                f"Blockchain ingestion for {trader_address[:8]}...: "
+                f"{stats['detail_count']} detail trades, "
+                f"{stats['summary_count']} summaries, "
+                f"{stats['already_in_db']} duplicates skipped"
+            )
+
+            stats["categories"] = list(stats["categories"])
+
+        except Exception as e:
+            session.rollback()
+            logger.error(f"Failed to ingest blockchain history: {e}")
+            raise
+        finally:
+            session.close()
+
+        return stats
+
     def run_full_sweep(self) -> dict:
         """Execute complete ingestion sweep.
 
