@@ -9,19 +9,19 @@ See: .planning/PROJECT.md (updated 2026-02-05)
 
 ## Current Position
 
-Phase: 6 of 7 (Alerting System)
-Plan: 3 of 3 complete
-Status: Phase 6 complete
-Last activity: 2026-02-11 — Plan 06-03 complete (Telegram bot integration & delivery pipeline)
+Phase: 7 of 7 (CLI Interface)
+Plan: 1 of 3 complete
+Status: In progress
+Last activity: 2026-02-11 — Plan 07-01 complete (CLI formatters and commands)
 
-Progress: [█████░░░░░] 57% (21/37 total plans complete)
+Progress: [█████░░░░░] 59% (22/37 total plans complete)
 
 ## Performance Metrics
 
 **Velocity:**
-- Total plans completed: 21
+- Total plans completed: 22
 - Average duration: 4.78 min
-- Total execution time: 1.67 hours
+- Total execution time: 1.75 hours
 
 **By Phase:**
 
@@ -33,11 +33,13 @@ Progress: [█████░░░░░] 57% (21/37 total plans complete)
 | 4 - Scoring Engine | 3/3 | 13.4min | 4.47min |
 | 5 - Signal Detection | 3/3 | 16min | 5.33min |
 | 6 - Alerting System | 3/3 | 14.71min | 4.90min |
+| 7 - CLI Interface | 1/3 | 4.78min | 4.78min |
 
 **Recent Trend:**
-- Last 5 plans: 4.5min (05-02), 6min (05-03), 5.5min (06-01), 3.83min (06-02), 5.38min (06-03)
-- Trend: TDD + pure functions consistently fast (3.8-6min), Phase 6 complete at 4.90min average
+- Last 5 plans: 6min (05-03), 5.5min (06-01), 3.83min (06-02), 5.38min (06-03), 4.78min (07-01)
+- Trend: TDD + pure functions consistently fast (3.8-6min), Phase 7 started at 4.78min
 - Phase 6 COMPLETE: All 3 plans done - signal detection, formatting, Telegram integration
+- Phase 7 IN PROGRESS: CLI formatters and commands complete
 
 *Updated after each plan completion*
 
@@ -122,6 +124,13 @@ Recent decisions affecting current work:
 - **[06-03] In-memory TTL deduplication:** Dict-based cache with cleanup on each check, no background thread or persistence needed
 - **[06-03] Graceful failure handling:** Log error + continue pipeline, don't block other alerts (best-effort delivery)
 - **[06-03] Fixed retry parameters:** 5 attempts, 2-60s exponential backoff matching Settings defaults (tenacity decorator limitation)
+- **[07-01] Pure formatters for testability:** All format_* functions are pure (data in → Rich renderable out), no database access or side effects
+- **[07-01] Address truncation:** first 6 + last 4 chars for long addresses (>10 chars), preserves 0x prefix for visual scanning
+- **[07-01] Partial address matching:** find_trader_by_prefix normalizes input (lowercase, strip, add 0x), handles 0/1/multiple matches with clear errors
+- **[07-01] Game slug validation:** leaderboard command validates slug exists, shows available games on error to improve UX
+- **[07-01] Console per command:** Each command creates Console() instance (not shared globally) for isolation
+- **[07-01] Confidence color hints:** Green ≥80, yellow 60-79, white <60 for visual scanning in signal table
+- **[07-01] Sweep command doesn't alert:** alerts_sent=0 placeholder, actual alerting lives in delivery pipeline
 
 ### Pending Todos
 
@@ -199,9 +208,20 @@ None yet.
 - Total project tests: 401 (362 pre-Phase 6 + 39 Phase 6)
 - Ready for Phase 7 (Scheduled Delivery & CLI)
 
+**Phase 7 (CLI Interface):**
+- ✓ [07-01] CLI formatters and commands complete - pure Rich formatters, Click commands with partial address matching (28 tests)
+- Pure formatters: truncate_address, format_markets_table, format_trader_profile, format_signals_table, format_leaderboard_table, format_sweep_summary
+- Click commands: markets, trader, signals, leaderboard, sweep
+- Helper: find_trader_by_prefix with normalization and 0/1/multiple match handling
+- Console per command, verbose flag wires to loguru DEBUG level
+- Game slug validation with available games list on error
+- Phase 7 tests (so far): 28 (17 formatters + 11 CLI commands)
+- Total project tests: 429 (401 pre-Phase 7 + 28 Phase 7)
+- Next: 07-02 (Scheduled polling with APScheduler), 07-03 (Integration tests and documentation)
+
 ## Session Continuity
 
 Last session: 2026-02-11
-Stopped at: Phase 6 execution complete, all plans verified
+Stopped at: Phase 7 Plan 07-01 complete (CLI formatters and commands)
 Resume file: None
-Next: Phase 7 planning - CLI interface for market exploration, trader analysis, signal monitoring, and scheduled polling
+Next: Phase 7 Plan 07-02 - Scheduled polling with APScheduler for automated signal detection sweeps
