@@ -11,14 +11,14 @@ This is the integration layer that fulfills DATA-01 through DATA-06.
 
 import json
 from datetime import datetime
-from typing import Any
+from typing import Any, Optional
 
 from loguru import logger
 from sqlalchemy.orm import sessionmaker
 
 from src.api.client import PolymarketClient
 from src.api.models import MarketResponse, TradeResponse
-from src.db.models import Market, Trader, Trade, TraderCategorySummary
+from src.db.models import BlockchainSyncState, Market, Trader, Trade, TraderCategorySummary
 from src.pipeline.aggregators import group_and_aggregate
 from src.pipeline.filters import CategoryFilter, TradeWithCategory
 
@@ -30,11 +30,13 @@ class IngestionPipeline:
     - PolymarketClient: API data fetching
     - CategoryFilter: Trade routing logic
     - SQLAlchemy session: Data persistence
+    - Optional PolygonBlockchainClient: Complete trader history from blockchain
 
     Attributes:
         client: Polymarket API client wrapper
         session_factory: SQLAlchemy session factory
         category_filter: Category-based trade router
+        blockchain_client: Optional blockchain client for complete history
     """
 
     def __init__(
@@ -42,6 +44,7 @@ class IngestionPipeline:
         client: PolymarketClient,
         session_factory: sessionmaker,
         category_filter: CategoryFilter,
+        blockchain_client: Optional[Any] = None,
     ):
         """Initialize ingestion pipeline.
 
@@ -49,10 +52,12 @@ class IngestionPipeline:
             client: Configured PolymarketClient instance
             session_factory: SQLAlchemy session factory for database access
             category_filter: CategoryFilter for routing trades
+            blockchain_client: Optional PolygonBlockchainClient for complete history
         """
         self.client = client
         self.session_factory = session_factory
         self.category_filter = category_filter
+        self.blockchain_client = blockchain_client
 
     def ingest_active_markets(self) -> int:
         """Fetch and persist active markets from Polymarket API.
