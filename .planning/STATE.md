@@ -10,18 +10,18 @@ See: .planning/PROJECT.md (updated 2026-02-05)
 ## Current Position
 
 Phase: 7 of 7 (CLI Interface)
-Plan: 1 of 3 complete
+Plan: 2 of 3 complete
 Status: In progress
-Last activity: 2026-02-11 — Plan 07-01 complete (CLI formatters and commands)
+Last activity: 2026-02-11 — Plan 07-02 complete (Scheduled polling with orchestration)
 
-Progress: [█████░░░░░] 59% (22/37 total plans complete)
+Progress: [█████░░░░░] 62% (23/37 total plans complete)
 
 ## Performance Metrics
 
 **Velocity:**
-- Total plans completed: 22
-- Average duration: 4.78 min
-- Total execution time: 1.75 hours
+- Total plans completed: 23
+- Average duration: 4.73 min
+- Total execution time: 1.81 hours
 
 **By Phase:**
 
@@ -33,13 +33,13 @@ Progress: [█████░░░░░] 59% (22/37 total plans complete)
 | 4 - Scoring Engine | 3/3 | 13.4min | 4.47min |
 | 5 - Signal Detection | 3/3 | 16min | 5.33min |
 | 6 - Alerting System | 3/3 | 14.71min | 4.90min |
-| 7 - CLI Interface | 1/3 | 4.78min | 4.78min |
+| 7 - CLI Interface | 2/3 | 8.33min | 4.17min |
 
 **Recent Trend:**
-- Last 5 plans: 6min (05-03), 5.5min (06-01), 3.83min (06-02), 5.38min (06-03), 4.78min (07-01)
-- Trend: TDD + pure functions consistently fast (3.8-6min), Phase 7 started at 4.78min
+- Last 5 plans: 5.5min (06-01), 3.83min (06-02), 5.38min (06-03), 4.78min (07-01), 3.55min (07-02)
+- Trend: Phase 7 accelerating (4.78min → 3.55min), orchestration simpler than expected
 - Phase 6 COMPLETE: All 3 plans done - signal detection, formatting, Telegram integration
-- Phase 7 IN PROGRESS: CLI formatters and commands complete
+- Phase 7 IN PROGRESS: CLI formatters, commands, and polling orchestration complete
 
 *Updated after each plan completion*
 
@@ -131,6 +131,11 @@ Recent decisions affecting current work:
 - **[07-01] Console per command:** Each command creates Console() instance (not shared globally) for isolation
 - **[07-01] Confidence color hints:** Green ≥80, yellow 60-79, white <60 for visual scanning in signal table
 - **[07-01] Sweep command doesn't alert:** alerts_sent=0 placeholder, actual alerting lives in delivery pipeline
+- **[07-02] Continue-on-failure per stage:** Each pipeline stage wrapped in try/except, failures logged without blocking subsequent stages (enables partial sweep completion)
+- **[07-02] Global shutdown flag:** Simple flag-based approach for SIGINT/SIGTERM handling (avoids threading complexity)
+- **[07-02] Graceful sleep:** Break sleep into 1-second intervals with shutdown check (enables fast shutdown response)
+- **[07-02] Stats dict return:** run_sweep returns comprehensive stats dict for monitoring and testing
+- **[07-02] Optional alerter:** Alerting optional via alerter=None or skip_alerts=True (enables dry-run mode)
 
 ### Pending Todos
 
@@ -210,18 +215,21 @@ None yet.
 
 **Phase 7 (CLI Interface):**
 - ✓ [07-01] CLI formatters and commands complete - pure Rich formatters, Click commands with partial address matching (28 tests)
+- ✓ [07-02] Sweep orchestration and polling loop complete - run_sweep chains all stages, run_polling_loop with graceful shutdown (9 tests)
 - Pure formatters: truncate_address, format_markets_table, format_trader_profile, format_signals_table, format_leaderboard_table, format_sweep_summary
-- Click commands: markets, trader, signals, leaderboard, sweep
-- Helper: find_trader_by_prefix with normalization and 0/1/multiple match handling
-- Console per command, verbose flag wires to loguru DEBUG level
-- Game slug validation with available games list on error
-- Phase 7 tests (so far): 28 (17 formatters + 11 CLI commands)
-- Total project tests: 429 (401 pre-Phase 7 + 28 Phase 7)
-- Next: 07-02 (Scheduled polling with APScheduler), 07-03 (Integration tests and documentation)
+- Click commands: markets, trader, signals, leaderboard, sweep, poll
+- Scheduler functions: run_sweep (single pipeline pass), run_polling_loop (automated repeating sweep)
+- Continue-on-failure: Each stage wrapped in try/except, failures logged without blocking
+- Global shutdown flag with SIGINT/SIGTERM handlers for graceful termination
+- Dense one-line cycle logging for operational monitoring
+- Optional alerting via alerter=None or skip_alerts=True flag
+- Phase 7 tests (so far): 37 (28 from 07-01 + 9 from 07-02)
+- Total project tests: 438 (401 pre-Phase 7 + 37 Phase 7)
+- Next: 07-03 (Integration tests and documentation)
 
 ## Session Continuity
 
 Last session: 2026-02-11
-Stopped at: Phase 7 Plan 07-01 complete (CLI formatters and commands)
+Stopped at: Phase 7 Plan 07-02 complete (Scheduled polling with orchestration)
 Resume file: None
-Next: Phase 7 Plan 07-02 - Scheduled polling with APScheduler for automated signal detection sweeps
+Next: Phase 7 Plan 07-03 - Integration tests and documentation for complete CLI system
