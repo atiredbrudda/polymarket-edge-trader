@@ -25,3 +25,10 @@ try:
     __all__.append("TelegramAlerter")
 except ImportError:
     pass
+
+try:
+    from src.alerts.delivery import deliver_signal_alerts, AlertDeliveryResult, AlertDeduplicator
+
+    __all__.extend(["deliver_signal_alerts", "AlertDeliveryResult", "AlertDeduplicator"])
+except ImportError:
+    pass
