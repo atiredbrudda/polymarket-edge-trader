@@ -17,7 +17,7 @@ from decimal import Decimal
 import click
 from loguru import logger
 from rich.console import Console
-from sqlalchemy import select
+from sqlalchemy import create_engine, select
 
 from src.cli.formatters import (
     format_markets_table,
@@ -26,8 +26,52 @@ from src.cli.formatters import (
     format_leaderboard_table,
     format_sweep_summary,
 )
-from src.db.models import Trader, TaxonomyNode, Market, MarketClassification
-from src.db.session import get_session
+from src.db.models import Base, Trader, TaxonomyNode, Market, MarketClassification
+from src.db.session import get_session, get_session_factory
+from src.config.settings import get_settings
+from src.api.client import PolymarketClient
+from src.pipeline.filters import CategoryFilter
+from src.alerts.telegram import TelegramAlerter
+
+
+def _get_dependencies(settings=None):
+    """Create all pipeline dependencies from settings.
+
+    Creates database engine, session factory, API client, category filter,
+    and optional Telegram alerter. Auto-creates database tables if needed.
+
+    Args:
+        settings: Optional Settings instance (defaults to get_settings())
+
+    Returns:
+        Tuple of (session_factory, client, category_filter, alerter)
+
+    Example:
+        session_factory, client, category_filter, alerter = _get_dependencies()
+        with get_session(session_factory) as session:
+            # use session
+    """
+    settings = settings or get_settings()
+
+    # Create engine and auto-create tables if needed
+    engine = create_engine(settings.database_url)
+    Base.metadata.create_all(engine)
+    session_factory = get_session_factory(engine)
+
+    # Create API client
+    client = PolymarketClient(settings=settings)
+
+    # Create category filter
+    category_filter = CategoryFilter(settings.detail_categories)
+
+    # Optional Telegram alerter (returns None if not configured)
+    alerter = None
+    try:
+        alerter = TelegramAlerter.from_settings(settings)
+    except ValueError as e:
+        logger.warning(f"Telegram configuration invalid: {e}")
+
+    return session_factory, client, category_filter, alerter
 
 
 def find_trader_by_prefix(session, partial_address: str) -> str | None:
@@ -95,32 +139,32 @@ def markets(category, verbose):
     console = Console()
 
     with console.status("[bold green]Fetching markets...", spinner="dots"):
-        session = get_session()
+        # Get dependencies
+        session_factory, _, _, _ = _get_dependencies()
 
         # Import queries here to avoid circular imports
         from src.pipeline.queries import get_active_markets
 
-        # Get active markets
-        markets_orm = get_active_markets(session, category=category)
+        with get_session(session_factory) as session:
+            # Get active markets
+            markets_orm = get_active_markets(session, category=category)
 
-        # Join with MarketClassification to get taxonomy slugs
-        market_data = []
-        for market in markets_orm:
-            query = (
-                select(TaxonomyNode.slug)
-                .join(MarketClassification, MarketClassification.taxonomy_node_id == TaxonomyNode.id)
-                .where(MarketClassification.market_id == market.condition_id)
-            )
-            result = session.execute(query)
-            slug = result.scalar()
+            # Join with MarketClassification to get taxonomy slugs
+            market_data = []
+            for market in markets_orm:
+                query = (
+                    select(TaxonomyNode.slug)
+                    .join(MarketClassification, MarketClassification.taxonomy_node_id == TaxonomyNode.id)
+                    .where(MarketClassification.market_id == market.condition_id)
+                )
+                result = session.execute(query)
+                slug = result.scalar()
 
-            market_data.append({
-                "question": market.question,
-                "slug": slug,
-                "active": market.active,
-            })
-
-        session.close()
+                market_data.append({
+                    "question": market.question,
+                    "slug": slug,
+                    "active": market.active,
+                })
 
     # Format and display
     table = format_markets_table(market_data)
@@ -146,59 +190,58 @@ def trader(address, verbose):
     console = Console()
 
     with console.status("[bold green]Fetching trader profile...", spinner="dots"):
-        session = get_session()
+        # Get dependencies
+        session_factory, _, _, _ = _get_dependencies()
 
-        # Resolve partial address
-        full_address = find_trader_by_prefix(session, address)
-        if not full_address:
-            session.close()
-            return
+        with get_session(session_factory) as session:
+            # Resolve partial address
+            full_address = find_trader_by_prefix(session, address)
+            if not full_address:
+                return
 
-        # Import queries here to avoid circular imports
-        from src.pipeline.queries import (
-            get_trader_summary,
-            get_positions_by_timeframe,
-            get_trader_score_history,
-        )
+            # Import queries here to avoid circular imports
+            from src.pipeline.queries import (
+                get_trader_summary,
+                get_positions_by_timeframe,
+                get_trader_score_history,
+            )
 
-        # Get trader data
-        summaries = get_trader_summary(session, full_address)
-        positions = get_positions_by_timeframe(session, full_address, "all")
-        scores = get_trader_score_history(session, full_address, limit=10)
+            # Get trader data
+            summaries = get_trader_summary(session, full_address)
+            positions = get_positions_by_timeframe(session, full_address, "all")
+            scores = get_trader_score_history(session, full_address, limit=10)
 
-        # Convert ORM objects to dicts for formatter
-        summaries_data = [
-            {
-                "category": s.category,
-                "volume": s.total_volume,
-                "trade_count": s.trade_count,
-            }
-            for s in summaries
-        ]
+            # Convert ORM objects to dicts for formatter
+            summaries_data = [
+                {
+                    "category": s.category,
+                    "volume": s.total_volume,
+                    "trade_count": s.trade_count,
+                }
+                for s in summaries
+            ]
 
-        positions_data = []
-        for p in positions:
-            # Get market question
-            market = session.query(Market).filter(Market.condition_id == p.market_id).first()
-            market_question = market.question if market else p.market_id
-            positions_data.append({
-                "market_question": market_question,
-                "direction": p.direction,
-                "size": p.size,
-                "avg_entry_price": p.avg_entry_price,
-            })
+            positions_data = []
+            for p in positions:
+                # Get market question
+                market = session.query(Market).filter(Market.condition_id == p.market_id).first()
+                market_question = market.question if market else p.market_id
+                positions_data.append({
+                    "market_question": market_question,
+                    "direction": p.direction,
+                    "size": p.size,
+                    "avg_entry_price": p.avg_entry_price,
+                })
 
-        scores_data = [
-            {
-                "game": s.game_slug,
-                "score": s.raw_score,
-                "percentile": s.percentile_rank or Decimal("0"),
-                "specialization": "specialist" if s.is_specialist else "generalist",
-            }
-            for s in scores
-        ]
-
-        session.close()
+            scores_data = [
+                {
+                    "game": s.game_slug,
+                    "score": s.raw_score,
+                    "percentile": s.percentile_rank or Decimal("0"),
+                    "specialization": "specialist" if s.is_specialist else "generalist",
+                }
+                for s in scores
+            ]
 
     # Format and display
     profile = format_trader_profile(full_address, summaries_data, positions_data, scores_data)
@@ -224,35 +267,35 @@ def signals(window, min_confidence, verbose):
     console = Console()
 
     with console.status("[bold green]Fetching signals...", spinner="dots"):
-        session = get_session()
+        # Get dependencies
+        session_factory, _, _, _ = _get_dependencies()
 
-        # Import signal queries here
-        from src.signals.pipeline import get_ranked_signals
+        with get_session(session_factory) as session:
+            # Import signal queries here
+            from src.signals.pipeline import get_ranked_signals
 
-        # Convert min_confidence to Decimal if provided
-        min_conf_decimal = Decimal(str(min_confidence)) if min_confidence else None
+            # Convert min_confidence to Decimal if provided
+            min_conf_decimal = Decimal(str(min_confidence)) if min_confidence else None
 
-        # Get ranked signals
-        signals_results = get_ranked_signals(
-            session, window_hours=window, min_confidence=min_conf_decimal, limit=50
-        )
+            # Get ranked signals
+            signals_results = get_ranked_signals(
+                session, window_hours=window, min_confidence=min_conf_decimal, limit=50
+            )
 
-        # Convert SignalResult objects to dicts for formatter
-        signals_data = []
-        for signal in signals_results:
-            # Get market question
-            market = session.query(Market).filter(Market.condition_id == signal.market_id).first()
-            market_question = market.question if market else signal.market_id
+            # Convert SignalResult objects to dicts for formatter
+            signals_data = []
+            for signal in signals_results:
+                # Get market question
+                market = session.query(Market).filter(Market.condition_id == signal.market_id).first()
+                market_question = market.question if market else signal.market_id
 
-            signals_data.append({
-                "market_question": market_question,
-                "direction": signal.direction,
-                "confidence": signal.confidence_score,
-                "expert_count": signal.expert_count,
-                "first_mover_address": signal.first_mover_address,
-            })
-
-        session.close()
+                signals_data.append({
+                    "market_question": market_question,
+                    "direction": signal.direction,
+                    "confidence": signal.confidence_score,
+                    "expert_count": signal.expert_count,
+                    "first_mover_address": signal.first_mover_address,
+                })
 
     # Format and display
     table = format_signals_table(signals_data)
@@ -279,41 +322,40 @@ def leaderboard(game_slug, top_n, verbose):
     console = Console()
 
     with console.status("[bold green]Fetching leaderboard...", spinner="dots"):
-        session = get_session()
+        # Get dependencies
+        session_factory, _, _, _ = _get_dependencies()
 
-        # Validate game slug exists
-        query = select(TaxonomyNode.slug).where(
-            TaxonomyNode.slug.like("esports.%"), TaxonomyNode.node_type == "game"
-        )
-        result = session.execute(query)
-        valid_games = result.scalars().all()
+        with get_session(session_factory) as session:
+            # Validate game slug exists
+            query = select(TaxonomyNode.slug).where(
+                TaxonomyNode.slug.like("esports.%"), TaxonomyNode.node_type == "game"
+            )
+            result = session.execute(query)
+            valid_games = result.scalars().all()
 
-        if game_slug not in valid_games:
-            session.close()
-            console.print(f"[bold red]Error: Game '{game_slug}' not found.[/bold red]")
-            console.print("\n[bold]Available games:[/bold]")
-            for game in sorted(valid_games):
-                console.print(f"  - {game}")
-            return
+            if game_slug not in valid_games:
+                console.print(f"[bold red]Error: Game '{game_slug}' not found.[/bold red]")
+                console.print("\n[bold]Available games:[/bold]")
+                for game in sorted(valid_games):
+                    console.print(f"  - {game}")
+                return
 
-        # Import queries here
-        from src.pipeline.queries import get_game_leaderboard
+            # Import queries here
+            from src.pipeline.queries import get_game_leaderboard
 
-        # Get leaderboard
-        leaderboard_entries = get_game_leaderboard(session, game_slug, top_n=top_n)
+            # Get leaderboard
+            leaderboard_entries = get_game_leaderboard(session, game_slug, top_n=top_n)
 
-        # Convert to dicts for formatter
-        entries_data = [
-            {
-                "rank": idx + 1,
-                "trader_address": entry.trader_address,
-                "score": entry.raw_score,
-                "win_rate": entry.win_rate or Decimal("0"),
-            }
-            for idx, entry in enumerate(leaderboard_entries)
-        ]
-
-        session.close()
+            # Convert to dicts for formatter
+            entries_data = [
+                {
+                    "rank": idx + 1,
+                    "trader_address": entry.trader_address,
+                    "score": entry.raw_score,
+                    "win_rate": entry.win_rate or Decimal("0"),
+                }
+                for idx, entry in enumerate(leaderboard_entries)
+            ]
 
     # Format and display
     table = format_leaderboard_table(entries_data, game_slug)
@@ -342,29 +384,23 @@ def sweep(window, verbose):
         import time
         start_time = time.time()
 
-        session = get_session()
+        # Get dependencies
+        session_factory, client, category_filter, alerter = _get_dependencies()
 
         # Import pipeline here
-        from src.signals.pipeline import refresh_all_signals
+        from src.cli.scheduler import run_sweep
 
-        # Run sweep
-        results = refresh_all_signals(session, window_hours=window)
+        # Run full sweep (skip_alerts=True since this is manual command)
+        stats = run_sweep(session_factory, client, category_filter, alerter, skip_alerts=True)
 
         processing_time = time.time() - start_time
-
-        # Count markets and alerts (simplified - no actual alerting in sweep command)
-        markets_count = len(set(r.market_id for r in results))
-        signals_count = len(results)
-        alerts_sent = 0  # Placeholder - sweep doesn't send alerts
-
-        session.close()
 
     # Format and display
     summary = format_sweep_summary({
         "processing_time": processing_time,
-        "markets_count": markets_count,
-        "signals_count": signals_count,
-        "alerts_sent": alerts_sent,
+        "markets_count": stats["markets_ingested"],
+        "signals_count": stats["signals_detected"],
+        "alerts_sent": stats["alerts_sent"],
     })
     console.print(summary)
 
@@ -388,16 +424,13 @@ def poll(interval, no_alerts, verbose):
         logger.remove()
         logger.add(sys.stderr, level="DEBUG")
 
-    # Import dependencies
-    from src.config.settings import get_settings
-    from src.db.session import get_session_factory
-    from src.api.client import PolymarketClient
-    from src.pipeline.filters import CategoryFilter
-    from src.alerts.telegram import TelegramAlerter
-    from src.cli.scheduler import run_polling_loop
-
-    # Load settings
+    # Get dependencies
     settings = get_settings()
+    session_factory, client, category_filter, alerter = _get_dependencies(settings)
+
+    # Disable alerter if --no-alerts flag is set
+    if no_alerts:
+        alerter = None
 
     # Use interval from flag if provided, else from settings
     poll_interval = interval if interval is not None else settings.poll_interval_minutes
@@ -405,19 +438,14 @@ def poll(interval, no_alerts, verbose):
     console = Console()
     console.print(f"[bold green]Starting polling loop[/bold green] (interval: {poll_interval} minutes)")
 
-    # Initialize components
-    session_factory = get_session_factory()
-    client = PolymarketClient(settings.polymarket_api_host, api_key=settings.polymarket_api_key)
-    category_filter = CategoryFilter(settings.detail_categories)
+    # Show alert status
+    if alerter:
+        console.print("[bold blue]Alerts enabled[/bold blue] (Telegram configured)")
+    else:
+        console.print("[bold yellow]Alerts disabled[/bold yellow] (Telegram not configured or --no-alerts)")
 
-    # Initialize alerter if configured and alerts not disabled
-    alerter = None
-    if not no_alerts:
-        if settings.telegram_bot_token and settings.telegram_chat_id:
-            alerter = TelegramAlerter.from_settings(settings)
-            console.print("[bold blue]Alerts enabled[/bold blue] (Telegram configured)")
-        else:
-            console.print("[bold yellow]Alerts disabled[/bold yellow] (Telegram not configured)")
+    # Import scheduler
+    from src.cli.scheduler import run_polling_loop
 
     # Run polling loop (blocks until SIGINT/SIGTERM)
     run_polling_loop(session_factory, client, category_filter, alerter, interval_minutes=poll_interval)
