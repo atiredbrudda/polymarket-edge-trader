@@ -18,7 +18,7 @@ Decimal phases appear between their surrounding integers in numeric order.
 - [x] **Phase 4: Scoring Engine** - Specialization depth and expertise calculation
 - [x] **Phase 5: Signal Detection** - Consensus identification and herding filters
 - [x] **Phase 6: Alerting System** - Multi-channel alert delivery
-- [ ] **Phase 7: CLI Interface** - User commands and presentation layer
+- [x] **Phase 7: CLI Interface** - User commands and presentation layer
 
 ## Phase Details
 
@@ -133,10 +133,12 @@ Plans:
   3. User can view current consensus signals ranked by confidence score
   4. User can view ranked leaderboards of eSports experts per game niche
   5. User can trigger manual market sweeps and automated hourly polling runs
-**Plans**: TBD
+**Plans**: 3 plans
 
 Plans:
-- [ ] TBD during planning
+- [x] 07-01-PLAN.md — CLI formatters and Click commands (TDD)
+- [x] 07-02-PLAN.md — Sweep orchestration and polling loop
+- [x] 07-03-PLAN.md — Dependency wiring and entry point
 
 ## Progress
 
@@ -151,4 +153,4 @@ Phases execute in numeric order: 1 -> 2 -> 3 -> 4 -> 5 -> 6 -> 7
 | 4. Scoring Engine | 3/3 | Complete | 2026-02-06 |
 | 5. Signal Detection | 3/3 | Complete | 2026-02-07 |
 | 6. Alerting System | 3/3 | Complete | 2026-02-11 |
-| 7. CLI Interface | 0/TBD | Not started | - |
+| 7. CLI Interface | 3/3 | Complete | 2026-02-11 |
