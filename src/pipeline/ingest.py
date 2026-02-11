@@ -728,6 +728,30 @@ class IngestionPipeline:
 
         return stats
 
+    def ingest_trader_history_hybrid(
+        self,
+        trader_address: str,
+        prefer_blockchain: bool = True,
+    ) -> dict:
+        """Ingest trader history using best available source.
+
+        If blockchain client is available and prefer_blockchain=True,
+        uses blockchain (complete history). Otherwise falls back to API.
+
+        Args:
+            trader_address: Trader wallet address
+            prefer_blockchain: Whether to prefer blockchain over API
+
+        Returns:
+            Stats dict from the chosen ingestion method
+        """
+        if prefer_blockchain and self.blockchain_client:
+            logger.info(f"Using blockchain source for {trader_address[:8]}...")
+            return self.ingest_trader_history_blockchain(trader_address)
+        else:
+            logger.info(f"Using API source for {trader_address[:8]}...")
+            return self.ingest_trader_history(trader_address)
+
     def run_full_sweep(self) -> dict:
         """Execute complete ingestion sweep.
 
