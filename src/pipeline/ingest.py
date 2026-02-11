@@ -752,13 +752,17 @@ class IngestionPipeline:
             logger.info(f"Using API source for {trader_address[:8]}...")
             return self.ingest_trader_history(trader_address)
 
-    def run_full_sweep(self) -> dict:
+    def run_full_sweep(self, use_blockchain: bool = False) -> dict:
         """Execute complete ingestion sweep.
 
         Steps:
         1. Ingest all active markets
         2. Discover traders from markets with detail categories
         3. Backfill history for newly discovered traders
+
+        Args:
+            use_blockchain: If True and blockchain_client configured,
+                          use blockchain for trader backfill
 
         Returns:
             Overall stats dict with keys:
@@ -828,9 +832,13 @@ class IngestionPipeline:
 
             for trader in traders_to_backfill:
                 try:
-                    stats = self.ingest_trader_history(trader.address)
-                    overall_stats["trades_stored"] += stats["detail_count"]
-                    overall_stats["summaries_created"] += stats["summary_count"]
+                    if use_blockchain and self.blockchain_client:
+                        stats = self.ingest_trader_history_blockchain(trader.address)
+                    else:
+                        stats = self.ingest_trader_history(trader.address)
+
+                    overall_stats["trades_stored"] += stats.get("detail_count", 0)
+                    overall_stats["summaries_created"] += stats.get("summary_count", 0)
                 except Exception as e:
                     logger.error(
                         f"Failed to backfill trader {trader.address[:8]}...: {e}"
