@@ -143,7 +143,7 @@ Plans:
 ## Progress
 
 **Execution Order:**
-Phases execute in numeric order: 1 -> 2 -> 3 -> 4 -> 5 -> 6 -> 7
+Phases execute in numeric order: 1 -> 2 -> 3 -> 4 -> 5 -> 6 -> 7 -> 8
 
 | Phase | Plans Complete | Status | Completed |
 |-------|----------------|--------|-----------|
@@ -154,13 +154,20 @@ Phases execute in numeric order: 1 -> 2 -> 3 -> 4 -> 5 -> 6 -> 7
 | 5. Signal Detection | 3/3 | Complete | 2026-02-07 |
 | 6. Alerting System | 3/3 | Complete | 2026-02-11 |
 | 7. CLI Interface | 3/3 | Complete | 2026-02-11 |
+| 8. Blockchain History | 2/2 | Complete | 2026-02-11 |
 
 ### Phase 8: Complete Trader History via Blockchain
 
 **Goal:** Eliminate 100-trade API limitation via blockchain indexing for complete trader histories
 **Depends on:** Phase 7
 **Plans:** 2 plans
+**Success Criteria** (what must be TRUE):
+  1. System queries Polygon blockchain directly for complete trader histories (no 100-trade limit)
+  2. Incremental sync tracks last_queried_block to prevent re-scanning entire blockchain
+  3. Cross-source deduplication prevents duplicate trades from API and blockchain
+  4. Hybrid approach maintains API for discovery, blockchain for complete backfill
+  5. Integration preserves existing category routing and summary aggregation
 
 Plans:
-- [ ] 08-01-PLAN.md — Blockchain client with OrderFilled event querying (TDD)
-- [ ] 08-02-PLAN.md — Pipeline integration with incremental sync and deduplication
+- [x] 08-01-PLAN.md — Blockchain client with OrderFilled event querying (TDD)
+- [x] 08-02-PLAN.md — Pipeline integration with incremental sync and deduplication
