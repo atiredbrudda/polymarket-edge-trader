@@ -154,3 +154,13 @@ Phases execute in numeric order: 1 -> 2 -> 3 -> 4 -> 5 -> 6 -> 7
 | 5. Signal Detection | 3/3 | Complete | 2026-02-07 |
 | 6. Alerting System | 3/3 | Complete | 2026-02-11 |
 | 7. CLI Interface | 3/3 | Complete | 2026-02-11 |
+
+### Phase 8: Complete Trader History via Blockchain
+
+**Goal:** Eliminate 100-trade API limitation via blockchain indexing for complete trader histories
+**Depends on:** Phase 7
+**Plans:** 2 plans
+
+Plans:
+- [ ] 08-01-PLAN.md — Blockchain client with OrderFilled event querying (TDD)
+- [ ] 08-02-PLAN.md — Pipeline integration with incremental sync and deduplication

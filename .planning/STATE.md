@@ -5,23 +5,23 @@
 See: .planning/PROJECT.md (updated 2026-02-05)
 
 **Core value:** Surface where smart money is moving in eSports markets so the user can see what informed traders are doing and factor that into their own thinking.
-**Current focus:** Milestone v1.0 COMPLETE - All phases finished
+**Current focus:** Phase 8 - Complete trader history via blockchain indexing
 
 ## Current Position
 
-Phase: 7 of 7 (CLI Interface)
-Plan: 3 of 3 complete
-Status: Complete
-Last activity: 2026-02-11 — Plan 07-03 complete (CLI wiring with real dependencies)
+Phase: 8 of 8 (Complete Trader History via Blockchain)
+Plan: 1 of 2 complete
+Status: In Progress
+Last activity: 2026-02-11 — Plan 08-01 complete (Blockchain indexing layer)
 
-Progress: [█████░░░░░] 65% (24/37 total plans complete)
+Progress: [█████░░░░░] 68% (25/37 total plans complete)
 
 ## Performance Metrics
 
 **Velocity:**
-- Total plans completed: 23
-- Average duration: 4.73 min
-- Total execution time: 1.81 hours
+- Total plans completed: 25
+- Average duration: 4.78 min
+- Total execution time: 1.95 hours
 
 **By Phase:**
 
@@ -34,12 +34,13 @@ Progress: [█████░░░░░] 65% (24/37 total plans complete)
 | 5 - Signal Detection | 3/3 | 16min | 5.33min |
 | 6 - Alerting System | 3/3 | 14.71min | 4.90min |
 | 7 - CLI Interface | 3/3 | 11.99min | 4.00min |
+| 8 - Blockchain History | 1/2 | 7.57min | 7.57min |
 
 **Recent Trend:**
-- Last 5 plans: 3.83min (06-02), 5.38min (06-03), 4.78min (07-01), 3.55min (07-02), 3.66min (07-03)
-- Trend: Phase 7 COMPLETE at 4.00min avg - consistent fast execution across CLI phase
-- Phase 6 COMPLETE: All 3 plans done - signal detection, formatting, Telegram integration
+- Last 5 plans: 5.38min (06-03), 4.78min (07-01), 3.55min (07-02), 3.66min (07-03), 7.57min (08-01)
+- Trend: Phase 8 started - blockchain indexing layer complete with web3.py integration
 - Phase 7 COMPLETE: All 3 plans done - formatters, orchestration, dependency wiring
+- Phase 8 IN PROGRESS: 1/2 plans done - blockchain client operational
 
 *Updated after each plan completion*
 
@@ -139,6 +140,15 @@ Recent decisions affecting current work:
 - **[07-03] Dependency injection helper:** _get_dependencies() centralizes initialization of engine, session factory, API client, category filter, and alerter
 - **[07-03] Auto-create tables on access:** Base.metadata.create_all on every CLI command invocation (idempotent, handles first run gracefully)
 - **[07-03] Graceful Telegram initialization:** TelegramAlerter.from_settings() wrapped in try/except, logs warning on missing credentials
+- **[08-01] Public Polygon RPC default:** Uses free https://polygon-rpc.com by default, configurable via POLYGON_RPC_URL env var for Alchemy/Infura in production
+- **[08-01] 1000-block chunk size:** Balances RPC provider limits with request count, configurable via blockchain_batch_size setting
+- **[08-01] Synchronous blockchain queries:** Simpler implementation than async, sufficient throughput for v1, future async enhancement path available
+- **[08-01] web3.py contract interface:** Type-safe event decoding following Jon Becker's proven approach, handles edge cases robustly
+- **[08-01] Dual contract support:** Always queries both CTF Exchange and NegRisk CTF Exchange for complete Polymarket coverage
+
+### Roadmap Evolution
+
+- Phase 8 added: Complete Trader History via Blockchain
 
 ### Pending Todos
 
@@ -236,9 +246,22 @@ None yet.
 - Total project tests: 438 (all passing)
 - Tool ready for production use
 
+**Phase 8 (Complete Trader History via Blockchain):**
+- IN PROGRESS - 1 of 2 plans complete
+- ✓ [08-01] Blockchain indexing layer complete - PolygonBlockchainClient with web3.py event decoding (25 tests)
+- BlockchainTrade model: is_buy, price, size, side properties with API compatibility
+- Event decoder: OrderFilled ABI, CTF Exchange + NegRisk CTF Exchange constants
+- PolygonBlockchainClient: get_trades_by_trader() for unlimited history, block pagination, retry logic
+- Dual contract support: CTF Exchange (0x4bFb41...) and NegRisk CTF Exchange (0xC5d563...)
+- Configuration: polygon_rpc_url, blockchain_batch_size, retry settings
+- Connection verified: Successfully connected to Polygon mainnet at block 82861269
+- Phase 8 tests: 25 (all passing)
+- Total project tests: 463 (449 passing - 9 pre-existing API test failures, 5 new blockchain integration tests pending)
+- Next: Plan 08-02 - Blockchain sync state and incremental updates
+
 ## Session Continuity
 
 Last session: 2026-02-11
-Stopped at: Phase 7 execution complete, all plans verified
+Stopped at: Phase 8 Plan 08-01 complete - blockchain indexing layer operational
 Resume file: None
-Next: Milestone v1.0 COMPLETE - All 7 phases finished, tool operational
+Next: Execute Plan 08-02 - Blockchain sync state persistence and incremental update logic
