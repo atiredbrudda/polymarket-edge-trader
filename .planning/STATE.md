@@ -10,11 +10,11 @@ See: .planning/PROJECT.md (updated 2026-02-05)
 ## Current Position
 
 Phase: 7 of 7 (CLI Interface)
-Plan: 2 of 3 complete
-Status: In progress
-Last activity: 2026-02-11 — Plan 07-02 complete (Scheduled polling with orchestration)
+Plan: 3 of 3 complete
+Status: Complete
+Last activity: 2026-02-11 — Plan 07-03 complete (CLI wiring with real dependencies)
 
-Progress: [█████░░░░░] 62% (23/37 total plans complete)
+Progress: [█████░░░░░] 65% (24/37 total plans complete)
 
 ## Performance Metrics
 
@@ -33,13 +33,13 @@ Progress: [█████░░░░░] 62% (23/37 total plans complete)
 | 4 - Scoring Engine | 3/3 | 13.4min | 4.47min |
 | 5 - Signal Detection | 3/3 | 16min | 5.33min |
 | 6 - Alerting System | 3/3 | 14.71min | 4.90min |
-| 7 - CLI Interface | 2/3 | 8.33min | 4.17min |
+| 7 - CLI Interface | 3/3 | 11.99min | 4.00min |
 
 **Recent Trend:**
-- Last 5 plans: 5.5min (06-01), 3.83min (06-02), 5.38min (06-03), 4.78min (07-01), 3.55min (07-02)
-- Trend: Phase 7 accelerating (4.78min → 3.55min), orchestration simpler than expected
+- Last 5 plans: 3.83min (06-02), 5.38min (06-03), 4.78min (07-01), 3.55min (07-02), 3.66min (07-03)
+- Trend: Phase 7 COMPLETE at 4.00min avg - consistent fast execution across CLI phase
 - Phase 6 COMPLETE: All 3 plans done - signal detection, formatting, Telegram integration
-- Phase 7 IN PROGRESS: CLI formatters, commands, and polling orchestration complete
+- Phase 7 COMPLETE: All 3 plans done - formatters, orchestration, dependency wiring
 
 *Updated after each plan completion*
 
@@ -136,6 +136,9 @@ Recent decisions affecting current work:
 - **[07-02] Graceful sleep:** Break sleep into 1-second intervals with shutdown check (enables fast shutdown response)
 - **[07-02] Stats dict return:** run_sweep returns comprehensive stats dict for monitoring and testing
 - **[07-02] Optional alerter:** Alerting optional via alerter=None or skip_alerts=True (enables dry-run mode)
+- **[07-03] Dependency injection helper:** _get_dependencies() centralizes initialization of engine, session factory, API client, category filter, and alerter
+- **[07-03] Auto-create tables on access:** Base.metadata.create_all on every CLI command invocation (idempotent, handles first run gracefully)
+- **[07-03] Graceful Telegram initialization:** TelegramAlerter.from_settings() wrapped in try/except, logs warning on missing credentials
 
 ### Pending Todos
 
@@ -214,22 +217,28 @@ None yet.
 - Ready for Phase 7 (Scheduled Delivery & CLI)
 
 **Phase 7 (CLI Interface):**
+- ✓ COMPLETE - All 3 plans finished
 - ✓ [07-01] CLI formatters and commands complete - pure Rich formatters, Click commands with partial address matching (28 tests)
 - ✓ [07-02] Sweep orchestration and polling loop complete - run_sweep chains all stages, run_polling_loop with graceful shutdown (9 tests)
+- ✓ [07-03] Dependency wiring complete - _get_dependencies() helper, auto-create tables, graceful Telegram init
 - Pure formatters: truncate_address, format_markets_table, format_trader_profile, format_signals_table, format_leaderboard_table, format_sweep_summary
-- Click commands: markets, trader, signals, leaderboard, sweep, poll
+- Click commands: markets, trader, signals, leaderboard, sweep, poll (all wired to real dependencies)
 - Scheduler functions: run_sweep (single pipeline pass), run_polling_loop (automated repeating sweep)
+- Dependency injection: _get_dependencies() creates engine, session factory, API client, category filter, alerter
+- Database auto-creates tables on first CLI command via Base.metadata.create_all
+- Console scripts entry point: polymarket command accessible after pip install -e .
 - Continue-on-failure: Each stage wrapped in try/except, failures logged without blocking
 - Global shutdown flag with SIGINT/SIGTERM handlers for graceful termination
 - Dense one-line cycle logging for operational monitoring
 - Optional alerting via alerter=None or skip_alerts=True flag
-- Phase 7 tests (so far): 37 (28 from 07-01 + 9 from 07-02)
-- Total project tests: 438 (401 pre-Phase 7 + 37 Phase 7)
-- Next: 07-03 (Integration tests and documentation)
+- Graceful Telegram handling: warnings on missing credentials, doesn't prevent CLI operation
+- Phase 7 tests: 37 (28 from 07-01 + 9 from 07-02)
+- Total project tests: 438 (all passing)
+- Tool ready for production use
 
 ## Session Continuity
 
-Last session: 2026-02-11
-Stopped at: Phase 7 Plan 07-02 complete (Scheduled polling with orchestration)
+Last session: 2026-02-11T02:50:08Z
+Stopped at: Phase 7 Plan 07-03 complete (CLI wiring with real dependencies)
 Resume file: None
-Next: Phase 7 Plan 07-03 - Integration tests and documentation for complete CLI system
+Next: All planned phases complete - tool ready for production use
