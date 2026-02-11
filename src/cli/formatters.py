@@ -1,0 +1,274 @@
+"""Pure formatter functions for CLI output.
+
+All formatters are pure functions that take data objects and return Rich renderables
+(Tables, Panels, Groups). No database access or side effects.
+
+Formatters:
+- truncate_address: Shorten wallet addresses for display
+- format_markets_table: Display markets in a table
+- format_trader_profile: Display trader summary with sections
+- format_signals_table: Display expert consensus signals
+- format_leaderboard_table: Display game leaderboard rankings
+- format_sweep_summary: Display sweep operation results
+"""
+
+from decimal import Decimal
+
+from rich.table import Table
+from rich.panel import Panel
+from rich.console import Group
+from rich.text import Text
+
+
+def truncate_address(address: str) -> str:
+    """Truncate wallet address for display.
+
+    Args:
+        address: Wallet address string
+
+    Returns:
+        Truncated address (first 6 + last 4 chars) if > 10 chars,
+        otherwise returns full address
+
+    Example:
+        >>> truncate_address("0xAbCdEf1234567890AbCdEf1234567890AbCdEf12")
+        '0xAbCd...Ef12'
+        >>> truncate_address("0x123456")
+        '0x123456'
+    """
+    if len(address) <= 10:
+        return address
+    return f"{address[:6]}...{address[-4:]}"
+
+
+def format_markets_table(markets: list) -> Table:
+    """Format markets list as a Rich Table.
+
+    Args:
+        markets: List of dicts/objects with question, slug, active fields
+
+    Returns:
+        Rich Table with columns: Market, Game, Status
+
+    Example:
+        >>> markets = [{"question": "Will Team A win?", "slug": "esports.cs2", "active": True}]
+        >>> table = format_markets_table(markets)
+    """
+    table = Table(title="Active Markets", show_header=True, header_style="bold cyan")
+    table.add_column("Market", style="white", no_wrap=False)
+    table.add_column("Game", style="yellow")
+    table.add_column("Status", style="green")
+
+    # Filter only markets with classification (slug is not None)
+    classified_markets = [m for m in markets if m.get("slug")]
+
+    for market in classified_markets:
+        question = market.get("question", "")
+        slug = market.get("slug", "")
+        active = market.get("active", False)
+        status = "active" if active else "resolved"
+
+        table.add_row(question, slug, status)
+
+    return table
+
+
+def format_trader_profile(
+    trader_address: str, summaries: list, positions: list, scores: list
+) -> Group:
+    """Format trader profile as Rich Group with multiple sections.
+
+    Args:
+        trader_address: Trader wallet address
+        summaries: List of category summaries (category, volume, trade_count)
+        positions: List of current positions (market_question, direction, size, avg_entry_price)
+        scores: List of expertise scores (game, score, percentile, specialization)
+
+    Returns:
+        Rich Group containing header panel and section tables
+
+    Example:
+        >>> profile = format_trader_profile("0xTrader123", summaries, positions, scores)
+    """
+    sections = []
+
+    # Section 1: Header panel
+    header = Panel(
+        f"[bold cyan]Trader Profile[/bold cyan]\n{truncate_address(trader_address)}",
+        border_style="cyan",
+    )
+    sections.append(header)
+
+    # Section 2: Category summary table
+    if summaries:
+        summary_table = Table(title="Category Summary", show_header=True, header_style="bold")
+        summary_table.add_column("Category", style="cyan")
+        summary_table.add_column("Volume", justify="right", style="green")
+        summary_table.add_column("Trades", justify="right", style="yellow")
+
+        for summary in summaries:
+            category = summary.get("category", "")
+            volume = summary.get("volume", Decimal("0"))
+            trade_count = summary.get("trade_count", 0)
+            summary_table.add_row(category, f"${volume:,.2f}", str(trade_count))
+
+        sections.append(summary_table)
+
+    # Section 3: Current positions table
+    if positions:
+        positions_table = Table(title="Current Positions", show_header=True, header_style="bold")
+        positions_table.add_column("Market", style="white", no_wrap=False)
+        positions_table.add_column("Direction", style="cyan")
+        positions_table.add_column("Size", justify="right", style="green")
+        positions_table.add_column("Entry Price", justify="right", style="yellow")
+
+        for position in positions:
+            market_question = position.get("market_question", "")
+            direction = position.get("direction", "")
+            size = position.get("size", Decimal("0"))
+            entry_price = position.get("avg_entry_price")
+            entry_str = f"{entry_price:.4f}" if entry_price else "N/A"
+            positions_table.add_row(market_question, direction, f"{size:,.2f}", entry_str)
+
+        sections.append(positions_table)
+
+    # Section 4: Expertise scores table
+    if scores:
+        scores_table = Table(title="Expertise Scores", show_header=True, header_style="bold")
+        scores_table.add_column("Game", style="cyan")
+        scores_table.add_column("Score", justify="right", style="green")
+        scores_table.add_column("Percentile", justify="right", style="yellow")
+        scores_table.add_column("Specialization", style="magenta")
+
+        for score in scores:
+            game = score.get("game", "")
+            raw_score = score.get("score", Decimal("0"))
+            percentile = score.get("percentile", Decimal("0"))
+            specialization = score.get("specialization", "")
+            scores_table.add_row(
+                game, f"{raw_score:.1f}", f"{percentile:.0f}", specialization
+            )
+
+        sections.append(scores_table)
+
+    return Group(*sections)
+
+
+def format_signals_table(signals: list) -> Table:
+    """Format signals list as a Rich Table.
+
+    Args:
+        signals: List of dicts with market_question, direction, confidence,
+                 expert_count, first_mover_address fields
+
+    Returns:
+        Rich Table with columns: Market, Direction, Confidence, Experts, First Mover
+
+    Example:
+        >>> signals = [{"market_question": "Will Team A win?", "direction": "LONG", ...}]
+        >>> table = format_signals_table(signals)
+    """
+    table = Table(title="Expert Signals", show_header=True, header_style="bold cyan")
+    table.add_column("Market", style="white", no_wrap=False)
+    table.add_column("Direction", style="cyan")
+    table.add_column("Confidence", justify="right", style="green")
+    table.add_column("Experts", justify="right", style="yellow")
+    table.add_column("First Mover", style="magenta")
+
+    for signal in signals:
+        market_question = signal.get("market_question", "")
+        direction = signal.get("direction", "")
+        confidence = signal.get("confidence", Decimal("0"))
+        expert_count = signal.get("expert_count", 0)
+        first_mover = signal.get("first_mover_address")
+
+        # Format confidence as percentage with color hint
+        confidence_pct = f"{confidence:.1f}%"
+        if confidence >= 80:
+            confidence_display = f"[bold green]{confidence_pct}[/bold green]"
+        elif confidence >= 60:
+            confidence_display = f"[green]{confidence_pct}[/green]"
+        else:
+            confidence_display = f"[yellow]{confidence_pct}[/yellow]"
+
+        # Truncate first mover address
+        first_mover_display = truncate_address(first_mover) if first_mover else "N/A"
+
+        table.add_row(
+            market_question,
+            direction,
+            Text.from_markup(confidence_display),
+            str(expert_count),
+            first_mover_display,
+        )
+
+    return table
+
+
+def format_leaderboard_table(entries: list, game_slug: str) -> Table:
+    """Format leaderboard entries as a Rich Table.
+
+    Args:
+        entries: List of dicts with rank, trader_address, score, win_rate fields
+        game_slug: Game identifier for table title
+
+    Returns:
+        Rich Table with columns: Rank, Trader, Score, Win Rate
+
+    Example:
+        >>> entries = [{"rank": 1, "trader_address": "0xTrader123", "score": 95.5, ...}]
+        >>> table = format_leaderboard_table(entries, "esports.cs2")
+    """
+    table = Table(
+        title=f"Leaderboard: {game_slug}", show_header=True, header_style="bold cyan"
+    )
+    table.add_column("Rank", justify="right", style="cyan")
+    table.add_column("Trader", style="white")
+    table.add_column("Score", justify="right", style="green")
+    table.add_column("Win Rate", justify="right", style="yellow")
+
+    for entry in entries:
+        rank = entry.get("rank", 0)
+        trader_address = entry.get("trader_address", "")
+        score = entry.get("score", Decimal("0"))
+        win_rate = entry.get("win_rate", Decimal("0"))
+
+        # Format win rate as percentage
+        win_rate_pct = float(win_rate) * 100
+
+        table.add_row(
+            str(rank),
+            truncate_address(trader_address),
+            f"{score:.1f}",
+            f"{win_rate_pct:.1f}%",
+        )
+
+    return table
+
+
+def format_sweep_summary(results: dict) -> Panel:
+    """Format sweep operation results as a Rich Panel.
+
+    Args:
+        results: Dict with processing_time, markets_count, signals_count, alerts_sent
+
+    Returns:
+        Rich Panel with summary stats
+
+    Example:
+        >>> results = {"processing_time": 12.5, "markets_count": 42, ...}
+        >>> panel = format_sweep_summary(results)
+    """
+    processing_time = results.get("processing_time", 0.0)
+    markets_count = results.get("markets_count", 0)
+    signals_count = results.get("signals_count", 0)
+    alerts_sent = results.get("alerts_sent", 0)
+
+    content = f"""[bold green]Sweep Complete[/bold green]
+
+Processing Time: {processing_time:.1f}s
+Markets Scanned: {markets_count}
+Signals Detected: {signals_count}
+Alerts Sent: {alerts_sent}"""
+
+    return Panel(content, border_style="green", title="Sweep Summary")
