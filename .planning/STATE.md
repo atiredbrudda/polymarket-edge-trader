@@ -10,18 +10,18 @@ See: .planning/PROJECT.md (updated 2026-02-05)
 ## Current Position
 
 Phase: 6 of 7 (Alerting System)
-Plan: 2 of 3 complete
-Status: Phase 6 in progress
-Last activity: 2026-02-08 — Plan 06-02 complete (Telegram HTML alert formatter)
+Plan: 3 of 3 complete
+Status: Phase 6 complete
+Last activity: 2026-02-11 — Plan 06-03 complete (Telegram bot integration & delivery pipeline)
 
-Progress: [█████░░░░░] 54% (20/37 total plans complete)
+Progress: [█████░░░░░] 57% (21/37 total plans complete)
 
 ## Performance Metrics
 
 **Velocity:**
-- Total plans completed: 20
-- Average duration: 4.74 min
-- Total execution time: 1.58 hours
+- Total plans completed: 21
+- Average duration: 4.78 min
+- Total execution time: 1.67 hours
 
 **By Phase:**
 
@@ -32,12 +32,12 @@ Progress: [█████░░░░░] 54% (20/37 total plans complete)
 | 3 - Historical Evaluation | 5/5 | 19.45min | 3.89min |
 | 4 - Scoring Engine | 3/3 | 13.4min | 4.47min |
 | 5 - Signal Detection | 3/3 | 16min | 5.33min |
-| 6 - Alerting System | 2/3 | 9.33min | 4.67min |
+| 6 - Alerting System | 3/3 | 14.71min | 4.90min |
 
 **Recent Trend:**
-- Last 5 plans: 5.5min (05-01), 4.5min (05-02), 6min (05-03), 5.5min (06-01), 3.83min (06-02)
-- Trend: TDD + pure functions consistently fast (3.8-6min), Phase 6 off to strong start
-- Phase 6 in progress: 2/3 plans complete - signal event detection + alert formatter done
+- Last 5 plans: 4.5min (05-02), 6min (05-03), 5.5min (06-01), 3.83min (06-02), 5.38min (06-03)
+- Trend: TDD + pure functions consistently fast (3.8-6min), Phase 6 complete at 4.90min average
+- Phase 6 COMPLETE: All 3 plans done - signal detection, formatting, Telegram integration
 
 *Updated after each plan completion*
 
@@ -119,6 +119,9 @@ Recent decisions affecting current work:
 - **[05-03] Signal lost detection:** Create inactive snapshot when consensus drops, preserves append-only history for Phase 6 delta analysis
 - **[05-03] Herding stub deferred:** assess_herding returns "not_analyzed" per user decision in CONTEXT.md
 - **[05-03] Time-window filtering at query layer:** get_ranked_signals filters by expert activity windows for 1h/6h/24h views
+- **[06-03] In-memory TTL deduplication:** Dict-based cache with cleanup on each check, no background thread or persistence needed
+- **[06-03] Graceful failure handling:** Log error + continue pipeline, don't block other alerts (best-effort delivery)
+- **[06-03] Fixed retry parameters:** 5 attempts, 2-60s exponential backoff matching Settings defaults (tenacity decorator limitation)
 
 ### Pending Todos
 
@@ -182,21 +185,23 @@ None yet.
 - Ready for Phase 6 (Alerting & Delivery)
 
 **Phase 6 (Alerting System):**
-- IN PROGRESS - 2/3 plans complete
+- ✓ COMPLETE - All 3 plans finished
 - ✓ [06-01] Signal event detection complete - NEW/STRENGTHENING/WEAKENING/LOST classification (12 tests)
 - ✓ [06-02] Alert formatter complete - Telegram HTML with event headers, HTML escaping, address truncation (16 tests)
+- ✓ [06-03] Telegram bot integration complete - delivery pipeline, deduplication, retry logic (11 tests)
 - Event detection: compare latest snapshots to detect state changes in signals
 - Formatter: pure function producing rich Telegram HTML messages
-- HTML escaping: html.escape() for all user-generated content (market questions, addresses)
-- Address truncation: first 10 chars + ... + last 6 chars for readability
-- Extended metadata: first mover, fast follower count, expert addresses (first 5 + N more), position sizes
-- Phase 6 tests so far: 28 (12 from 06-01, 16 from 06-02)
-- Total project tests: 390 (362 pre-Phase 6 + 28 Phase 6)
-- Next: Phase 6 plan 3 (Telegram Bot Integration)
+- Delivery pipeline: end-to-end orchestration from signals to Telegram messages
+- TelegramAlerter: exponential backoff retry (5 attempts, 2-60s wait) with tenacity
+- AlertDeduplicator: in-memory TTL cache (60min default) prevents duplicate alerts
+- Graceful failure handling: log errors, continue pipeline, don't block other alerts
+- Phase 6 tests: 39 (12 from 06-01, 16 from 06-02, 11 from 06-03)
+- Total project tests: 401 (362 pre-Phase 6 + 39 Phase 6)
+- Ready for Phase 7 (Scheduled Delivery & CLI)
 
 ## Session Continuity
 
-Last session: 2026-02-08
-Stopped at: Completed 06-02-PLAN.md
+Last session: 2026-02-11
+Stopped at: Completed 06-03-PLAN.md
 Resume file: None
-Next: Phase 6 plan 3 (Telegram Bot Integration) - bot setup, retry logic, delivery confirmation
+Next: Phase 7 (Scheduled Delivery & CLI) - periodic alert delivery, CLI commands, cron integration
