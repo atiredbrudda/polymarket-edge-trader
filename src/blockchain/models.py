@@ -67,7 +67,7 @@ class BlockchainTrade:
             "side": self.side,
             "size": str(self.size),
             "price": str(self.price),
-            "timestamp": self.timestamp.timestamp() if self.timestamp else 0,
+            "timestamp": int(self.timestamp.timestamp()) if self.timestamp else 0,
             "asset_ticker": self.extract_outcome_name(),
         }
 
