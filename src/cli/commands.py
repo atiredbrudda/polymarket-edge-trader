@@ -6,6 +6,7 @@ Commands:
 - signals: Show expert consensus signals
 - leaderboard: Display game leaderboard rankings
 - sweep: Run signal detection sweep
+- poll: Run automated polling loop
 
 All commands delegate formatting to src.cli.formatters for clean separation.
 """
@@ -366,6 +367,60 @@ def sweep(window, verbose):
         "alerts_sent": alerts_sent,
     })
     console.print(summary)
+
+
+@cli.command()
+@click.option("--interval", "-i", default=None, type=int, help="Polling interval in minutes")
+@click.option("--no-alerts", is_flag=True, help="Skip alert delivery")
+@click.option("--verbose", "-v", is_flag=True, help="Enable debug logging")
+def poll(interval, no_alerts, verbose):
+    """Run automated polling loop.
+
+    Executes full sweep (ingest → score → detect → alert) at regular intervals.
+    Press Ctrl+C for graceful shutdown.
+
+    Example:
+        polymarket poll
+        polymarket poll --interval 30
+        polymarket poll --no-alerts
+    """
+    if verbose:
+        logger.remove()
+        logger.add(sys.stderr, level="DEBUG")
+
+    # Import dependencies
+    from src.config.settings import get_settings
+    from src.db.session import get_session_factory
+    from src.api.client import PolymarketClient
+    from src.pipeline.filters import CategoryFilter
+    from src.alerts.telegram import TelegramAlerter
+    from src.cli.scheduler import run_polling_loop
+
+    # Load settings
+    settings = get_settings()
+
+    # Use interval from flag if provided, else from settings
+    poll_interval = interval if interval is not None else settings.poll_interval_minutes
+
+    console = Console()
+    console.print(f"[bold green]Starting polling loop[/bold green] (interval: {poll_interval} minutes)")
+
+    # Initialize components
+    session_factory = get_session_factory()
+    client = PolymarketClient(settings.polymarket_api_host, api_key=settings.polymarket_api_key)
+    category_filter = CategoryFilter(settings.detail_categories)
+
+    # Initialize alerter if configured and alerts not disabled
+    alerter = None
+    if not no_alerts:
+        if settings.telegram_bot_token and settings.telegram_chat_id:
+            alerter = TelegramAlerter.from_settings(settings)
+            console.print("[bold blue]Alerts enabled[/bold blue] (Telegram configured)")
+        else:
+            console.print("[bold yellow]Alerts disabled[/bold yellow] (Telegram not configured)")
+
+    # Run polling loop (blocks until SIGINT/SIGTERM)
+    run_polling_loop(session_factory, client, category_filter, alerter, interval_minutes=poll_interval)
 
 
 if __name__ == "__main__":
