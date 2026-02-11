@@ -10,18 +10,18 @@ See: .planning/PROJECT.md (updated 2026-02-05)
 ## Current Position
 
 Phase: 8 of 8 (Complete Trader History via Blockchain)
-Plan: 1 of 2 complete
-Status: In Progress
-Last activity: 2026-02-11 — Plan 08-01 complete (Blockchain indexing layer)
+Plan: 2 of 2 complete
+Status: Complete
+Last activity: 2026-02-12 — Plan 08-02 complete (Blockchain pipeline integration)
 
-Progress: [█████░░░░░] 68% (25/37 total plans complete)
+Progress: [█████████░] 70% (26/37 total plans complete)
 
 ## Performance Metrics
 
 **Velocity:**
-- Total plans completed: 25
-- Average duration: 4.78 min
-- Total execution time: 1.95 hours
+- Total plans completed: 26
+- Average duration: 4.93 min
+- Total execution time: 2.08 hours
 
 **By Phase:**
 
@@ -34,13 +34,13 @@ Progress: [█████░░░░░] 68% (25/37 total plans complete)
 | 5 - Signal Detection | 3/3 | 16min | 5.33min |
 | 6 - Alerting System | 3/3 | 14.71min | 4.90min |
 | 7 - CLI Interface | 3/3 | 11.99min | 4.00min |
-| 8 - Blockchain History | 1/2 | 7.57min | 7.57min |
+| 8 - Blockchain History | 2/2 | 14.35min | 7.18min |
 
 **Recent Trend:**
-- Last 5 plans: 5.38min (06-03), 4.78min (07-01), 3.55min (07-02), 3.66min (07-03), 7.57min (08-01)
-- Trend: Phase 8 started - blockchain indexing layer complete with web3.py integration
+- Last 5 plans: 4.78min (07-01), 3.55min (07-02), 3.66min (07-03), 7.57min (08-01), 6.78min (08-02)
+- Trend: Phase 8 COMPLETE - blockchain indexing + pipeline integration complete
 - Phase 7 COMPLETE: All 3 plans done - formatters, orchestration, dependency wiring
-- Phase 8 IN PROGRESS: 1/2 plans done - blockchain client operational
+- Phase 8 COMPLETE: 2/2 plans done - blockchain client + ingestion pipeline integration
 
 *Updated after each plan completion*
 
@@ -145,6 +145,11 @@ Recent decisions affecting current work:
 - **[08-01] Synchronous blockchain queries:** Simpler implementation than async, sufficient throughput for v1, future async enhancement path available
 - **[08-01] web3.py contract interface:** Type-safe event decoding following Jon Becker's proven approach, handles edge cases robustly
 - **[08-01] Dual contract support:** Always queries both CTF Exchange and NegRisk CTF Exchange for complete Polymarket coverage
+- **[08-02] BlockchainSyncState for incremental updates:** Tracks last_queried_block per trader to avoid re-scanning entire blockchain on subsequent syncs
+- **[08-02] Hybrid ingestion approach:** API for trader discovery (fast), blockchain for complete history backfill (no 100-trade limit)
+- **[08-02] Cross-source deduplication via trade_id:** Works for both API and blockchain trades, prevents duplicates when mixing sources
+- **[08-02] Blockchain fetches metadata from API:** Blockchain events lack human-readable data (questions, categories), so API enriches condition_id
+- **[08-02] run_full_sweep blockchain flag:** use_blockchain=False default maintains backward compatibility with existing API-based flow
 
 ### Roadmap Evolution
 
@@ -247,21 +252,25 @@ None yet.
 - Tool ready for production use
 
 **Phase 8 (Complete Trader History via Blockchain):**
-- IN PROGRESS - 1 of 2 plans complete
+- ✓ COMPLETE - 2 of 2 plans complete
 - ✓ [08-01] Blockchain indexing layer complete - PolygonBlockchainClient with web3.py event decoding (25 tests)
+- ✓ [08-02] Pipeline integration complete - BlockchainSyncState, hybrid ingestion, incremental sync (10 tests)
 - BlockchainTrade model: is_buy, price, size, side properties with API compatibility
 - Event decoder: OrderFilled ABI, CTF Exchange + NegRisk CTF Exchange constants
 - PolygonBlockchainClient: get_trades_by_trader() for unlimited history, block pagination, retry logic
 - Dual contract support: CTF Exchange (0x4bFb41...) and NegRisk CTF Exchange (0xC5d563...)
+- BlockchainSyncState: Tracks last_queried_block per trader for incremental updates
+- Hybrid ingestion: ingest_trader_history_blockchain(), ingest_trader_history_hybrid()
+- Cross-source deduplication: Works for both API and blockchain trades via trade_id
+- run_full_sweep(use_blockchain=True): Supports blockchain backfill via flag
 - Configuration: polygon_rpc_url, blockchain_batch_size, retry settings
-- Connection verified: Successfully connected to Polygon mainnet at block 82861269
-- Phase 8 tests: 25 (all passing)
-- Total project tests: 463 (449 passing - 9 pre-existing API test failures, 5 new blockchain integration tests pending)
-- Next: Plan 08-02 - Blockchain sync state and incremental updates
+- Phase 8 tests: 35 (25 from 08-01 + 10 from 08-02, all passing)
+- Total project tests: 469 (459 passing - 9 pre-existing API test failures, 1 skip)
+- Phase 8 COMPLETE: Blockchain integration operational, no 100-trade API limit
 
 ## Session Continuity
 
-Last session: 2026-02-11
-Stopped at: Phase 8 Plan 08-01 complete - blockchain indexing layer operational
+Last session: 2026-02-12
+Stopped at: Phase 8 Plan 08-02 complete - blockchain pipeline integration operational
 Resume file: None
-Next: Execute Plan 08-02 - Blockchain sync state persistence and incremental update logic
+Next: All phases complete! Ready for production deployment.
