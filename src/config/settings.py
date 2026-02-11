@@ -59,6 +59,14 @@ class Settings(BaseSettings):
     # CLI Polling Configuration (Phase 7)
     poll_interval_minutes: int = 60
 
+    # Blockchain Configuration (Phase 8)
+    polygon_rpc_url: str = "https://polygon-rpc.com"  # Public RPC default
+    blockchain_batch_size: int = 1000  # Blocks per query
+    blockchain_max_workers: int = 4  # Parallel workers (future async support)
+    blockchain_retry_attempts: int = 3
+    blockchain_retry_min_wait: float = 2.0
+    blockchain_retry_max_wait: float = 30.0
+
     # Pydantic v2 configuration
     model_config = SettingsConfigDict(
         env_file=".env",
