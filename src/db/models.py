@@ -315,3 +315,21 @@ class SignalSnapshot(Base):
         Index("ix_signal_market_computed", "market_id", "computed_at"),
         Index("ix_signal_status", "status"),
     )
+
+
+class BlockchainSyncState(Base):
+    """Tracks blockchain sync progress per trader for incremental updates.
+
+    Stores the last block queried for each trader to avoid re-scanning
+    the entire blockchain on subsequent syncs.
+    """
+
+    __tablename__ = "blockchain_sync_state"
+
+    id: Mapped[int] = mapped_column(primary_key=True, autoincrement=True)
+    trader_address: Mapped[str] = mapped_column(String(42), unique=True, nullable=False, index=True)
+    last_queried_block: Mapped[int] = mapped_column(nullable=False, default=0)
+    last_sync_at: Mapped[datetime] = mapped_column(default=datetime.utcnow, nullable=False)
+    total_trades_found: Mapped[int] = mapped_column(default=0, nullable=False)
+
+    __table_args__ = (Index("ix_sync_state_trader", "trader_address", unique=True),)
