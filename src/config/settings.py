@@ -54,6 +54,9 @@ class Settings(BaseSettings):
     alert_retry_max_wait: float = 60.0
     alert_dedup_ttl_minutes: int = 60
 
+    # CLI Polling Configuration (Phase 7)
+    poll_interval_minutes: int = 60
+
     # Pydantic v2 configuration
     model_config = SettingsConfigDict(
         env_file=".env",
