@@ -30,6 +30,7 @@ polymarket = "src.cli.commands:cli"
 dev = [
     "pytest>=8.0",
     "pytest-cov",
+    "pytest-mock",
 ]
 
 [tool.setuptools.packages.find]
