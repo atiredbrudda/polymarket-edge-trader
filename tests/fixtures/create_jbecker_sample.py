@@ -37,6 +37,9 @@ def generate_jbecker_sample():
     # Known trader addresses for testing
     trader_xero = "0xeffd76b6a4318d50c6f71a16b276c5b279445a86"
     trader_other = "0xeefa8eb0568f7cbd57d85e99f61c92dcc57a23b2"
+    # Additional traders to avoid double-counting
+    trader_3 = "0x1234567890abcdef1234567890abcdef12345678"
+    trader_4 = "0xabcdefabcdefabcdefabcdefabcdefabcdefabcd"
 
     # Base timestamp: 2024-01-01 00:00:00 UTC
     base_timestamp = 1704067200
@@ -52,10 +55,14 @@ def generate_jbecker_sample():
     # Generate 100 trades
     trades = []
     for i in range(100):
-        # Alternate between traders (50 each)
-        is_xero = i < 50
-        maker = trader_xero if is_xero else trader_other
-        taker = trader_other if is_xero else trader_xero
+        # First 50: trader_xero as maker, traders 3/4 as taker
+        # Next 50: trader_other as maker, traders 3/4 as taker
+        if i < 50:
+            maker = trader_xero
+            taker = trader_3 if i % 2 == 0 else trader_4
+        else:
+            maker = trader_other
+            taker = trader_3 if i % 2 == 0 else trader_4
 
         # Alternating BUY/SELL
         side = "BUY" if i % 2 == 0 else "SELL"
