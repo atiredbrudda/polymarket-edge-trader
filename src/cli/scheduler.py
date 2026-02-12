@@ -17,6 +17,8 @@ Design principles:
 
 import signal
 import time
+import random
+from pathlib import Path
 from datetime import datetime, UTC
 from decimal import Decimal
 
@@ -30,6 +32,140 @@ from src.pipeline.scoring_pipeline import compute_all_game_scores
 from src.signals.pipeline import refresh_all_signals
 from src.alerts.delivery import deliver_signal_alerts
 from src.alerts.telegram import TelegramAlerter
+from src.db.models import Market, Trade, ExpertiseScore
+
+
+def _generate_sweep_debug_report(session_factory: sessionmaker, stats: dict) -> None:
+    """Generate debug report after sweep for testing/monitoring.
+
+    Creates logs/last_sweep_debug.md with:
+    - Markets scanned
+    - List of traders involved
+    - Random 3 traders with their trade history and scores
+
+    Args:
+        session_factory: SQLAlchemy session factory
+        stats: Stats dict from run_sweep
+    """
+    try:
+        with session_factory() as session:
+            # Get recent markets
+            markets = session.query(Market).order_by(Market.id.desc()).limit(10).all()
+
+            # Get all traders with trades (from last sweep)
+            traders_with_trades = (
+                session.query(Trade.trader_address)
+                .distinct()
+                .order_by(Trade.id.desc())
+                .limit(100)
+                .all()
+            )
+            trader_addresses = [t[0] for t in traders_with_trades]
+
+            # Pick random 3 traders
+            sample_size = min(3, len(trader_addresses))
+            sample_traders = random.sample(trader_addresses, sample_size) if trader_addresses else []
+
+            # Build report
+            report_lines = [
+                "# Sweep Debug Report",
+                f"**Generated:** {datetime.now(UTC).strftime('%Y-%m-%d %H:%M:%S UTC')}",
+                "",
+                "## Sweep Summary",
+                f"- Markets ingested: {stats.get('markets_ingested', 0)}",
+                f"- Traders discovered: {stats.get('traders_discovered', 0)}",
+                f"- Scores computed: {stats.get('scores_computed', 0)}",
+                f"- Signals detected: {stats.get('signals_detected', 0)}",
+                f"- Duration: {stats.get('duration_seconds', 0):.1f}s",
+                "",
+                "## Recent Markets Scanned",
+            ]
+
+            if markets:
+                for market in markets[:5]:
+                    report_lines.append(f"- **{market.question}**")
+                    report_lines.append(f"  - Condition ID: `{market.condition_id}`")
+                    report_lines.append(f"  - Category: {market.category or 'N/A'}")
+                    report_lines.append("")
+            else:
+                report_lines.append("- No markets found")
+                report_lines.append("")
+
+            report_lines.extend([
+                f"## All Traders Involved ({len(trader_addresses)} total)",
+                "",
+            ])
+
+            # Show first 20 traders
+            for addr in trader_addresses[:20]:
+                report_lines.append(f"- `{addr}`")
+            if len(trader_addresses) > 20:
+                report_lines.append(f"- ... and {len(trader_addresses) - 20} more")
+            report_lines.append("")
+
+            # Detail for sample traders
+            report_lines.extend([
+                f"## Sample Traders Detail (Random {sample_size})",
+                "",
+            ])
+
+            for addr in sample_traders:
+                report_lines.append(f"### Trader: `{addr}`")
+                report_lines.append("")
+
+                # Get recent trades
+                trades = (
+                    session.query(Trade)
+                    .filter(Trade.trader_address == addr)
+                    .order_by(Trade.timestamp.desc())
+                    .limit(10)
+                    .all()
+                )
+
+                report_lines.append(f"**Recent Trades ({len(trades)} shown):**")
+                report_lines.append("")
+                for trade in trades:
+                    report_lines.append(
+                        f"- {trade.timestamp.strftime('%Y-%m-%d %H:%M')} | "
+                        f"{trade.side} | Size: {trade.size} | Price: {trade.price}"
+                    )
+                report_lines.append("")
+
+                # Get expertise scores
+                scores = (
+                    session.query(ExpertiseScore)
+                    .filter(ExpertiseScore.trader_address == addr)
+                    .order_by(ExpertiseScore.computed_at.desc())
+                    .limit(5)
+                    .all()
+                )
+
+                if scores:
+                    report_lines.append("**Expertise Scores:**")
+                    report_lines.append("")
+                    for score in scores:
+                        report_lines.append(
+                            f"- Category: `{score.category_slug}` | "
+                            f"Raw Score: {score.raw_score:.1f} | "
+                            f"Percentile: {score.percentile_rank or 'N/A'} | "
+                            f"Win Rate: {score.win_rate:.2f}"
+                        )
+                else:
+                    report_lines.append("**Expertise Scores:** None computed yet")
+
+                report_lines.append("")
+                report_lines.append("---")
+                report_lines.append("")
+
+            # Write to file
+            report_path = Path("logs/last_sweep_debug.md")
+            report_path.parent.mkdir(exist_ok=True)
+            report_path.write_text("\n".join(report_lines))
+
+            logger.info(f"Debug report written to {report_path}")
+
+    except Exception as e:
+        logger.error(f"Failed to generate debug report: {e}")
 
 
 def run_sweep(
@@ -146,6 +282,10 @@ def run_sweep(
     stats["duration_seconds"] = time.time() - start_time
 
     logger.info(f"Sweep complete in {stats['duration_seconds']:.1f}s")
+
+    # Generate debug report for testing/monitoring
+    _generate_sweep_debug_report(session_factory, stats)
+
     return stats
 
 
