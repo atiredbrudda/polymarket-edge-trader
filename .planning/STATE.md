@@ -5,23 +5,23 @@
 See: .planning/PROJECT.md (updated 2026-02-05)
 
 **Core value:** Surface where smart money is moving in eSports markets so the user can see what informed traders are doing and factor that into their own thinking.
-**Current focus:** Phase 8 - Complete trader history via blockchain indexing
+**Current focus:** Phase 9 - Jon Becker dataset integration
 
 ## Current Position
 
-Phase: 8 of 8 (Complete Trader History via Blockchain)
-Plan: 2 of 2 complete
-Status: Complete
-Last activity: 2026-02-12 — Plan 08-02 complete (Blockchain pipeline integration)
+Phase: 9 of 9 (Jon Becker Dataset Integration)
+Plan: 1 of 2 complete
+Status: In Progress
+Last activity: 2026-02-12 — Plan 09-01 complete (DuckDB query layer)
 
-Progress: [█████████░] 70% (26/37 total plans complete)
+Progress: [█████████░] 73% (27/37 total plans complete)
 
 ## Performance Metrics
 
 **Velocity:**
-- Total plans completed: 26
-- Average duration: 4.93 min
-- Total execution time: 2.08 hours
+- Total plans completed: 27
+- Average duration: 5.02 min
+- Total execution time: 2.23 hours
 
 **By Phase:**
 
@@ -35,12 +35,13 @@ Progress: [█████████░] 70% (26/37 total plans complete)
 | 6 - Alerting System | 3/3 | 14.71min | 4.90min |
 | 7 - CLI Interface | 3/3 | 11.99min | 4.00min |
 | 8 - Blockchain History | 2/2 | 14.35min | 7.18min |
+| 9 - JBecker Dataset | 1/2 | 8.43min | 8.43min |
 
 **Recent Trend:**
-- Last 5 plans: 4.78min (07-01), 3.55min (07-02), 3.66min (07-03), 7.57min (08-01), 6.78min (08-02)
-- Trend: Phase 8 COMPLETE - blockchain indexing + pipeline integration complete
-- Phase 7 COMPLETE: All 3 plans done - formatters, orchestration, dependency wiring
+- Last 5 plans: 3.55min (07-02), 3.66min (07-03), 7.57min (08-01), 6.78min (08-02), 8.43min (09-01)
+- Trend: Phase 9 IN PROGRESS - DuckDB query layer complete
 - Phase 8 COMPLETE: 2/2 plans done - blockchain client + ingestion pipeline integration
+- Phase 7 COMPLETE: All 3 plans done - formatters, orchestration, dependency wiring
 
 *Updated after each plan completion*
 
@@ -150,10 +151,15 @@ Recent decisions affecting current work:
 - **[08-02] Cross-source deduplication via trade_id:** Works for both API and blockchain trades, prevents duplicates when mixing sources
 - **[08-02] Blockchain fetches metadata from API:** Blockchain events lack human-readable data (questions, categories), so API enriches condition_id
 - **[08-02] run_full_sweep blockchain flag:** use_blockchain=False default maintains backward compatibility with existing API-based flow
+- **[09-01] DuckDB for Parquet queries:** Zero-storage, instant filter pushdown, native Parquet support - 100x faster than row-oriented databases
+- **[09-01] Parameterized SQL ($1, $2):** Prevents injection attacks, addresses never interpolated into query strings via f-strings
+- **[09-01] Case-insensitive address matching:** LOWER() on both sides for EIP-55 checksum compliance across mixed-case data
+- **[09-01] Fixture-based testing:** 12KB sample Parquet eliminates 33.5GB dataset requirement for CI/dev environments
 
 ### Roadmap Evolution
 
 - Phase 8 added: Complete Trader History via Blockchain
+- Phase 9 added: Jon Becker Dataset Integration
 
 ### Pending Todos
 
@@ -268,9 +274,23 @@ None yet.
 - Total project tests: 469 (459 passing - 9 pre-existing API test failures, 1 skip)
 - Phase 8 COMPLETE: Blockchain integration operational, no 100-trade API limit
 
+**Phase 9 (Jon Becker Dataset Integration):**
+- IN PROGRESS - 1 of 2 plans complete
+- ✓ [09-01] DuckDB query layer complete - JBeckerDataset with parameterized SQL (20 tests)
+- JBeckerDataset class: 6 public methods (is_available, query_trader_history, query_market_trades, get_trade_count, get_date_range, get_dataset_info)
+- Parameterized queries ($1, $2) prevent SQL injection, addresses never in query strings
+- Case-insensitive address matching via LOWER() for EIP-55 compliance
+- Filter pushdown optimization: DuckDB only loads matching rows from Parquet
+- Test fixture: 100-trade sample Parquet (12KB) eliminates 33.5GB dataset requirement for tests
+- Configuration: jbecker_data_path, jbecker_enabled, jbecker_batch_size settings
+- Dependencies added: duckdb (production), pyarrow (test), numpy/pandas (transitive)
+- Phase 9 tests: 20 (from 09-01, all passing)
+- Total project tests: 489 (476 passing - 11 pre-existing API/blockchain failures, 1 skip + 1 new skip)
+- Next: Plan 09-02 - Pipeline integration for JBecker ingestion tier
+
 ## Session Continuity
 
 Last session: 2026-02-12
-Stopped at: Phase 8 Plan 08-02 complete - blockchain pipeline integration operational
+Stopped at: Phase 9 Plan 09-01 complete - DuckDB query layer operational
 Resume file: None
-Next: All phases complete! Ready for production deployment.
+Next: Plan 09-02 - Integrate JBeckerDataset into IngestionPipeline with cost-optimized tier ordering
