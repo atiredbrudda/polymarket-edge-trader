@@ -1107,7 +1107,7 @@ class IngestionPipeline:
 
     def run_full_sweep(
         self,
-        use_graph: bool = True,
+        use_jbecker: bool = True,
         use_blockchain_fallback: bool = True
     ) -> dict:
         """Execute complete ingestion sweep.
@@ -1118,8 +1118,8 @@ class IngestionPipeline:
         3. Backfill history for newly discovered traders
 
         Args:
-            use_graph: If True and graph_client configured, use The Graph (default: True)
-            use_blockchain_fallback: If True, fallback to blockchain if Graph fails (default: True)
+            use_jbecker: If True and jbecker_client configured, use JBecker dataset as primary (default: True)
+            use_blockchain_fallback: If True, fallback to blockchain as last resort (default: True)
 
         Returns:
             Overall stats dict with keys:
@@ -1189,10 +1189,10 @@ class IngestionPipeline:
 
             for trader in traders_to_backfill:
                 try:
-                    # Use hybrid method (Graph -> Blockchain -> API fallback)
+                    # Use hybrid method (JBecker -> API -> Graph -> Blockchain)
                     stats = self.ingest_trader_history_hybrid(
                         trader.address,
-                        prefer_graph=use_graph,
+                        prefer_jbecker=use_jbecker,
                         fallback_to_blockchain=use_blockchain_fallback,
                     )
 

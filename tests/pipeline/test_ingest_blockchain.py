@@ -307,7 +307,12 @@ def test_ingest_trader_history_hybrid_falls_back_to_api(
 def test_run_full_sweep_with_blockchain(
     pipeline, mock_api_client, mock_blockchain_client, test_db
 ):
-    """Test run_full_sweep uses blockchain for backfill when flag set."""
+    """Test run_full_sweep uses blockchain for backfill when flag set.
+
+    Note: After Phase 9 JBecker integration, blockchain is used as LAST RESORT
+    in the hybrid tier (JBecker -> API -> Graph -> Blockchain). This test
+    verifies blockchain fallback still works when JBecker client is None.
+    """
     # Pre-populate database with trader needing backfill
     session = test_db()
     try:
@@ -327,8 +332,12 @@ def test_run_full_sweep_with_blockchain(
     # Mock blockchain client for trader backfill
     mock_blockchain_client.get_trades_by_trader.return_value = []
 
-    # Execute sweep with blockchain flag
-    stats = pipeline.run_full_sweep(use_blockchain=True)
+    # Execute sweep with JBecker disabled (None), blockchain as fallback
+    # This tests backward compatibility from Phase 8
+    stats = pipeline.run_full_sweep(
+        use_jbecker=False,  # Disable JBecker tier (pipeline.jbecker_client is already None)
+        use_blockchain_fallback=True
+    )
 
     # Verify blockchain client was called for trader backfill
     assert mock_blockchain_client.get_trades_by_trader.called
