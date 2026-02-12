@@ -143,7 +143,7 @@ Plans:
 ## Progress
 
 **Execution Order:**
-Phases execute in numeric order: 1 -> 2 -> 3 -> 4 -> 5 -> 6 -> 7 -> 8
+Phases execute in numeric order: 1 -> 2 -> 3 -> 4 -> 5 -> 6 -> 7 -> 8 -> 9
 
 | Phase | Plans Complete | Status | Completed |
 |-------|----------------|--------|-----------|
@@ -155,6 +155,7 @@ Phases execute in numeric order: 1 -> 2 -> 3 -> 4 -> 5 -> 6 -> 7 -> 8
 | 6. Alerting System | 3/3 | Complete | 2026-02-11 |
 | 7. CLI Interface | 3/3 | Complete | 2026-02-11 |
 | 8. Blockchain History | 2/2 | Complete | 2026-02-11 |
+| 9. JBecker Dataset | 0/3 | Planned | — |
 
 ### Phase 8: Complete Trader History via Blockchain
 
@@ -171,3 +172,20 @@ Phases execute in numeric order: 1 -> 2 -> 3 -> 4 -> 5 -> 6 -> 7 -> 8
 Plans:
 - [x] 08-01-PLAN.md — Blockchain client with OrderFilled event querying (TDD)
 - [x] 08-02-PLAN.md — Pipeline integration with incremental sync and deduplication
+
+### Phase 9: Jon Becker Dataset Integration
+
+**Goal:** Integrate Jon Becker's 33.5GB Parquet dataset as research/backup tier for offline historical analysis via DuckDB
+**Depends on:** Phase 8
+**Plans:** 3 plans
+**Success Criteria** (what must be TRUE):
+  1. System queries complete trade history from JBecker Parquet files via DuckDB with parameterized SQL
+  2. Schema converter transforms JBecker trades to TradeResponse format for pipeline compatibility
+  3. 4-tier hybrid ingestion: Graph (instant) -> JBecker (seconds, offline) -> Blockchain (hours) -> API (100-trade limit)
+  4. CLI research command enables offline exploration of any trader's complete history
+  5. Missing dataset degrades gracefully with download instructions instead of crashing
+
+Plans:
+- [ ] 09-01-PLAN.md — DuckDB query layer with test fixtures (TDD)
+- [ ] 09-02-PLAN.md — Schema converter and pipeline integration (TDD)
+- [ ] 09-03-PLAN.md — Research and batch-analyze CLI commands
