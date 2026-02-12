@@ -175,13 +175,13 @@ Plans:
 
 ### Phase 9: Jon Becker Dataset Integration
 
-**Goal:** Integrate Jon Becker's 33.5GB Parquet dataset as research/backup tier for offline historical analysis via DuckDB
+**Goal:** Integrate Jon Becker's 33.5GB Parquet dataset as primary historical data source with cost-optimized 4-tier ingestion hierarchy via DuckDB
 **Depends on:** Phase 8
 **Plans:** 3 plans
 **Success Criteria** (what must be TRUE):
   1. System queries complete trade history from JBecker Parquet files via DuckDB with parameterized SQL
   2. Schema converter transforms JBecker trades to TradeResponse format for pipeline compatibility
-  3. 4-tier hybrid ingestion: Graph (instant) -> JBecker (seconds, offline) -> Blockchain (hours) -> API (100-trade limit)
+  3. 4-tier cost-optimized hybrid ingestion: JBecker (primary, free) -> API (recent gap fill, free) -> Graph (if API insufficient, costs units) -> Blockchain (last resort, hours)
   4. CLI research command enables offline exploration of any trader's complete history
   5. Missing dataset degrades gracefully with download instructions instead of crashing
 
