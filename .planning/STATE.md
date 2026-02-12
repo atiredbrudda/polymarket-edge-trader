@@ -10,18 +10,18 @@ See: .planning/PROJECT.md (updated 2026-02-05)
 ## Current Position
 
 Phase: 9 of 9 (Jon Becker Dataset Integration)
-Plan: 2 of 3 complete
-Status: In Progress
-Last activity: 2026-02-12 — Plan 09-02 complete (Schema converter & pipeline integration)
+Plan: 3 of 3 complete
+Status: Complete
+Last activity: 2026-02-12 — Plan 09-03 complete (Research commands and dataset management)
 
-Progress: [█████████░] 76% (28/37 total plans complete)
+Progress: [██████████] 78% (29/37 total plans complete)
 
 ## Performance Metrics
 
 **Velocity:**
-- Total plans completed: 28
-- Average duration: 5.07 min
-- Total execution time: 2.37 hours
+- Total plans completed: 29
+- Average duration: 5.14 min
+- Total execution time: 2.48 hours
 
 **By Phase:**
 
@@ -35,11 +35,11 @@ Progress: [█████████░] 76% (28/37 total plans complete)
 | 6 - Alerting System | 3/3 | 14.71min | 4.90min |
 | 7 - CLI Interface | 3/3 | 11.99min | 4.00min |
 | 8 - Blockchain History | 2/2 | 14.35min | 7.18min |
-| 9 - JBecker Dataset | 2/3 | 14.43min | 7.22min |
+| 9 - JBecker Dataset | 3/3 | 24.43min | 8.14min |
 
 **Recent Trend:**
-- Last 5 plans: 3.66min (07-03), 7.57min (08-01), 6.78min (08-02), 8.43min (09-01), 6min (09-02)
-- Trend: Phase 9 IN PROGRESS - Schema converter & pipeline integration complete
+- Last 5 plans: 7.57min (08-01), 6.78min (08-02), 8.43min (09-01), 6min (09-02), 10min (09-03)
+- Trend: Phase 9 COMPLETE - All 3 plans done - DuckDB query layer, schema converter, CLI research commands
 - Phase 8 COMPLETE: 2/2 plans done - blockchain client + ingestion pipeline integration
 - Phase 7 COMPLETE: All 3 plans done - formatters, orchestration, dependency wiring
 
@@ -486,6 +486,11 @@ Recent decisions affecting current work:
 - **[09-01] Fixture-based testing:** 12KB sample Parquet eliminates 33.5GB dataset requirement for CI/dev environments
 - [Phase 09-02]: JBecker dataset as PRIMARY data source (not backup) for cost-optimized bulk analysis
 - [Phase 09-02]: 4-tier cost-optimized fallback: JBecker->API->Graph->Blockchain minimizes Graph API unit consumption
+- **[09-03] Research command default limit: 50 trades:** Balances terminal readability with quick exploration, user can override with --limit flag
+- **[09-03] Batch-analyze file input support:** Enables bulk processing from curated trader lists via --file flag with comment support
+- **[09-03] Graceful dataset unavailability:** Commands print clear download instructions instead of tracebacks when dataset missing
+- **[09-03] Multi-format output (table/json/csv):** research command supports Rich terminal display, JSON for automation, CSV for spreadsheets
+- **[09-03] Role-based size calculation:** format_research_table determines MAKER/TAKER role and displays correct amount filled
 
 ### Roadmap Evolution
 
@@ -606,25 +611,27 @@ None yet.
 - Phase 8 COMPLETE: Blockchain integration operational, no 100-trade API limit
 
 **Phase 9 (Jon Becker Dataset Integration):**
-- IN PROGRESS - 2 of 3 plans complete
+- ✓ COMPLETE - 3 of 3 plans complete
 - ✓ [09-01] DuckDB query layer complete - JBeckerDataset with parameterized SQL (20 tests)
 - ✓ [09-02] Schema converter & pipeline integration complete - cost-optimized 4-tier fallback (23 tests)
+- ✓ [09-03] Research commands complete - polymarket research & batch-analyze CLI (10 tests)
 - JBeckerDataset class: 6 public methods (is_available, query_trader_history, query_market_trades, get_trade_count, get_date_range, get_dataset_info)
 - jbecker_trade_to_api_response: Converts JBecker Parquet schema to TradeResponse format (13 tests)
 - ingest_trader_history_jbecker: Pipeline method with 1000-trade batch deduplication (10 tests)
 - ingest_trader_history_hybrid: Updated with JBecker-first cost-optimized fallback (JBecker->API->Graph->Blockchain)
-- _get_latest_trade_timestamp: Helper for timestamp-based gap filling
+- CLI commands: research (table/json/csv output), batch-analyze (file input support)
+- Formatters: format_research_table (role/side/size display), format_batch_summary (status colors)
+- Graceful dataset unavailability: Clear download instructions instead of tracebacks
 - Cost optimization: JBecker + API covers most traders for free, Graph only if API insufficient (100-trade limit)
-- Timestamp-based gap filling: API fills trades after JBecker snapshot timestamp
 - Configuration: jbecker_data_path, jbecker_enabled, jbecker_batch_size settings
 - Dependencies: duckdb (production), pyarrow (test), numpy/pandas (transitive)
-- Phase 9 tests: 43 (20 from 09-01 + 23 from 09-02, all passing)
-- Total project tests: 499 (499 passing - same 12 pre-existing failures)
-- Next: Plan 09-03 - Research command and dataset management
+- Phase 9 tests: 53 (20 from 09-01 + 23 from 09-02 + 10 from 09-03, all passing)
+- Total project tests: 509 (all Phase 9 tests passing, 12 pre-existing failures in other phases)
+- Phase 9 COMPLETE: JBecker dataset fully integrated for offline research and bulk analysis
 
 ## Session Continuity
 
 Last session: 2026-02-12
-Stopped at: Phase 9 Plan 09-02 complete - Schema converter & pipeline integration operational
+Stopped at: Phase 9 Plan 09-03 complete - Research commands and dataset management operational
 Resume file: None
-Next: Plan 09-03 - Research command and dataset management
+Next: All 9 phases complete - project ready for production use
