@@ -22,6 +22,7 @@ dependencies = [
     "click>=8.1",
     "rich>=13.0",
     "web3>=6.0.0",
+    "duckdb>=1.0.0",
 ]
 
 [project.scripts]
@@ -32,6 +33,7 @@ dev = [
     "pytest>=8.0",
     "pytest-cov",
     "pytest-mock",
+    "pyarrow>=23.0.0",
 ]
 
 [tool.setuptools.packages.find]

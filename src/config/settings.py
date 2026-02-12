@@ -67,6 +67,15 @@ class Settings(BaseSettings):
     blockchain_retry_min_wait: float = 2.0
     blockchain_retry_max_wait: float = 30.0
 
+    # The Graph Configuration (Phase 8 - Preferred Method)
+    the_graph_api_key: str | None = None  # API key from https://thegraph.com/studio/
+    the_graph_subgraph_id: str = "7fu2DWYK93ePfzB24c2wrP94S3x4LGHUrQxphhoEypyY"  # Polymarket Orderbook
+
+    # JBecker Dataset Configuration (Phase 9)
+    jbecker_data_path: str = "./data"  # Path to extracted dataset root
+    jbecker_enabled: bool = True  # Enable/disable JBecker tier
+    jbecker_batch_size: int = 1000  # Trades per batch insert
+
     # Pydantic v2 configuration
     model_config = SettingsConfigDict(
         env_file=".env",
