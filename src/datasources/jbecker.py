@@ -8,6 +8,7 @@ Provides SQL interface to 33.5GB Parquet trade history with:
 
 from pathlib import Path
 from typing import Optional
+import time
 import duckdb
 from loguru import logger
 
@@ -18,6 +19,10 @@ class JBeckerDataset:
     Provides SQL interface to 33.5GB Parquet trade history.
     Uses parameterized queries ($1, $2) for security.
     Uses filter pushdown for performance (only matching rows loaded).
+
+    Attributes:
+        data_path: Path to extracted dataset root
+        trades_path: Path to trades parquet files directory
 
     Args:
         data_path: Path to extracted dataset root (contains polymarket/trades/)
@@ -90,11 +95,16 @@ class JBeckerDataset:
             query += f" LIMIT {int(limit)}"
 
         logger.debug(f"Querying JBecker dataset for trader {trader_address[:10]}...")
+        start = time.time()
         result = duckdb.execute(query, [pattern, trader_address])
 
         # Convert to list of dicts
         trades = result.fetchdf().to_dict("records")
-        logger.info(f"Found {len(trades)} trades for trader {trader_address[:10]}...")
+        elapsed = time.time() - start
+        logger.info(
+            f"Found {len(trades)} trades for trader {trader_address[:10]}... "
+            f"in {elapsed:.2f}s"
+        )
 
         return trades
 
@@ -132,10 +142,15 @@ class JBeckerDataset:
             query += f" LIMIT {int(limit)}"
 
         logger.debug(f"Querying JBecker dataset for market {asset_id[:10]}...")
+        start = time.time()
         result = duckdb.execute(query, [pattern, asset_id])
 
         trades = result.fetchdf().to_dict("records")
-        logger.info(f"Found {len(trades)} trades for market {asset_id[:10]}...")
+        elapsed = time.time() - start
+        logger.info(
+            f"Found {len(trades)} trades for market {asset_id[:10]}... "
+            f"in {elapsed:.2f}s"
+        )
 
         return trades
 
@@ -168,10 +183,15 @@ class JBeckerDataset:
             WHERE LOWER(maker) = LOWER($2) OR LOWER(taker) = LOWER($2)
         """
 
+        start = time.time()
         result = duckdb.execute(query, [pattern, trader_address])
         count = result.fetchone()[0]
+        elapsed = time.time() - start
 
-        logger.info(f"Trader {trader_address[:10]}... has {count} trades")
+        logger.info(
+            f"Trader {trader_address[:10]}... has {count} trades "
+            f"(counted in {elapsed:.2f}s)"
+        )
         return count
 
     def get_date_range(self, trader_address: str) -> tuple[int, int] | None:
@@ -243,8 +263,15 @@ class JBeckerDataset:
             FROM read_parquet($1)
         """
 
+        start = time.time()
         result = duckdb.execute(query, [pattern])
         row = result.fetchone()
+        elapsed = time.time() - start
+
+        logger.info(
+            f"Dataset info: {file_count} files, {row[0]:,} rows "
+            f"(scanned in {elapsed:.2f}s)"
+        )
 
         return {
             "file_count": file_count,
