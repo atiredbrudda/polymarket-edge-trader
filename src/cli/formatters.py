@@ -10,8 +10,11 @@ Formatters:
 - format_signals_table: Display expert consensus signals
 - format_leaderboard_table: Display game leaderboard rankings
 - format_sweep_summary: Display sweep operation results
+- format_research_table: Display JBecker trade history
+- format_batch_summary: Display batch-analyze results
 """
 
+from datetime import datetime
 from decimal import Decimal
 
 from rich.table import Table
@@ -272,3 +275,134 @@ Signals Detected: {signals_count}
 Alerts Sent: {alerts_sent}"""
 
     return Panel(content, border_style="green", title="Sweep Summary")
+
+
+def format_research_table(trades_data: list[dict], trader_address: str, total_count: int) -> Table:
+    """Format JBecker trade history as Rich table.
+
+    Args:
+        trades_data: List of trade dicts from JBeckerDataset (raw DuckDB output)
+        trader_address: Trader address being queried
+        total_count: Total trades found (may differ from len(trades_data) if truncated)
+
+    Returns:
+        Rich Table renderable
+
+    Example:
+        >>> trades = [{"maker": "0xAbc...", "timestamp": 1234567890, ...}]
+        >>> table = format_research_table(trades, "0xAbc...", 100)
+    """
+    table = Table(
+        title=f"Trade History: {truncate_address(trader_address)} ({total_count} trades)",
+        show_header=True,
+        header_style="bold cyan"
+    )
+
+    table.add_column("#", justify="right", style="dim")
+    table.add_column("Timestamp", style="white")
+    table.add_column("Role", style="cyan")
+    table.add_column("Side", style="white")
+    table.add_column("Size (USDC)", justify="right", style="green")
+    table.add_column("Price", justify="right", style="yellow")
+    table.add_column("Block", justify="right", style="dim")
+
+    for idx, trade in enumerate(trades_data, start=1):
+        # Determine role (MAKER or TAKER)
+        maker = trade.get("maker", "")
+        taker = trade.get("taker", "")
+        is_maker = maker.lower() == trader_address.lower()
+        role = "MAKER" if is_maker else "TAKER"
+
+        # Determine size based on role
+        maker_amount = trade.get("makerAmountFilled", 0)
+        taker_amount = trade.get("takerAmountFilled", 0)
+        size_raw = maker_amount if is_maker else taker_amount
+        size = float(size_raw) / 1e6  # Convert from 6 decimals to USDC
+
+        # Format timestamp
+        timestamp = trade.get("timestamp", 0)
+        dt = datetime.fromtimestamp(timestamp)
+        timestamp_str = dt.strftime("%Y-%m-%d %H:%M:%S")
+
+        # Get side (BUY/SELL) and apply color
+        side = trade.get("side", "UNKNOWN")
+        if side == "BUY":
+            side_display = "[green]BUY[/green]"
+        elif side == "SELL":
+            side_display = "[red]SELL[/red]"
+        else:
+            side_display = side
+
+        # Get price
+        price = trade.get("price", 0)
+        price_str = f"{float(price):.4f}"
+
+        # Get block number
+        block = trade.get("blockNumber", 0)
+
+        table.add_row(
+            str(idx),
+            timestamp_str,
+            role,
+            Text.from_markup(side_display),
+            f"{size:,.2f}",
+            price_str,
+            str(block)
+        )
+
+    # Add footer if truncated
+    if len(trades_data) < total_count:
+        table.caption = f"Showing {len(trades_data)} of {total_count} trades"
+
+    return table
+
+
+def format_batch_summary(results: list[dict]) -> Table:
+    """Format batch-analyze results summary.
+
+    Args:
+        results: List of per-trader stats dicts from pipeline ingestion
+
+    Returns:
+        Rich Table with trader address, trades found, inserted, skipped, status
+
+    Example:
+        >>> results = [{"address": "0xAbc...", "found": 100, "inserted": 95, ...}]
+        >>> table = format_batch_summary(results)
+    """
+    table = Table(
+        title="Batch Analysis Summary",
+        show_header=True,
+        header_style="bold cyan"
+    )
+
+    table.add_column("Trader", style="white")
+    table.add_column("Found", justify="right", style="cyan")
+    table.add_column("Inserted", justify="right", style="green")
+    table.add_column("Skipped", justify="right", style="yellow")
+    table.add_column("Status", style="white")
+
+    for result in results:
+        address = result.get("address", "")
+        found = result.get("found", 0)
+        inserted = result.get("inserted", 0)
+        skipped = result.get("skipped", 0)
+        error = result.get("error")
+
+        # Determine status and color
+        if error:
+            status_display = "[red]Error[/red]"
+        elif inserted == 0 and found == 0:
+            status_display = "[yellow]No trades[/yellow]"
+        else:
+            status_display = "[green]OK[/green]"
+
+        table.add_row(
+            truncate_address(address),
+            str(found),
+            str(inserted),
+            str(skipped),
+            Text.from_markup(status_display)
+        )
+
+    return table
