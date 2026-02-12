@@ -11,6 +11,8 @@ Commands:
 All commands delegate formatting to src.cli.formatters for clean separation.
 """
 
+import csv
+import json
 import sys
 from decimal import Decimal
 from pathlib import Path
@@ -26,6 +28,8 @@ from src.cli.formatters import (
     format_signals_table,
     format_leaderboard_table,
     format_sweep_summary,
+    format_research_table,
+    format_batch_summary,
 )
 from src.db.models import Base, Trader, TaxonomyNode, Market, MarketClassification
 from src.db.session import get_session, get_session_factory
@@ -532,6 +536,209 @@ def poll(interval, no_alerts, verbose):
     logger.info(f"Entering polling loop (interval={poll_interval}min)")
     run_polling_loop(session_factory, client, category_filter, alerter, interval_minutes=poll_interval)
     logger.info("POLL command completed (graceful shutdown)")
+
+
+@cli.command()
+@click.argument("address")
+@click.option("--format", "-f", "output_format", type=click.Choice(["table", "json", "csv"]), default="table",
+              help="Output format")
+@click.option("--limit", "-l", default=50, type=int, help="Max trades to display (default 50)")
+@click.option("--verbose", "-v", is_flag=True, help="Enable debug logging")
+def research(address, output_format, limit, verbose):
+    """Query full trade history from JBecker dataset.
+
+    Queries the complete historical dataset (2020-2026) offline without API rate limits.
+    Requires JBecker dataset downloaded and JBECKER_DATA_PATH configured.
+
+    ADDRESS can be full address or prefix (e.g., 0xeffd76).
+
+    \b
+    Examples:
+        polymarket research 0xeffd76
+        polymarket research 0xeffd76 --format json
+        polymarket research 0xeffd76 --format csv --limit 1000
+    """
+    logger.info(f"RESEARCH command started (address={address}, format={output_format}, limit={limit}, verbose={verbose})")
+
+    if verbose:
+        logger.remove()
+        logger.add(sys.stderr, level="DEBUG")
+
+    console = Console()
+    settings = get_settings()
+
+    # Import JBeckerDataset
+    from src.datasources.jbecker import JBeckerDataset
+
+    # Create JBecker client
+    jbecker = JBeckerDataset(settings.jbecker_data_path)
+
+    # Check if dataset is available
+    if not jbecker.is_available():
+        console.print("[red]JBecker dataset not available.[/red]\n")
+        console.print("[yellow]To download and setup:[/yellow]")
+        console.print("1. wget https://s3.jbecker.dev/data.tar.zst  (33.5 GB)")
+        console.print("2. tar --use-compress-program=zstd -xvf data.tar.zst")
+        console.print("3. Set JBECKER_DATA_PATH in .env to point to the data/ directory")
+        console.print("4. Verify: ls $JBECKER_DATA_PATH/polymarket/trades/")
+        logger.warning("JBecker dataset not available, exiting")
+        return
+
+    # Resolve address (try DB lookup if available, otherwise use as-is)
+    full_address = address
+    try:
+        session_factory, _, _, _ = _get_dependencies(settings)
+        with get_session(session_factory) as session:
+            resolved = find_trader_by_prefix(session, address)
+            if resolved:
+                full_address = resolved
+                logger.info(f"Resolved address from DB: {full_address}")
+    except Exception as e:
+        logger.debug(f"DB lookup failed, using address as-is: {e}")
+
+    with console.status(f"[bold green]Querying {limit} trades for {full_address[:10]}...", spinner="dots"):
+        # Get total count
+        total_count = jbecker.get_trade_count(full_address)
+        logger.info(f"Total trades found: {total_count}")
+
+        # Query trades with limit
+        trades = jbecker.query_trader_history(full_address, limit=limit)
+        logger.info(f"Fetched {len(trades)} trades")
+
+    # Format output based on --format
+    if output_format == "table":
+        table = format_research_table(trades, full_address, total_count)
+        console.print(table)
+    elif output_format == "json":
+        output = json.dumps(trades, indent=2, default=str)
+        console.print(output)
+    elif output_format == "csv":
+        if trades:
+            writer = csv.DictWriter(sys.stdout, fieldnames=trades[0].keys())
+            writer.writeheader()
+            writer.writerows(trades)
+        else:
+            console.print("[yellow]No trades found[/yellow]")
+
+    logger.info("RESEARCH command completed")
+
+
+@cli.command("batch-analyze")
+@click.option("--addresses", "-a", multiple=True, help="Trader addresses to analyze")
+@click.option("--file", "-f", "address_file", type=click.Path(exists=True), help="File with addresses (one per line)")
+@click.option("--verbose", "-v", is_flag=True, help="Enable debug logging")
+def batch_analyze(addresses, address_file, verbose):
+    """Bulk ingest trader histories from JBecker dataset.
+
+    Ingests complete trade histories for multiple traders at once,
+    storing them in the database for analysis. Uses batch deduplication.
+
+    Provide addresses via --addresses flag (repeatable) or --file flag.
+
+    \b
+    Examples:
+        polymarket batch-analyze -a 0xeffd76... -a 0xeefa8e...
+        polymarket batch-analyze --file traders.txt
+    """
+    logger.info(f"BATCH-ANALYZE command started (addresses={len(addresses)}, file={address_file}, verbose={verbose})")
+
+    if verbose:
+        logger.remove()
+        logger.add(sys.stderr, level="DEBUG")
+
+    console = Console()
+    settings = get_settings()
+
+    # Collect addresses from both sources
+    all_addresses = list(addresses)
+
+    if address_file:
+        with open(address_file, 'r') as f:
+            for line in f:
+                line = line.strip()
+                # Skip empty lines and comments
+                if line and not line.startswith('#'):
+                    all_addresses.append(line)
+        logger.info(f"Loaded {len(all_addresses) - len(addresses)} addresses from file")
+
+    if not all_addresses:
+        console.print("[red]Error: No addresses provided. Use --addresses or --file.[/red]")
+        logger.error("No addresses provided")
+        return
+
+    logger.info(f"Total addresses to process: {len(all_addresses)}")
+
+    # Import JBeckerDataset
+    from src.datasources.jbecker import JBeckerDataset
+
+    # Create JBecker client
+    jbecker = JBeckerDataset(settings.jbecker_data_path)
+
+    # Check if dataset is available
+    if not jbecker.is_available():
+        console.print("[red]JBecker dataset not available.[/red]\n")
+        console.print("[yellow]To download and setup:[/yellow]")
+        console.print("1. wget https://s3.jbecker.dev/data.tar.zst  (33.5 GB)")
+        console.print("2. tar --use-compress-program=zstd -xvf data.tar.zst")
+        console.print("3. Set JBECKER_DATA_PATH in .env to point to the data/ directory")
+        console.print("4. Verify: ls $JBECKER_DATA_PATH/polymarket/trades/")
+        logger.warning("JBecker dataset not available, exiting")
+        return
+
+    # Get dependencies
+    session_factory, client, category_filter, _ = _get_dependencies(settings)
+
+    # Import pipeline
+    from src.pipeline.ingest import IngestionPipeline
+
+    # Create pipeline with JBecker client
+    pipeline = IngestionPipeline(client, session_factory, category_filter, jbecker_client=jbecker)
+
+    # Process each trader
+    results = []
+    total_inserted = 0
+    total_skipped = 0
+    total_errors = 0
+
+    with console.status("[bold green]Processing traders...", spinner="dots") as status:
+        for idx, addr in enumerate(all_addresses, start=1):
+            status.update(f"[bold green]Processing {idx}/{len(all_addresses)}: {addr[:10]}...")
+            logger.info(f"Processing trader {idx}/{len(all_addresses)}: {addr}")
+
+            try:
+                stats = pipeline.ingest_trader_history_jbecker(addr)
+                results.append({
+                    "address": addr,
+                    "found": stats.get("detail_count", 0),
+                    "inserted": stats.get("trades_inserted", 0),
+                    "skipped": stats.get("duplicates_skipped", 0),
+                    "error": None,
+                })
+                total_inserted += stats.get("trades_inserted", 0)
+                total_skipped += stats.get("duplicates_skipped", 0)
+                logger.info(f"Success: {stats.get('trades_inserted', 0)} inserted, {stats.get('duplicates_skipped', 0)} skipped")
+            except Exception as e:
+                logger.warning(f"Error processing {addr}: {e}")
+                results.append({
+                    "address": addr,
+                    "found": 0,
+                    "inserted": 0,
+                    "skipped": 0,
+                    "error": str(e),
+                })
+                total_errors += 1
+
+    # Display summary table
+    table = format_batch_summary(results)
+    console.print(table)
+
+    # Print totals
+    console.print(f"\n[bold]Totals:[/bold]")
+    console.print(f"  Inserted: [green]{total_inserted}[/green]")
+    console.print(f"  Skipped:  [yellow]{total_skipped}[/yellow]")
+    console.print(f"  Errors:   [red]{total_errors}[/red]")
+
+    logger.info(f"BATCH-ANALYZE command completed: {total_inserted} inserted, {total_skipped} skipped, {total_errors} errors")
 
 
 if __name__ == "__main__":
