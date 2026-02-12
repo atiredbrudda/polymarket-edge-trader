@@ -11,8 +11,10 @@ This guide helps you configure a Polygon RPC provider for blockchain data fetchi
 
 ## Provider Options
 
-### 1. Alchemy (Recommended)
+### 1. Alchemy
 **Free Tier:** 300M compute units/month
+
+⚠️ **IMPORTANT**: Free tier limited to **10 blocks per `eth_getLogs` request**!
 
 **Steps:**
 1. Sign up at https://www.alchemy.com/
@@ -21,12 +23,16 @@ This guide helps you configure a Polygon RPC provider for blockchain data fetchi
 4. Add to `.env`:
    ```bash
    POLYGON_RPC_URL=https://polygon-mainnet.g.alchemy.com/v2/YOUR_API_KEY
+   BLOCKCHAIN_BATCH_SIZE=10  # Required for free tier!
    ```
 
 **Example:**
 ```bash
 POLYGON_RPC_URL=https://polygon-mainnet.g.alchemy.com/v2/abc123def456ghi789
+BLOCKCHAIN_BATCH_SIZE=10
 ```
+
+**Note:** For production use, consider upgrading to Alchemy's PAYG plan to remove the 10-block restriction.
 
 ---
 
@@ -109,13 +115,16 @@ Connected! Current block: 12345678
 
 ## Rate Limits & Recommendations
 
-| Provider | Free Tier | Best For |
-|----------|-----------|----------|
-| **Alchemy** | 300M CU/month | Production & heavy usage |
-| **Infura** | 100k req/day | Medium usage |
-| **QuickNode** | Limited | Professional use |
-| **Ankr** | Rate-limited | Light testing |
-| **Public RPC** | Very limited | Initial testing only |
+| Provider | Free Tier | eth_getLogs Limit | Best For |
+|----------|-----------|-------------------|----------|
+| **Infura** | 100k req/day | 10k results per request | **Production** (recommended) |
+| **Alchemy Free** | 300M CU/month | **10 blocks per request** | Light testing only |
+| **Alchemy PAYG** | Pay per request | Expanded limits | Heavy production use |
+| **QuickNode** | Limited | Varies by plan | Professional use |
+| **Ankr** | Rate-limited | Limited | Light testing |
+| **Public RPC** | Very limited | Unreliable | Initial testing only |
+
+**Recommendation:** Use **Infura** for production (100 block batches work great). Alchemy free tier is too restrictive (10 blocks = very slow).
 
 ## Troubleshooting
 

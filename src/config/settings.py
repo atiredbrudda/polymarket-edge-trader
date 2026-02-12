@@ -61,7 +61,7 @@ class Settings(BaseSettings):
 
     # Blockchain Configuration (Phase 8)
     polygon_rpc_url: str = "https://polygon-rpc.com"  # Public RPC default
-    blockchain_batch_size: int = 100  # Blocks per query (Infura limit: 10k results)
+    blockchain_batch_size: int = 100  # Blocks per query (Infura: 10k results, Alchemy free: 10 blocks)
     blockchain_max_workers: int = 4  # Parallel workers (future async support)
     blockchain_retry_attempts: int = 3
     blockchain_retry_min_wait: float = 2.0
