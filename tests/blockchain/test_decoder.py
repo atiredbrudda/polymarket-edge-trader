@@ -29,7 +29,7 @@ def test_constants_defined():
 def test_decode_order_filled_valid_log():
     """Test decoding a valid OrderFilled event log."""
     # Mock Web3 instance
-    w3 = Mock(spec=Web3)
+    w3 = Mock()
 
     # Mock contract and event processing
     mock_contract = Mock()
@@ -49,6 +49,7 @@ def test_decode_order_filled_valid_log():
 
     mock_event.process_log = Mock(return_value=mock_decoded)
     mock_contract.events.OrderFilled = Mock(return_value=mock_event)
+    w3.eth = Mock()
     w3.eth.contract = Mock(return_value=mock_contract)
 
     # Create test log
@@ -80,13 +81,14 @@ def test_decode_order_filled_valid_log():
 
 def test_decode_order_filled_invalid_log():
     """Test that decoding an invalid log raises ValueError."""
-    w3 = Mock(spec=Web3)
+    w3 = Mock()
 
     # Mock contract that raises exception during processing
     mock_contract = Mock()
     mock_event = Mock()
     mock_event.process_log = Mock(side_effect=ValueError("Invalid log"))
     mock_contract.events.OrderFilled = Mock(return_value=mock_event)
+    w3.eth = Mock()
     w3.eth.contract = Mock(return_value=mock_contract)
 
     log = {
@@ -104,7 +106,7 @@ def test_decode_order_filled_invalid_log():
 
 def test_decode_preserves_hex_format():
     """Test that transaction and order hashes are converted to hex strings."""
-    w3 = Mock(spec=Web3)
+    w3 = Mock()
 
     mock_contract = Mock()
     mock_event = Mock()
@@ -123,6 +125,7 @@ def test_decode_preserves_hex_format():
 
     mock_event.process_log = Mock(return_value=mock_decoded)
     mock_contract.events.OrderFilled = Mock(return_value=mock_event)
+    w3.eth = Mock()
     w3.eth.contract = Mock(return_value=mock_contract)
 
     log = {

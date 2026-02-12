@@ -12,7 +12,6 @@ from tenacity import (
     wait_exponential,
 )
 from web3 import Web3
-from web3.middleware import ExtraDataToPOAMiddleware
 
 from src.blockchain.decoder import (
     CTF_EXCHANGE,
@@ -56,9 +55,6 @@ class PolygonBlockchainClient:
 
         # Initialize Web3 with Polygon RPC
         self.w3 = Web3(Web3.HTTPProvider(self.rpc_url, request_kwargs={"timeout": 30}))
-
-        # Inject Polygon PoA middleware (required for Polygon)
-        self.w3.middleware_onion.inject(ExtraDataToPOAMiddleware, layer=0)
 
         # Verify connection
         if not self.w3.is_connected():
@@ -136,11 +132,16 @@ class PolygonBlockchainClient:
 
         # Decode each log
         trades = []
+        # Cache block timestamps to avoid redundant RPC calls
+        block_timestamps = {}
         for log in logs:
             try:
                 trade = decode_order_filled(log, self.w3)
-                # Add timestamp from block
-                trade.timestamp = datetime.fromtimestamp(self.get_block_timestamp(log["blockNumber"]))
+                # Add timestamp from block (cached)
+                block_num = log["blockNumber"]
+                if block_num not in block_timestamps:
+                    block_timestamps[block_num] = self.get_block_timestamp(block_num)
+                trade.timestamp = datetime.fromtimestamp(block_timestamps[block_num])
                 trades.append(trade)
             except Exception as e:
                 logger.warning(f"Failed to decode log at block {log.get('blockNumber')}: {e}")
