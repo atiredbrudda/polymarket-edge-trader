@@ -12,6 +12,7 @@ from tenacity import (
     wait_exponential,
 )
 from web3 import Web3
+from web3.middleware import ExtraDataToPOAMiddleware
 
 from src.blockchain.decoder import (
     CTF_EXCHANGE,
@@ -55,6 +56,9 @@ class PolygonBlockchainClient:
 
         # Initialize Web3 with Polygon RPC
         self.w3 = Web3(Web3.HTTPProvider(self.rpc_url, request_kwargs={"timeout": 30}))
+
+        # Inject PoA middleware (Polygon has some blocks with PoA-style headers)
+        self.w3.middleware_onion.inject(ExtraDataToPOAMiddleware, layer=0)
 
         # Verify connection
         if not self.w3.is_connected():
