@@ -255,7 +255,7 @@ class TestBatchAnalyzeCommand:
         mock_session_factory = Mock()
         mock_client = Mock()
         mock_filter = Mock()
-        mock_deps.return_value = (mock_session_factory, mock_client, mock_filter, None)
+        mock_deps.return_value = (mock_session_factory, mock_client, mock_filter, None, None)
 
         # Mock pipeline
         mock_pipeline = Mock()

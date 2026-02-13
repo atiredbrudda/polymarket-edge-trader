@@ -35,6 +35,7 @@ from src.db.models import Base, Trader, TaxonomyNode, Market, MarketClassificati
 from src.db.session import get_session, get_session_factory
 from src.config.settings import get_settings
 from src.api.client import PolymarketClient
+from src.api.gamma_client import GammaMarketClient
 from src.pipeline.filters import CategoryFilter
 from src.alerts.telegram import TelegramAlerter
 
@@ -52,7 +53,7 @@ def _get_dependencies(settings=None):
         Tuple of (session_factory, client, category_filter, alerter)
 
     Example:
-        session_factory, client, category_filter, alerter = _get_dependencies()
+        session_factory, client, category_filter, alerter, _ = _get_dependencies()
         with get_session(session_factory) as session:
             # use session
     """
@@ -76,7 +77,9 @@ def _get_dependencies(settings=None):
     except ValueError as e:
         logger.warning(f"Telegram configuration invalid: {e}")
 
-    return session_factory, client, category_filter, alerter
+    gamma_client = GammaMarketClient(rate_limiter=client.rate_limiter)
+
+    return session_factory, client, category_filter, alerter, gamma_client
 
 
 def find_trader_by_prefix(session, partial_address: str) -> str | None:
@@ -126,6 +129,7 @@ def _setup_cli_logging():
     - Includes timestamps, command names, and full output
     """
     from src.config.settings import get_settings
+
     settings = get_settings()
 
     # Create logs directory if it doesn't exist
@@ -166,13 +170,15 @@ def cli(ctx):
     Track expert trader consensus and market signals in eSports prediction markets.
     """
     # Only setup logging if not --help
-    if ctx.invoked_subcommand is not None or '--help' not in sys.argv:
+    if ctx.invoked_subcommand is not None or "--help" not in sys.argv:
         _setup_cli_logging()
         logger.info(f"Command invoked: {' '.join(sys.argv)}")
 
 
 @cli.command()
-@click.option("--category", "-c", default=None, help="Filter by category (e.g., eSports)")
+@click.option(
+    "--category", "-c", default=None, help="Filter by category (e.g., eSports)"
+)
 @click.option("--verbose", "-v", is_flag=True, help="Enable debug logging")
 def markets(category, verbose):
     """List active markets with optional category filter.
@@ -191,7 +197,7 @@ def markets(category, verbose):
 
     with console.status("[bold green]Fetching markets...", spinner="dots"):
         # Get dependencies
-        session_factory, _, _, _ = _get_dependencies()
+        session_factory, _, _, _, _ = _get_dependencies()
 
         # Import queries here to avoid circular imports
         from src.pipeline.queries import get_active_markets
@@ -205,17 +211,22 @@ def markets(category, verbose):
             for market in markets_orm:
                 query = (
                     select(TaxonomyNode.slug)
-                    .join(MarketClassification, MarketClassification.taxonomy_node_id == TaxonomyNode.id)
+                    .join(
+                        MarketClassification,
+                        MarketClassification.taxonomy_node_id == TaxonomyNode.id,
+                    )
                     .where(MarketClassification.market_id == market.condition_id)
                 )
                 result = session.execute(query)
                 slug = result.scalar()
 
-                market_data.append({
-                    "question": market.question,
-                    "slug": slug,
-                    "active": market.active,
-                })
+                market_data.append(
+                    {
+                        "question": market.question,
+                        "slug": slug,
+                        "active": market.active,
+                    }
+                )
 
     logger.info(f"Found {len(market_data)} active markets")
     for market in market_data:
@@ -249,7 +260,7 @@ def trader(address, verbose):
 
     with console.status("[bold green]Fetching trader profile...", spinner="dots"):
         # Get dependencies
-        session_factory, _, _, _ = _get_dependencies()
+        session_factory, _, _, _, _ = _get_dependencies()
 
         with get_session(session_factory) as session:
             # Resolve partial address
@@ -284,14 +295,20 @@ def trader(address, verbose):
             positions_data = []
             for p in positions:
                 # Get market question
-                market = session.query(Market).filter(Market.condition_id == p.market_id).first()
+                market = (
+                    session.query(Market)
+                    .filter(Market.condition_id == p.market_id)
+                    .first()
+                )
                 market_question = market.question if market else p.market_id
-                positions_data.append({
-                    "market_question": market_question,
-                    "direction": p.direction,
-                    "size": p.size,
-                    "avg_entry_price": p.avg_entry_price,
-                })
+                positions_data.append(
+                    {
+                        "market_question": market_question,
+                        "direction": p.direction,
+                        "size": p.size,
+                        "avg_entry_price": p.avg_entry_price,
+                    }
+                )
 
             scores_data = [
                 {
@@ -303,17 +320,23 @@ def trader(address, verbose):
                 for s in scores
             ]
 
-    logger.info(f"Trader profile loaded: {len(summaries_data)} categories, {len(positions_data)} positions, {len(scores_data)} scores")
+    logger.info(
+        f"Trader profile loaded: {len(summaries_data)} categories, {len(positions_data)} positions, {len(scores_data)} scores"
+    )
 
     # Format and display
-    profile = format_trader_profile(full_address, summaries_data, positions_data, scores_data)
+    profile = format_trader_profile(
+        full_address, summaries_data, positions_data, scores_data
+    )
     console.print(profile)
     logger.info("TRADER command completed")
 
 
 @cli.command()
 @click.option("--window", "-w", default=24, help="Time window in hours (1, 6, 24)")
-@click.option("--min-confidence", "-c", default=None, type=float, help="Minimum confidence score")
+@click.option(
+    "--min-confidence", "-c", default=None, type=float, help="Minimum confidence score"
+)
 @click.option("--verbose", "-v", is_flag=True, help="Enable debug logging")
 def signals(window, min_confidence, verbose):
     """Show expert consensus signals.
@@ -323,7 +346,9 @@ def signals(window, min_confidence, verbose):
         polymarket signals --window 6
         polymarket signals --min-confidence 80
     """
-    logger.info(f"SIGNALS command started (window={window}h, min_confidence={min_confidence}, verbose={verbose})")
+    logger.info(
+        f"SIGNALS command started (window={window}h, min_confidence={min_confidence}, verbose={verbose})"
+    )
 
     if verbose:
         logger.remove()
@@ -333,7 +358,7 @@ def signals(window, min_confidence, verbose):
 
     with console.status("[bold green]Fetching signals...", spinner="dots"):
         # Get dependencies
-        session_factory, _, _, _ = _get_dependencies()
+        session_factory, _, _, _, _ = _get_dependencies()
 
         with get_session(session_factory) as session:
             # Import signal queries here
@@ -351,20 +376,28 @@ def signals(window, min_confidence, verbose):
             signals_data = []
             for signal in signals_results:
                 # Get market question
-                market = session.query(Market).filter(Market.condition_id == signal.market_id).first()
+                market = (
+                    session.query(Market)
+                    .filter(Market.condition_id == signal.market_id)
+                    .first()
+                )
                 market_question = market.question if market else signal.market_id
 
-                signals_data.append({
-                    "market_question": market_question,
-                    "direction": signal.direction,
-                    "confidence": signal.confidence_score,
-                    "expert_count": signal.expert_count,
-                    "first_mover_address": signal.first_mover_address,
-                })
+                signals_data.append(
+                    {
+                        "market_question": market_question,
+                        "direction": signal.direction,
+                        "confidence": signal.confidence_score,
+                        "expert_count": signal.expert_count,
+                        "first_mover_address": signal.first_mover_address,
+                    }
+                )
 
     logger.info(f"Found {len(signals_data)} signals")
     for signal in signals_data[:5]:  # Log first 5
-        logger.debug(f"  - {signal['market_question'][:60]}: {signal['direction']} (conf={signal['confidence']}, experts={signal['expert_count']})")
+        logger.debug(
+            f"  - {signal['market_question'][:60]}: {signal['direction']} (conf={signal['confidence']}, experts={signal['expert_count']})"
+        )
 
     # Format and display
     table = format_signals_table(signals_data)
@@ -385,7 +418,9 @@ def leaderboard(game_slug, top_n, verbose):
         polymarket leaderboard esports.cs2
         polymarket leaderboard esports.lol --top-n 10
     """
-    logger.info(f"LEADERBOARD command started (game_slug={game_slug}, top_n={top_n}, verbose={verbose})")
+    logger.info(
+        f"LEADERBOARD command started (game_slug={game_slug}, top_n={top_n}, verbose={verbose})"
+    )
 
     if verbose:
         logger.remove()
@@ -395,7 +430,7 @@ def leaderboard(game_slug, top_n, verbose):
 
     with console.status("[bold green]Fetching leaderboard...", spinner="dots"):
         # Get dependencies
-        session_factory, _, _, _ = _get_dependencies()
+        session_factory, _, _, _, _ = _get_dependencies()
 
         with get_session(session_factory) as session:
             # Validate game slug exists
@@ -406,8 +441,12 @@ def leaderboard(game_slug, top_n, verbose):
             valid_games = result.scalars().all()
 
             if game_slug not in valid_games:
-                logger.error(f"Invalid game slug: {game_slug}. Valid games: {valid_games}")
-                console.print(f"[bold red]Error: Game '{game_slug}' not found.[/bold red]")
+                logger.error(
+                    f"Invalid game slug: {game_slug}. Valid games: {valid_games}"
+                )
+                console.print(
+                    f"[bold red]Error: Game '{game_slug}' not found.[/bold red]"
+                )
                 console.print("\n[bold]Available games:[/bold]")
                 for game in sorted(valid_games):
                     console.print(f"  - {game}")
@@ -439,9 +478,22 @@ def leaderboard(game_slug, top_n, verbose):
 
 
 @cli.command()
-@click.option("--window", "-w", default=24, help="Time window in hours for expert activity")
+@click.option(
+    "--window", "-w", default=24, help="Time window in hours for expert activity"
+)
+@click.option(
+    "--niche",
+    "-n",
+    multiple=True,
+    help="Niche category to scan (repeatable, e.g., --niche esports --niche crypto)",
+)
+@click.option(
+    "--closing-within",
+    default=None,
+    help="Only scan markets closing within this time window (e.g., 48h, 2d)",
+)
 @click.option("--verbose", "-v", is_flag=True, help="Enable debug logging")
-def sweep(window, verbose):
+def sweep(window, niche, closing_within, verbose):
     """Run signal detection sweep.
 
     Refreshes all signals for markets with expert activity.
@@ -449,8 +501,12 @@ def sweep(window, verbose):
     Example:
         polymarket sweep
         polymarket sweep --window 6
+        polymarket sweep --niche esports
+        polymarket sweep --niche esports --niche crypto --closing-within 48h
     """
-    logger.info(f"SWEEP command started (window={window}h, verbose={verbose})")
+    logger.info(
+        f"SWEEP command started (window={window}h, niches={niche}, closing_within={closing_within}, verbose={verbose})"
+    )
 
     if verbose:
         logger.remove()
@@ -458,39 +514,78 @@ def sweep(window, verbose):
 
     console = Console()
 
+    if niche:
+        console.print(f"[bold blue]Scanning niches:[/bold blue] {', '.join(niche)}")
+    if closing_within:
+        from src.pipeline.time_utils import parse_closing_within
+
+        try:
+            threshold = parse_closing_within(closing_within)
+            console.print(
+                f"[bold blue]Closing within:[/bold blue] {closing_within} (before {threshold})"
+            )
+        except ValueError as e:
+            console.print(f"[bold red]Error: {e}[/bold red]")
+            return
+
     with console.status("[bold green]Running sweep...", spinner="dots"):
         import time
+
         start_time = time.time()
 
-        # Get dependencies
-        session_factory, client, category_filter, alerter = _get_dependencies()
+        session_factory, client, category_filter, alerter, gamma_client = (
+            _get_dependencies()
+        )
 
-        # Import pipeline here
         from src.cli.scheduler import run_sweep
 
-        # Run full sweep (skip_alerts=True since this is manual command)
-        stats = run_sweep(session_factory, client, category_filter, alerter, skip_alerts=True)
+        stats = run_sweep(
+            session_factory,
+            client,
+            category_filter,
+            alerter,
+            skip_alerts=True,
+            gamma_client=gamma_client,
+            niches=niche,
+            closing_within=closing_within,
+        )
 
         processing_time = time.time() - start_time
 
-    logger.info(f"Sweep completed: {stats['markets_ingested']} markets, {stats['signals_detected']} signals, {stats['alerts_sent']} alerts in {processing_time:.2f}s")
+    logger.info(
+        f"Sweep completed: {stats['markets_ingested']} markets, {stats['signals_detected']} signals, {stats['alerts_sent']} alerts in {processing_time:.2f}s"
+    )
 
-    # Format and display
-    summary = format_sweep_summary({
-        "processing_time": processing_time,
-        "markets_count": stats["markets_ingested"],
-        "signals_count": stats["signals_detected"],
-        "alerts_sent": stats["alerts_sent"],
-    })
+    summary = format_sweep_summary(
+        {
+            "processing_time": processing_time,
+            "markets_count": stats["markets_ingested"],
+            "signals_count": stats["signals_detected"],
+            "alerts_sent": stats["alerts_sent"],
+        }
+    )
     console.print(summary)
     logger.info("SWEEP command completed")
 
 
 @cli.command()
-@click.option("--interval", "-i", default=None, type=int, help="Polling interval in minutes")
+@click.option(
+    "--interval", "-i", default=None, type=int, help="Polling interval in minutes"
+)
+@click.option(
+    "--niche",
+    "-n",
+    multiple=True,
+    help="Niche category to scan (repeatable)",
+)
+@click.option(
+    "--closing-within",
+    default=None,
+    help="Only scan markets closing within time window (e.g., 48h, 2d)",
+)
 @click.option("--no-alerts", is_flag=True, help="Skip alert delivery")
 @click.option("--verbose", "-v", is_flag=True, help="Enable debug logging")
-def poll(interval, no_alerts, verbose):
+def poll(interval, niche, closing_within, no_alerts, verbose):
     """Run automated polling loop.
 
     Executes full sweep (ingest → score → detect → alert) at regular intervals.
@@ -500,49 +595,86 @@ def poll(interval, no_alerts, verbose):
         polymarket poll
         polymarket poll --interval 30
         polymarket poll --no-alerts
+        polymarket poll --niche esports
+        polymarket poll --niche esports --closing-within 48h
     """
-    logger.info(f"POLL command started (interval={interval}min, no_alerts={no_alerts}, verbose={verbose})")
+    logger.info(
+        f"POLL command started (interval={interval}min, niches={niche}, closing_within={closing_within}, no_alerts={no_alerts}, verbose={verbose})"
+    )
 
     if verbose:
         logger.remove()
         logger.add(sys.stderr, level="DEBUG")
 
-    # Get dependencies
-    settings = get_settings()
-    session_factory, client, category_filter, alerter = _get_dependencies(settings)
+    console = Console()
 
-    # Disable alerter if --no-alerts flag is set
+    if niche:
+        console.print(f"[bold blue]Scanning niches:[/bold blue] {', '.join(niche)}")
+    if closing_within:
+        from src.pipeline.time_utils import parse_closing_within
+
+        try:
+            threshold = parse_closing_within(closing_within)
+            console.print(
+                f"[bold blue]Closing within:[/bold blue] {closing_within} (before {threshold})"
+            )
+        except ValueError as e:
+            console.print(f"[bold red]Error: {e}[/bold red]")
+            return
+
+    settings = get_settings()
+    session_factory, client, category_filter, alerter, gamma_client = _get_dependencies(
+        settings
+    )
+
     if no_alerts:
         alerter = None
 
-    # Use interval from flag if provided, else from settings
     poll_interval = interval if interval is not None else settings.poll_interval_minutes
 
     console = Console()
-    console.print(f"[bold green]Starting polling loop[/bold green] (interval: {poll_interval} minutes)")
+    console.print(
+        f"[bold green]Starting polling loop[/bold green] (interval: {poll_interval} minutes)"
+    )
 
-    # Show alert status
     if alerter:
         logger.info("Alerts enabled (Telegram configured)")
         console.print("[bold blue]Alerts enabled[/bold blue] (Telegram configured)")
     else:
         logger.info("Alerts disabled (Telegram not configured or --no-alerts)")
-        console.print("[bold yellow]Alerts disabled[/bold yellow] (Telegram not configured or --no-alerts)")
+        console.print(
+            "[bold yellow]Alerts disabled[/bold yellow] (Telegram not configured or --no-alerts)"
+        )
 
-    # Import scheduler
     from src.cli.scheduler import run_polling_loop
 
-    # Run polling loop (blocks until SIGINT/SIGTERM)
     logger.info(f"Entering polling loop (interval={poll_interval}min)")
-    run_polling_loop(session_factory, client, category_filter, alerter, interval_minutes=poll_interval)
+    run_polling_loop(
+        session_factory,
+        client,
+        category_filter,
+        alerter,
+        interval_minutes=poll_interval,
+        gamma_client=gamma_client,
+        niches=niche,
+        closing_within=closing_within,
+    )
     logger.info("POLL command completed (graceful shutdown)")
 
 
 @cli.command()
 @click.argument("address")
-@click.option("--format", "-f", "output_format", type=click.Choice(["table", "json", "csv"]), default="table",
-              help="Output format")
-@click.option("--limit", "-l", default=50, type=int, help="Max trades to display (default 50)")
+@click.option(
+    "--format",
+    "-f",
+    "output_format",
+    type=click.Choice(["table", "json", "csv"]),
+    default="table",
+    help="Output format",
+)
+@click.option(
+    "--limit", "-l", default=50, type=int, help="Max trades to display (default 50)"
+)
 @click.option("--verbose", "-v", is_flag=True, help="Enable debug logging")
 def research(address, output_format, limit, verbose):
     """Query full trade history from JBecker dataset.
@@ -558,7 +690,9 @@ def research(address, output_format, limit, verbose):
         polymarket research 0xeffd76 --format json
         polymarket research 0xeffd76 --format csv --limit 1000
     """
-    logger.info(f"RESEARCH command started (address={address}, format={output_format}, limit={limit}, verbose={verbose})")
+    logger.info(
+        f"RESEARCH command started (address={address}, format={output_format}, limit={limit}, verbose={verbose})"
+    )
 
     if verbose:
         logger.remove()
@@ -579,7 +713,9 @@ def research(address, output_format, limit, verbose):
         console.print("[yellow]To download and setup:[/yellow]")
         console.print("1. wget https://s3.jbecker.dev/data.tar.zst  (33.5 GB)")
         console.print("2. tar --use-compress-program=zstd -xvf data.tar.zst")
-        console.print("3. Set JBECKER_DATA_PATH in .env to point to the data/ directory")
+        console.print(
+            "3. Set JBECKER_DATA_PATH in .env to point to the data/ directory"
+        )
         console.print("4. Verify: ls $JBECKER_DATA_PATH/polymarket/trades/")
         logger.warning("JBecker dataset not available, exiting")
         return
@@ -587,7 +723,7 @@ def research(address, output_format, limit, verbose):
     # Resolve address (try DB lookup if available, otherwise use as-is)
     full_address = address
     try:
-        session_factory, _, _, _ = _get_dependencies(settings)
+        session_factory, _, _, _, _ = _get_dependencies(settings)
         with get_session(session_factory) as session:
             resolved = find_trader_by_prefix(session, address)
             if resolved:
@@ -596,7 +732,10 @@ def research(address, output_format, limit, verbose):
     except Exception as e:
         logger.debug(f"DB lookup failed, using address as-is: {e}")
 
-    with console.status(f"[bold green]Querying {limit} trades for {full_address[:10]}...", spinner="dots"):
+    with console.status(
+        f"[bold green]Querying {limit} trades for {full_address[:10]}...",
+        spinner="dots",
+    ):
         # Get total count
         total_count = jbecker.get_trade_count(full_address)
         logger.info(f"Total trades found: {total_count}")
@@ -625,7 +764,13 @@ def research(address, output_format, limit, verbose):
 
 @cli.command("batch-analyze")
 @click.option("--addresses", "-a", multiple=True, help="Trader addresses to analyze")
-@click.option("--file", "-f", "address_file", type=click.Path(exists=True), help="File with addresses (one per line)")
+@click.option(
+    "--file",
+    "-f",
+    "address_file",
+    type=click.Path(exists=True),
+    help="File with addresses (one per line)",
+)
 @click.option("--verbose", "-v", is_flag=True, help="Enable debug logging")
 def batch_analyze(addresses, address_file, verbose):
     """Bulk ingest trader histories from JBecker dataset.
@@ -640,7 +785,9 @@ def batch_analyze(addresses, address_file, verbose):
         polymarket batch-analyze -a 0xeffd76... -a 0xeefa8e...
         polymarket batch-analyze --file traders.txt
     """
-    logger.info(f"BATCH-ANALYZE command started (addresses={len(addresses)}, file={address_file}, verbose={verbose})")
+    logger.info(
+        f"BATCH-ANALYZE command started (addresses={len(addresses)}, file={address_file}, verbose={verbose})"
+    )
 
     if verbose:
         logger.remove()
@@ -653,16 +800,18 @@ def batch_analyze(addresses, address_file, verbose):
     all_addresses = list(addresses)
 
     if address_file:
-        with open(address_file, 'r') as f:
+        with open(address_file, "r") as f:
             for line in f:
                 line = line.strip()
                 # Skip empty lines and comments
-                if line and not line.startswith('#'):
+                if line and not line.startswith("#"):
                     all_addresses.append(line)
         logger.info(f"Loaded {len(all_addresses) - len(addresses)} addresses from file")
 
     if not all_addresses:
-        console.print("[red]Error: No addresses provided. Use --addresses or --file.[/red]")
+        console.print(
+            "[red]Error: No addresses provided. Use --addresses or --file.[/red]"
+        )
         logger.error("No addresses provided")
         return
 
@@ -680,19 +829,23 @@ def batch_analyze(addresses, address_file, verbose):
         console.print("[yellow]To download and setup:[/yellow]")
         console.print("1. wget https://s3.jbecker.dev/data.tar.zst  (33.5 GB)")
         console.print("2. tar --use-compress-program=zstd -xvf data.tar.zst")
-        console.print("3. Set JBECKER_DATA_PATH in .env to point to the data/ directory")
+        console.print(
+            "3. Set JBECKER_DATA_PATH in .env to point to the data/ directory"
+        )
         console.print("4. Verify: ls $JBECKER_DATA_PATH/polymarket/trades/")
         logger.warning("JBecker dataset not available, exiting")
         return
 
     # Get dependencies
-    session_factory, client, category_filter, _ = _get_dependencies(settings)
+    session_factory, client, category_filter, _, _ = _get_dependencies(settings)
 
     # Import pipeline
     from src.pipeline.ingest import IngestionPipeline
 
     # Create pipeline with JBecker client
-    pipeline = IngestionPipeline(client, session_factory, category_filter, jbecker_client=jbecker)
+    pipeline = IngestionPipeline(
+        client, session_factory, category_filter, jbecker_client=jbecker
+    )
 
     # Process each trader
     results = []
@@ -702,30 +855,38 @@ def batch_analyze(addresses, address_file, verbose):
 
     with console.status("[bold green]Processing traders...", spinner="dots") as status:
         for idx, addr in enumerate(all_addresses, start=1):
-            status.update(f"[bold green]Processing {idx}/{len(all_addresses)}: {addr[:10]}...")
+            status.update(
+                f"[bold green]Processing {idx}/{len(all_addresses)}: {addr[:10]}..."
+            )
             logger.info(f"Processing trader {idx}/{len(all_addresses)}: {addr}")
 
             try:
                 stats = pipeline.ingest_trader_history_jbecker(addr)
-                results.append({
-                    "address": addr,
-                    "found": stats.get("detail_count", 0),
-                    "inserted": stats.get("trades_inserted", 0),
-                    "skipped": stats.get("duplicates_skipped", 0),
-                    "error": None,
-                })
+                results.append(
+                    {
+                        "address": addr,
+                        "found": stats.get("detail_count", 0),
+                        "inserted": stats.get("trades_inserted", 0),
+                        "skipped": stats.get("duplicates_skipped", 0),
+                        "error": None,
+                    }
+                )
                 total_inserted += stats.get("trades_inserted", 0)
                 total_skipped += stats.get("duplicates_skipped", 0)
-                logger.info(f"Success: {stats.get('trades_inserted', 0)} inserted, {stats.get('duplicates_skipped', 0)} skipped")
+                logger.info(
+                    f"Success: {stats.get('trades_inserted', 0)} inserted, {stats.get('duplicates_skipped', 0)} skipped"
+                )
             except Exception as e:
                 logger.warning(f"Error processing {addr}: {e}")
-                results.append({
-                    "address": addr,
-                    "found": 0,
-                    "inserted": 0,
-                    "skipped": 0,
-                    "error": str(e),
-                })
+                results.append(
+                    {
+                        "address": addr,
+                        "found": 0,
+                        "inserted": 0,
+                        "skipped": 0,
+                        "error": str(e),
+                    }
+                )
                 total_errors += 1
 
     # Display summary table
@@ -738,7 +899,9 @@ def batch_analyze(addresses, address_file, verbose):
     console.print(f"  Skipped:  [yellow]{total_skipped}[/yellow]")
     console.print(f"  Errors:   [red]{total_errors}[/red]")
 
-    logger.info(f"BATCH-ANALYZE command completed: {total_inserted} inserted, {total_skipped} skipped, {total_errors} errors")
+    logger.info(
+        f"BATCH-ANALYZE command completed: {total_inserted} inserted, {total_skipped} skipped, {total_errors} errors"
+    )
 
 
 if __name__ == "__main__":
