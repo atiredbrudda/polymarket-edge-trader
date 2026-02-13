@@ -2,19 +2,18 @@
 
 ## Project Reference
 
-See: .planning/PROJECT.md (updated 2026-02-05)
+See: .planning/PROJECT.md (updated 2026-02-13)
 
-**Core value:** Surface where smart money is moving in eSports markets so the user can see what informed traders are doing and factor that into their own thinking.
-**Current focus:** Phase 9 - Jon Becker dataset integration
+**Core value:** Surface where smart money is moving in niche prediction markets so the user can see what informed traders are doing and factor that into their own thinking.
+**Current focus:** v1.0 complete — planning v2.0 milestone
 
 ## Current Position
 
-Phase: 9 of 9 (Jon Becker Dataset Integration)
-Plan: 3 of 3 complete
-Status: Complete
-Last activity: 2026-02-12 — Phase 9 COMPLETE (All 3 plans verified and passing)
+Milestone: v1.0 MVP SHIPPED (2026-02-13)
+Status: Between milestones — ready for v2.0 planning
+Last activity: 2026-02-13 — v1.0 milestone archived
 
-Progress: [██████████] 100% (29/29 total plans complete)
+Progress: v1.0 [██████████] 100% (29/29 plans, 9 phases)
 
 ## Performance Metrics
 

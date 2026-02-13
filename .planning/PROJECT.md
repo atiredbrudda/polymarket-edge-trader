@@ -12,55 +12,63 @@ Surface where smart money is moving in niche prediction markets so the user can 
 
 ### Validated
 
-(None yet — ship to validate)
+- Polymarket CLOB API integration for events, markets, trades, and trader histories — v1.0
+- Custom eSports taxonomy with game-level granularity (CS2, Dota 2, LoL, Valorant) — v1.0
+- Event-first trader discovery pipeline (active events → active traders → history backtrack) — v1.0
+- Trader evaluation engine (PnL, win rate, volume, minimum 5 resolved markets, recency weighting) — v1.0
+- Niche specialization detection (game-level specialist vs. eSports generalist) — v1.0
+- Signal aggregation with configurable thresholds (75% consensus, 3+ experts) — v1.0
+- Ranked trader leaderboard per niche — v1.0
+- Drill-down into individual trader profiles, stats, and position history — v1.0
+- Periodic automated polling (hourly sweeps of active markets) — v1.0
+- Telegram alerting with event classification and deduplication — v1.0
+- 4-tier cost-optimized data ingestion (JBecker/API/Graph/Blockchain) — v1.0
+- Offline trader research via JBecker dataset CLI — v1.0
+- Architecture extensible to new categories via taxonomy definitions — v1.0
 
 ### Active
 
-- [ ] Polymarket CLOB API integration for events, markets, trades, and trader histories
-- [ ] Custom eSports taxonomy with game-level granularity (CS:GO, Dota 2, LoL, Valorant, etc.)
-- [ ] Event-first trader discovery pipeline (active events → active traders → history backtrack)
-- [ ] Trader evaluation engine (ROI weighted by volume, minimum 5 resolved markets, calibration scoring, recency weighting)
-- [ ] Niche specialization detection (game-level specialist vs. eSports generalist)
-- [ ] Signal aggregation with configurable thresholds (>70% consensus, 2+ convergence)
-- [ ] Ranked trader leaderboard per niche
-- [ ] Drill-down into individual trader profiles, stats, and position history
-- [ ] Periodic automated polling (hourly sweeps of active markets)
-- [ ] CLI alert output with webhook support (Discord/Telegram)
-- [ ] Architecture extensible to new categories (politics, crypto, sports) via taxonomy definitions
+(Requirements for next milestone defined via `/gsd:new-milestone`)
 
 ### Out of Scope
 
 - Web dashboard — premature until signal quality is proven
 - Auto-trading / bot execution — this is an awareness tool, not a trading bot
 - Real-time streaming — hourly polling is sufficient for the use case
-- Non-eSports categories in v1 — architecture is category-agnostic by design, but only eSports taxonomy is configured as the initial case study
 - Mobile app — CLI + webhooks covers the interface needs
+- Discord webhook alerting — Telegram sufficient for v1, Discord deferred (ALRT-02)
 
 ## Context
 
 - **Platform:** Polymarket — prediction market on Polygon blockchain. Uses a CLOB (Central Limit Order Book) API for trading data. Traders identified by wallet addresses.
-- **Discovery approach:** Scanning all historical traders is infeasible and unnecessary. Instead, start from currently active events, find who's trading them, then evaluate those traders' histories. This naturally focuses on active participants.
-- **Niche hypothesis:** Traders who specialize deeply in a narrow category (e.g., one specific esport game) likely have domain knowledge that generalists don't. Their convergence on a position is a stronger signal than broad-market consensus.
-- **eSports as case study:** eSports is the proving ground, not the end goal. It's a small enough category to validate the niche-expertise-detection pipeline before applying it to larger markets. Every design choice should ask "would this generalize?" — hard-coding eSports assumptions is tech debt.
-- **Signal philosophy:** The output is intelligence, not instruction. The user wants to see patterns and make their own decisions. Alerts are awareness triggers, not trade recommendations.
+- **Current state:** v1.0 shipped. 26,306 LOC Python, 509+ tests. Full pipeline operational: ingestion → classification → evaluation → scoring → signal detection → alerting → CLI.
+- **Tech stack:** Python 3.12, SQLAlchemy 2.0, Click, Rich, DuckDB, web3.py, py-clob-client, loguru, tenacity.
+- **Discovery approach:** Event-first: start from active events, find who's trading them, then evaluate those traders' histories. Naturally focuses on active participants.
+- **Niche hypothesis:** Traders who specialize deeply in a narrow category likely have domain knowledge that generalists don't. Their convergence on a position is a stronger signal than broad-market consensus.
+- **Signal philosophy:** The output is intelligence, not instruction. Alerts are awareness triggers, not trade recommendations.
+- **Known limitation:** Market scanning currently fetches ALL markets then filters. Needs niche + time-to-close filtering for practical use.
+- **Known limitation:** Scoring operates at game level only. Deeper niche detection (tournament/team level) needed for the "Chelsea trader" use case.
 
 ## Constraints
 
-- **Data source**: Polymarket CLOB API — all data must come from public API endpoints. Rate limits will constrain polling frequency and backfill depth.
-- **Tech stack**: Python — user's preferred language. Specific libraries TBD after research.
-- **Storage**: Local-first (SQLite preferred) — no external database infrastructure for v1.
-- **Taxonomy**: Must be extensible by design — adding a new category should mean defining a taxonomy file and running the same pipeline, not rewriting code.
+- **Data source**: Polymarket CLOB API + The Graph + JBecker Parquet dataset. Rate limits constrain polling frequency.
+- **Tech stack**: Python — user's preferred language.
+- **Storage**: Local-first (SQLite). Database at `data/polymarket.db`.
+- **Taxonomy**: Extensible by design — adding a category means defining a YAML taxonomy file.
 
 ## Key Decisions
 
 | Decision | Rationale | Outcome |
 |----------|-----------|---------|
-| eSports as first case study | Small category to validate the category-agnostic pipeline before applying to larger markets; eSports is the proving ground, not the product | — Pending |
-| Event-first discovery (not trader-first) | Avoids scanning entire trader database; focuses on active participants naturally | — Pending |
-| Custom taxonomy over Polymarket categories | Polymarket's categories are too broad; game-level granularity needed for niche detection | — Pending |
-| Hourly polling, not real-time | Awareness tool doesn't need sub-minute latency; reduces API pressure and complexity | — Pending |
-| CLI + webhooks, no web UI | Prove signal quality first; UI investment only after value is validated | — Pending |
-| Both summary signal and trader drill-down | User wants to evaluate the signal themselves, not just trust the algorithm blindly | — Pending |
+| eSports as first case study | Small category to validate pipeline before larger markets | Good — validated architecture |
+| Event-first discovery | Avoids scanning entire trader database; focuses on active participants | Good — efficient and targeted |
+| Custom taxonomy over Polymarket categories | Game-level granularity needed for niche detection | Good — enables specialist scoring |
+| Hourly polling, not real-time | Awareness tool doesn't need sub-minute latency | Good — reduces API pressure |
+| CLI + webhooks, no web UI | Prove signal quality first before UI investment | Good — CLI sufficient for v1 |
+| SQLite local-first storage | No external database infrastructure needed | Good — simple, zero-config |
+| 4-tier data ingestion hierarchy | JBecker (free) → API (free) → Graph (paid) → Blockchain (slow) | Good — minimizes costs |
+| Bonus-only consistency multiplier | Never penalize, only reward consistent traders | Good — conservative scoring |
+| Append-only score history | INSERT-only for ExpertiseScore and SignalSnapshot | Good — enables trend analysis |
 
 ---
-*Last updated: 2026-02-05 after clarifying eSports as case study, not end goal*
+*Last updated: 2026-02-13 after v1.0 milestone*
