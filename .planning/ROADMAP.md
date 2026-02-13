@@ -56,10 +56,11 @@ Plans:
   2. User can run backfill command for previously discovered traders without re-discovering
   3. User can view which traders have been discovered but not yet backfilled via CLI status command
   4. System tracks backfill state per trader (discovered vs. backfilled) in database
-**Plans**: TBD
+**Plans**: 2 plans
 
 Plans:
-- [ ] 11-01: TBD
+- [ ] 11-01-PLAN.md — TDD backfill state queries and index
+- [ ] 11-02-PLAN.md — CLI commands (discover, backfill, status) and formatter
 
 #### Phase 12: Deep Niche Scoring
 **Goal**: System scores expertise at tournament and team level, not just game level
@@ -90,5 +91,5 @@ Plans:
 | 8. Blockchain History | v1.0 | 2/2 | Complete | 2026-02-11 |
 | 9. JBecker Dataset | v1.0 | 3/3 | Complete | 2026-02-12 |
 | 10. Targeted Market Scanning | v1.1 | 0/2 | Planned | - |
-| 11. Pipeline Decoupling | v1.1 | 0/? | Not started | - |
+| 11. Pipeline Decoupling | v1.1 | 0/2 | Planned | - |
 | 12. Deep Niche Scoring | v1.1 | 0/? | Not started | - |
