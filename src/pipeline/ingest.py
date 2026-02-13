@@ -17,8 +17,16 @@ from loguru import logger
 from sqlalchemy.orm import sessionmaker
 
 from src.api.client import PolymarketClient
+from src.api.gamma_client import GammaMarketClient
 from src.api.models import MarketResponse, TradeResponse
-from src.db.models import BlockchainSyncState, Market, Trader, Trade, TraderCategorySummary
+from src.pipeline.time_utils import parse_closing_within
+from src.db.models import (
+    BlockchainSyncState,
+    Market,
+    Trader,
+    Trade,
+    TraderCategorySummary,
+)
 from src.pipeline.aggregators import group_and_aggregate
 from src.pipeline.filters import CategoryFilter, TradeWithCategory
 from src.graph.client import GraphClient
@@ -53,6 +61,7 @@ class IngestionPipeline:
         blockchain_client: Optional[Any] = None,
         graph_client: Optional[GraphClient] = None,
         jbecker_client: Optional[Any] = None,
+        gamma_client: Optional[GammaMarketClient] = None,
     ):
         """Initialize ingestion pipeline.
 
@@ -63,6 +72,7 @@ class IngestionPipeline:
             blockchain_client: Optional PolygonBlockchainClient for complete history (backup)
             graph_client: Optional GraphClient for The Graph queries (if API insufficient)
             jbecker_client: Optional JBeckerDataset for historical trades (primary tier per cost optimization)
+            gamma_client: Optional GammaMarketClient for targeted market scanning
         """
         self.client = client
         self.session_factory = session_factory
@@ -70,6 +80,7 @@ class IngestionPipeline:
         self.blockchain_client = blockchain_client
         self.graph_client = graph_client
         self.jbecker_client = jbecker_client
+        self.gamma_client = gamma_client
 
     def ingest_active_markets(self) -> int:
         """Fetch and persist active markets from Polymarket API.
@@ -98,7 +109,9 @@ class IngestionPipeline:
         all_markets: list[MarketResponse] = []
 
         if test_condition_ids:
-            logger.info(f"DEBUG MODE: Testing with {len(test_condition_ids)} hardcoded markets")
+            logger.info(
+                f"DEBUG MODE: Testing with {len(test_condition_ids)} hardcoded markets"
+            )
             for condition_id in test_condition_ids:
                 market = self.client.get_market(condition_id)
                 if market:
@@ -107,9 +120,13 @@ class IngestionPipeline:
         else:
             # Full scan mode (slow)
             logger.info("Full scan mode - fetching ALL markets (this will be slow)")
-            all_markets_full: list[MarketResponse] = self.client.get_markets(active=True)
+            all_markets_full: list[MarketResponse] = self.client.get_markets(
+                active=True
+            )
             esports_markets = [m for m in all_markets_full if m.category == "eSports"]
-            logger.info(f"Found {len(all_markets_full)} total markets, {len(esports_markets)} eSports markets")
+            logger.info(
+                f"Found {len(all_markets_full)} total markets, {len(esports_markets)} eSports markets"
+            )
             all_markets = esports_markets
 
         # Persist markets in batches
@@ -191,6 +208,173 @@ class IngestionPipeline:
 
         return markets_processed
 
+    def ingest_targeted_markets(
+        self,
+        niches: tuple[str, ...] = (),
+        end_date_max: datetime | None = None,
+    ) -> int:
+        """Fetch and persist markets matching niche and time filters via Gamma API.
+
+        Uses Gamma API for server-side filtering instead of fetching all markets.
+        For each niche, queries Gamma API with tag filter. If end_date_max provided,
+        includes it as additional filter. Results are unioned (OR semantics).
+
+        Falls back to CLOB API + client-side filtering if Gamma client unavailable.
+
+        Args:
+            niches: Tuple of niche category strings (e.g., ("esports", "crypto"))
+            end_date_max: Maximum end date for market closing time filter
+
+        Returns:
+            Count of markets processed
+        """
+        if self.gamma_client is None:
+            logger.warning(
+                "Gamma client not available, falling back to full market ingestion"
+            )
+            return self.ingest_active_markets()
+
+        logger.info(
+            f"Starting targeted market ingestion (niches={niches}, end_date_max={end_date_max})"
+        )
+
+        all_markets: list[dict] = []
+        seen_condition_ids: set[str] = set()
+
+        if niches:
+            for niche in niches:
+                logger.info(f"Fetching markets for niche: {niche}")
+                try:
+                    markets = self.gamma_client.get_markets(
+                        tag=niche,
+                        end_date_max=end_date_max,
+                        closed=False,
+                    )
+                    for market in markets:
+                        condition_id = market.get("condition_id")
+                        if condition_id and condition_id not in seen_condition_ids:
+                            seen_condition_ids.add(condition_id)
+                            all_markets.append(market)
+                    logger.info(f"Fetched {len(markets)} markets for niche '{niche}'")
+                except Exception as e:
+                    logger.error(f"Failed to fetch markets for niche '{niche}': {e}")
+                    continue
+        elif end_date_max:
+            logger.info(f"Fetching markets with end_date_max: {end_date_max}")
+            try:
+                markets = self.gamma_client.get_markets(
+                    end_date_max=end_date_max,
+                    closed=False,
+                )
+                for market in markets:
+                    condition_id = market.get("condition_id")
+                    if condition_id and condition_id not in seen_condition_ids:
+                        seen_condition_ids.add(condition_id)
+                        all_markets.append(market)
+                logger.info(f"Fetched {len(markets)} markets with time filter")
+            except Exception as e:
+                logger.error(f"Failed to fetch markets with time filter: {e}")
+                all_markets = []
+
+        if not all_markets:
+            logger.info("No markets found matching filters")
+            return 0
+
+        logger.info(f"Total unique markets to persist: {len(all_markets)}")
+
+        batch_size = 100
+        markets_processed = 0
+
+        session = self.session_factory()
+        try:
+            for i, market_dict in enumerate(all_markets):
+                condition_id = market_dict.get("condition_id")
+                if not condition_id:
+                    continue
+
+                question = market_dict.get("question", "")
+                end_date_iso = market_dict.get("end_date")
+                closed = market_dict.get("closed", False)
+                active = not closed
+
+                tags = market_dict.get("tags", [])
+                category = None
+                if tags and isinstance(tags, list):
+                    first_tag = tags[0]
+                    if isinstance(first_tag, dict):
+                        category = first_tag.get("label")
+                    elif isinstance(first_tag, str):
+                        category = first_tag
+
+                tokens = market_dict.get("tokens", [])
+                outcome = None
+                if tokens and isinstance(tokens, list):
+                    outcome_tokens = [
+                        t.get("outcome") for t in tokens if isinstance(t, dict)
+                    ]
+                    outcome = ",".join(outcome_tokens) if outcome_tokens else None
+
+                existing = (
+                    session.query(Market).filter_by(condition_id=condition_id).first()
+                )
+
+                if existing:
+                    existing.question = question
+                    existing.category = category
+                    existing.active = active
+                    existing.outcome = outcome
+                    existing.updated_at = datetime.utcnow()
+
+                    if end_date_iso:
+                        try:
+                            existing.end_date = datetime.fromisoformat(
+                                end_date_iso.replace("Z", "+00:00")
+                            )
+                        except Exception:
+                            pass
+
+                    if tokens:
+                        existing.tokens = json.dumps(tokens)
+                else:
+                    market = Market(
+                        condition_id=condition_id,
+                        question=question,
+                        category=category,
+                        active=active,
+                        outcome=outcome,
+                    )
+
+                    if end_date_iso:
+                        try:
+                            market.end_date = datetime.fromisoformat(
+                                end_date_iso.replace("Z", "+00:00")
+                            )
+                        except Exception:
+                            pass
+
+                    if tokens:
+                        market.tokens = json.dumps(tokens)
+
+                    session.add(market)
+
+                markets_processed += 1
+
+                if (i + 1) % batch_size == 0:
+                    session.commit()
+                    logger.debug(f"Committed batch of {batch_size} markets")
+
+            session.commit()
+            logger.info(f"Ingested {markets_processed} targeted markets")
+
+        except Exception as e:
+            session.rollback()
+            logger.error(f"Failed to ingest targeted markets: {e}")
+            raise
+        finally:
+            session.close()
+
+        return markets_processed
+
     def discover_traders_from_market(self, condition_id: str) -> list[str]:
         """Discover trader addresses from market trades and store their trades.
 
@@ -223,7 +407,9 @@ class IngestionPipeline:
             # Get market category
             market = session.query(Market).filter_by(condition_id=condition_id).first()
             if not market:
-                logger.warning(f"Market {condition_id} not found in database during discovery")
+                logger.warning(
+                    f"Market {condition_id} not found in database during discovery"
+                )
                 session.close()
                 return []
 
@@ -250,7 +436,9 @@ class IngestionPipeline:
                 for trade_response in trader_trades:
                     # Check if trade already exists (deduplication)
                     existing_trade = (
-                        session.query(Trade).filter_by(trade_id=trade_response.id).first()
+                        session.query(Trade)
+                        .filter_by(trade_id=trade_response.id)
+                        .first()
                     )
 
                     if not existing_trade:
@@ -357,7 +545,9 @@ class IngestionPipeline:
                             if market_response.end_date_iso:
                                 try:
                                     new_market.end_date = datetime.fromisoformat(
-                                        market_response.end_date_iso.replace("Z", "+00:00")
+                                        market_response.end_date_iso.replace(
+                                            "Z", "+00:00"
+                                        )
                                     )
                                 except Exception:
                                     pass
@@ -371,7 +561,9 @@ class IngestionPipeline:
                                 f"Discovered new market: {market_response.question[:40]}... ({market_response.category})"
                             )
                     except Exception as e:
-                        logger.warning(f"Failed to fetch market {market_id[:8]}...: {e}")
+                        logger.warning(
+                            f"Failed to fetch market {market_id[:8]}...: {e}"
+                        )
                         # Skip this market if we can't fetch metadata
                         continue
 
@@ -513,7 +705,9 @@ class IngestionPipeline:
             - already_in_db: Trades skipped due to deduplication
         """
         if not self.blockchain_client:
-            raise ValueError("Blockchain client not configured. Pass blockchain_client to __init__.")
+            raise ValueError(
+                "Blockchain client not configured. Pass blockchain_client to __init__."
+            )
 
         # Import here to avoid circular dependency
         from src.blockchain.client import POLYMARKET_START_BLOCK
@@ -532,9 +726,11 @@ class IngestionPipeline:
 
         try:
             # Get sync state for incremental updates
-            sync_state = session.query(BlockchainSyncState).filter_by(
-                trader_address=trader_address
-            ).first()
+            sync_state = (
+                session.query(BlockchainSyncState)
+                .filter_by(trader_address=trader_address)
+                .first()
+            )
 
             if use_incremental and sync_state:
                 from_block = sync_state.last_queried_block + 1
@@ -552,7 +748,9 @@ class IngestionPipeline:
             stats["trades_from_blockchain"] = len(blockchain_trades)
 
             if not blockchain_trades:
-                logger.info(f"No blockchain trades found for trader {trader_address[:8]}...")
+                logger.info(
+                    f"No blockchain trades found for trader {trader_address[:8]}..."
+                )
                 # Mark backfill complete even if no trades
                 trader = session.query(Trader).filter_by(address=trader_address).first()
                 if trader:
@@ -576,9 +774,11 @@ class IngestionPipeline:
 
                 # Fetch market metadata if not cached
                 if condition_id not in market_metadata:
-                    existing_market = session.query(Market).filter_by(
-                        condition_id=condition_id
-                    ).first()
+                    existing_market = (
+                        session.query(Market)
+                        .filter_by(condition_id=condition_id)
+                        .first()
+                    )
 
                     if existing_market:
                         market_metadata[condition_id] = existing_market.category
@@ -598,19 +798,25 @@ class IngestionPipeline:
                                 if market_response.end_date_iso:
                                     try:
                                         new_market.end_date = datetime.fromisoformat(
-                                            market_response.end_date_iso.replace("Z", "+00:00")
+                                            market_response.end_date_iso.replace(
+                                                "Z", "+00:00"
+                                            )
                                         )
                                     except Exception:
                                         pass
                                 if market_response.tokens:
-                                    new_market.tokens = json.dumps(market_response.tokens)
+                                    new_market.tokens = json.dumps(
+                                        market_response.tokens
+                                    )
 
                                 session.add(new_market)
                                 market_metadata[condition_id] = market_response.category
                             else:
                                 market_metadata[condition_id] = None
                         except Exception as e:
-                            logger.warning(f"Failed to fetch market {condition_id[:8]}...: {e}")
+                            logger.warning(
+                                f"Failed to fetch market {condition_id[:8]}...: {e}"
+                            )
                             market_metadata[condition_id] = None
 
                 category = market_metadata.get(condition_id)
@@ -632,7 +838,9 @@ class IngestionPipeline:
                         continue
 
             if not all_trades_with_category:
-                logger.info(f"No valid trades to process for trader {trader_address[:8]}...")
+                logger.info(
+                    f"No valid trades to process for trader {trader_address[:8]}..."
+                )
                 trader = session.query(Trader).filter_by(address=trader_address).first()
                 if trader:
                     trader.backfill_complete = True
@@ -649,9 +857,9 @@ class IngestionPipeline:
                 trade_response = trade_with_cat.trade
 
                 # Deduplication check by trade_id
-                existing = session.query(Trade).filter_by(
-                    trade_id=trade_response.id
-                ).first()
+                existing = (
+                    session.query(Trade).filter_by(trade_id=trade_response.id).first()
+                )
 
                 if existing:
                     stats["already_in_db"] += 1
@@ -675,10 +883,14 @@ class IngestionPipeline:
                 summaries = group_and_aggregate(summary_trades, trader_address)
 
                 for summary_dict in summaries:
-                    existing_summary = session.query(TraderCategorySummary).filter_by(
-                        trader_address=summary_dict["trader_address"],
-                        category=summary_dict["category"],
-                    ).first()
+                    existing_summary = (
+                        session.query(TraderCategorySummary)
+                        .filter_by(
+                            trader_address=summary_dict["trader_address"],
+                            category=summary_dict["category"],
+                        )
+                        .first()
+                    )
 
                     if existing_summary:
                         existing_summary.total_volume += summary_dict["total_volume"]
@@ -764,7 +976,9 @@ class IngestionPipeline:
             - already_in_db: Trades skipped due to deduplication
         """
         if not self.graph_client:
-            raise ValueError("Graph client not configured. Pass graph_client to __init__.")
+            raise ValueError(
+                "Graph client not configured. Pass graph_client to __init__."
+            )
 
         logger.info(f"Ingesting history for {trader_address[:8]}... from The Graph")
 
@@ -809,12 +1023,16 @@ class IngestionPipeline:
 
                 try:
                     # Convert to API format
-                    trade_response = graph_trade_to_api_response(graph_trade, trader_address)
+                    trade_response = graph_trade_to_api_response(
+                        graph_trade, trader_address
+                    )
 
                     # Check if trade already exists (deduplication by trade ID)
-                    existing = session.query(Trade).filter_by(
-                        trade_id=trade_response.id
-                    ).first()
+                    existing = (
+                        session.query(Trade)
+                        .filter_by(trade_id=trade_response.id)
+                        .first()
+                    )
 
                     if existing:
                         stats["already_in_db"] += 1
@@ -887,9 +1105,13 @@ class IngestionPipeline:
             FileNotFoundError: If JBecker dataset not available
         """
         if not self.jbecker_client:
-            raise ValueError("JBecker client not configured. Pass jbecker_client to __init__.")
+            raise ValueError(
+                "JBecker client not configured. Pass jbecker_client to __init__."
+            )
 
-        logger.info(f"Ingesting history for {trader_address[:8]}... from JBecker dataset")
+        logger.info(
+            f"Ingesting history for {trader_address[:8]}... from JBecker dataset"
+        )
 
         session = self.session_factory()
         stats = {
@@ -907,7 +1129,11 @@ class IngestionPipeline:
             if not jbecker_trades:
                 logger.info(f"No JBecker trades found for {trader_address[:8]}...")
                 # Mark backfill complete even if no trades
-                trader = session.query(Trader).filter_by(address=trader_address.lower()).first()
+                trader = (
+                    session.query(Trader)
+                    .filter_by(address=trader_address.lower())
+                    .first()
+                )
                 if trader:
                     trader.backfill_complete = True
                     trader.last_active = datetime.utcnow()
@@ -921,12 +1147,16 @@ class IngestionPipeline:
             for jbecker_trade in jbecker_trades:
                 try:
                     # Convert to API format
-                    trade_response = jbecker_trade_to_api_response(jbecker_trade, trader_address)
+                    trade_response = jbecker_trade_to_api_response(
+                        jbecker_trade, trader_address
+                    )
 
                     # Check if trade already exists (deduplication by trade ID)
-                    existing = session.query(Trade).filter_by(
-                        trade_id=trade_response.id
-                    ).first()
+                    existing = (
+                        session.query(Trade)
+                        .filter_by(trade_id=trade_response.id)
+                        .first()
+                    )
 
                     if existing:
                         stats["already_in_db"] += 1
@@ -966,7 +1196,9 @@ class IngestionPipeline:
                 session.commit()
 
             # Mark trader as backfill complete
-            trader = session.query(Trader).filter_by(address=trader_address.lower()).first()
+            trader = (
+                session.query(Trader).filter_by(address=trader_address.lower()).first()
+            )
             if trader:
                 trader.backfill_complete = True
                 trader.last_active = datetime.utcnow()
@@ -1003,9 +1235,12 @@ class IngestionPipeline:
         session = self.session_factory()
         try:
             from sqlalchemy import func
-            result = session.query(func.max(Trade.timestamp)).filter_by(
-                trader_address=trader_address.lower()
-            ).scalar()
+
+            result = (
+                session.query(func.max(Trade.timestamp))
+                .filter_by(trader_address=trader_address.lower())
+                .scalar()
+            )
             return result
         finally:
             session.close()
@@ -1049,7 +1284,9 @@ class IngestionPipeline:
         # Tier 1: JBecker Dataset (PRIMARY - free, complete historical)
         if prefer_jbecker and self.jbecker_client:
             try:
-                logger.info(f"Using JBecker dataset for {trader_address[:8]}... (PRIMARY - free)")
+                logger.info(
+                    f"Using JBecker dataset for {trader_address[:8]}... (PRIMARY - free)"
+                )
                 stats = self.ingest_trader_history_jbecker(trader_address)
                 combined_stats.update(stats)
                 combined_stats["tiers_used"].append("jbecker")
@@ -1064,15 +1301,21 @@ class IngestionPipeline:
         # Tier 2: API gap fill (free, recent trades after JBecker snapshot)
         if fill_gap_with_api and jbecker_trades_found and latest_timestamp:
             try:
-                logger.info(f"Filling gap with API after {latest_timestamp} for {trader_address[:8]}...")
-                api_stats = self.ingest_trader_history(trader_address)  # existing method
+                logger.info(
+                    f"Filling gap with API after {latest_timestamp} for {trader_address[:8]}..."
+                )
+                api_stats = self.ingest_trader_history(
+                    trader_address
+                )  # existing method
                 combined_stats["tiers_used"].append("api")
                 api_trade_count = api_stats.get("detail_count", 0)
 
                 # Tier 3: Graph ONLY if API maxed out (100 trades = likely more exist)
                 if api_trade_count >= 100 and fallback_to_graph and self.graph_client:
                     try:
-                        logger.info(f"API maxed out (100 trades), using Graph for remaining gap")
+                        logger.info(
+                            f"API maxed out (100 trades), using Graph for remaining gap"
+                        )
                         graph_stats = self.ingest_trader_history_graph(trader_address)
                         combined_stats["tiers_used"].append("graph")
                     except Exception as e:
@@ -1091,7 +1334,11 @@ class IngestionPipeline:
                 logger.warning(f"API ingestion failed: {e}")
 
         # Tier 4: Blockchain (LAST RESORT - free but 6-7 hours per trader)
-        if not combined_stats["tiers_used"] and fallback_to_blockchain and self.blockchain_client:
+        if (
+            not combined_stats["tiers_used"]
+            and fallback_to_blockchain
+            and self.blockchain_client
+        ):
             logger.info(f"Using blockchain for {trader_address[:8]}... (LAST RESORT)")
             blockchain_stats = self.ingest_trader_history_blockchain(trader_address)
             combined_stats.update(blockchain_stats)
@@ -1099,7 +1346,9 @@ class IngestionPipeline:
 
         # Ultimate fallback: API without gap context
         if not combined_stats["tiers_used"]:
-            logger.info(f"All sources exhausted, using API for {trader_address[:8]}... (100 trade limit)")
+            logger.info(
+                f"All sources exhausted, using API for {trader_address[:8]}... (100 trade limit)"
+            )
             combined_stats.update(self.ingest_trader_history(trader_address))
             combined_stats["tiers_used"].append("api")
 
@@ -1108,18 +1357,22 @@ class IngestionPipeline:
     def run_full_sweep(
         self,
         use_jbecker: bool = True,
-        use_blockchain_fallback: bool = True
+        use_blockchain_fallback: bool = True,
+        niches: tuple[str, ...] = (),
+        closing_within: str | None = None,
     ) -> dict:
         """Execute complete ingestion sweep.
 
         Steps:
-        1. Ingest all active markets
+        1. Ingest active markets (targeted or full based on filters)
         2. Discover traders from markets with detail categories
         3. Backfill history for newly discovered traders
 
         Args:
             use_jbecker: If True and jbecker_client configured, use JBecker dataset as primary (default: True)
             use_blockchain_fallback: If True, fallback to blockchain as last resort (default: True)
+            niches: Tuple of niche category strings for targeted scanning
+            closing_within: Duration string for time-based filtering (e.g., "48h", "2d")
 
         Returns:
             Overall stats dict with keys:
@@ -1141,12 +1394,22 @@ class IngestionPipeline:
             "summaries_created": 0,
         }
 
-        # Step 1: Ingest active markets
+        # Step 1: Ingest markets (targeted or full)
         try:
-            overall_stats["markets_ingested"] = self.ingest_active_markets()
+            if niches or closing_within:
+                end_date_max = None
+                if closing_within:
+                    end_date_max = parse_closing_within(closing_within)
+                    logger.info(f"Filtering markets closing before {end_date_max}")
+
+                overall_stats["markets_ingested"] = self.ingest_targeted_markets(
+                    niches=niches,
+                    end_date_max=end_date_max,
+                )
+            else:
+                overall_stats["markets_ingested"] = self.ingest_active_markets()
         except Exception as e:
             logger.error(f"Market ingestion failed: {e}")
-            # Don't proceed if we can't fetch markets
             return overall_stats
 
         # Step 2: Discover traders from detail category markets
@@ -1155,9 +1418,7 @@ class IngestionPipeline:
             # Get all active markets in detail categories
             markets = session.query(Market).filter_by(active=True).all()
             detail_markets = [
-                m
-                for m in markets
-                if self.category_filter.requires_detail(m.category)
+                m for m in markets if self.category_filter.requires_detail(m.category)
             ]
 
             logger.info(
