@@ -49,24 +49,25 @@ Deferred from v1.1:
 
 | Requirement | Phase | Status |
 |-------------|-------|--------|
-| SCAN-01 | — | Pending |
-| SCAN-02 | — | Pending |
-| SCAN-03 | — | Pending |
-| SCAN-04 | — | Pending |
-| PIPE-01 | — | Pending |
-| PIPE-02 | — | Pending |
-| PIPE-03 | — | Pending |
-| PIPE-04 | — | Pending |
-| DEEP-01 | — | Pending |
-| DEEP-02 | — | Pending |
-| DEEP-03 | — | Pending |
-| DEEP-04 | — | Pending |
-| DEEP-05 | — | Pending |
+| SCAN-01 | Phase 10 | Pending |
+| SCAN-02 | Phase 10 | Pending |
+| SCAN-03 | Phase 10 | Pending |
+| SCAN-04 | Phase 10 | Pending |
+| PIPE-01 | Phase 11 | Pending |
+| PIPE-02 | Phase 11 | Pending |
+| PIPE-03 | Phase 11 | Pending |
+| PIPE-04 | Phase 11 | Pending |
+| DEEP-01 | Phase 12 | Pending |
+| DEEP-02 | Phase 12 | Pending |
+| DEEP-03 | Phase 12 | Pending |
+| DEEP-04 | Phase 12 | Pending |
+| DEEP-05 | Phase 12 | Pending |
 
 **Coverage:**
 - v1.1 requirements: 13 total
-- Mapped to phases: 0 (pending roadmap)
-- Unmapped: 13
+- Mapped to phases: 13 (100%)
+- Unmapped: 0
 
 ---
 *Requirements defined: 2026-02-13*
+*Roadmap created: 2026-02-13*
