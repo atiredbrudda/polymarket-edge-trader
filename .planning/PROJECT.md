@@ -28,7 +28,16 @@ Surface where smart money is moving in niche prediction markets so the user can 
 
 ### Active
 
-(Requirements for next milestone defined via `/gsd:new-milestone`)
+See `.planning/REQUIREMENTS.md` for v1.1 requirements.
+
+## Current Milestone: v1.1 Targeted Scanning & Deep Niche Scoring
+
+**Goal:** Make the pipeline practical for daily use by narrowing market scanning to relevant niches with time filters, decoupling fast discovery from slow backfill, and extending scoring to tournament/team depth for the "Chelsea trader" use case.
+
+**Target features:**
+- Configurable niche scanning with category + time-to-close filters as CLI inputs
+- Decoupled discovery/backfill pipeline (separate address harvesting from history ingestion)
+- Deep niche scoring at tournament and team level (below game-level)
 
 ### Out of Scope
 
@@ -71,4 +80,4 @@ Surface where smart money is moving in niche prediction markets so the user can 
 | Append-only score history | INSERT-only for ExpertiseScore and SignalSnapshot | Good — enables trend analysis |
 
 ---
-*Last updated: 2026-02-13 after v1.0 milestone*
+*Last updated: 2026-02-13 after v1.1 milestone started*
