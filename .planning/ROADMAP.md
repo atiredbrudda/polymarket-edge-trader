@@ -41,10 +41,11 @@ See `.planning/milestones/v1.0-ROADMAP.md` for full details.
   2. User can specify a time-to-close window to filter markets (e.g., `--closing-within 48h`)
   3. System fetches only markets matching niche and time filters from API (not client-side filtering)
   4. Pipeline ingests and processes only targeted markets, reducing API calls and processing time
-**Plans**: TBD
+**Plans**: 2 plans
 
 Plans:
-- [ ] 10-01: TBD
+- [ ] 10-01-PLAN.md — TDD Gamma API client + duration parsing utilities
+- [ ] 10-02-PLAN.md — Pipeline integration + CLI wiring (--niche, --closing-within)
 
 #### Phase 11: Pipeline Decoupling
 **Goal**: User can run address discovery and history backfill independently
@@ -88,6 +89,6 @@ Plans:
 | 7. CLI Interface | v1.0 | 3/3 | Complete | 2026-02-11 |
 | 8. Blockchain History | v1.0 | 2/2 | Complete | 2026-02-11 |
 | 9. JBecker Dataset | v1.0 | 3/3 | Complete | 2026-02-12 |
-| 10. Targeted Market Scanning | v1.1 | 0/? | Not started | - |
+| 10. Targeted Market Scanning | v1.1 | 0/2 | Planned | - |
 | 11. Pipeline Decoupling | v1.1 | 0/? | Not started | - |
 | 12. Deep Niche Scoring | v1.1 | 0/? | Not started | - |
