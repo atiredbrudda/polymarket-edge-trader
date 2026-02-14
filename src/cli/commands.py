@@ -141,10 +141,10 @@ def _setup_cli_logging():
     # Remove default handler to avoid duplicate stderr output
     logger.remove()
 
-    # Add file handler with rotation (10 MB max, keep 3 files)
+    # Add file handler with rotation (midnight daily)
     logger.add(
         settings.cli_log_file,
-        rotation="10 MB",
+        rotation="00:00",
         retention=3,
         level="DEBUG",
         format="{time:YYYY-MM-DD HH:mm:ss} | {level: <8} | {message}",
