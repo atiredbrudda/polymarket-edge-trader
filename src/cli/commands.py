@@ -30,6 +30,7 @@ from src.cli.formatters import (
     format_sweep_summary,
     format_research_table,
     format_batch_summary,
+    format_pipeline_status,
 )
 from src.db.models import Base, Trader, TaxonomyNode, Market, MarketClassification
 from src.db.session import get_session, get_session_factory
@@ -901,6 +902,276 @@ def batch_analyze(addresses, address_file, verbose):
 
     logger.info(
         f"BATCH-ANALYZE command completed: {total_inserted} inserted, {total_skipped} skipped, {total_errors} errors"
+    )
+
+
+@cli.command()
+@click.option(
+    "--niche",
+    "-n",
+    multiple=True,
+    help="Niche category to scan (repeatable, e.g., --niche esports --niche crypto)",
+)
+@click.option(
+    "--closing-within",
+    default=None,
+    help="Only scan markets closing within this time window (e.g., 48h, 2d)",
+)
+@click.option("--verbose", "-v", is_flag=True, help="Enable debug logging")
+def discover(niche, closing_within, verbose):
+    """Discover traders from active markets without backfilling history.
+
+    Finds new trader addresses from market trade data and stores them
+    with backfill_complete=False. Does NOT fetch their full trade history.
+    Use 'backfill' command separately to fetch history.
+
+    \b
+    Examples:
+        polymarket discover
+        polymarket discover --niche esports
+        polymarket discover --niche esports --closing-within 48h
+    """
+    logger.info(
+        f"DISCOVER command started (niches={niche}, closing_within={closing_within})"
+    )
+
+    if verbose:
+        logger.remove()
+        logger.add(sys.stderr, level="DEBUG")
+
+    console = Console()
+
+    if niche:
+        console.print(f"[bold blue]Scanning niches:[/bold blue] {', '.join(niche)}")
+    if closing_within:
+        from src.pipeline.time_utils import parse_closing_within
+
+        try:
+            threshold = parse_closing_within(closing_within)
+            console.print(
+                f"[bold blue]Closing within:[/bold blue] {closing_within} (before {threshold})"
+            )
+        except ValueError as e:
+            console.print(f"[bold red]Error: {e}[/bold red]")
+            return
+
+    with console.status("[bold green]Discovering traders...", spinner="dots"):
+        import time
+
+        start_time = time.time()
+
+        session_factory, client, category_filter, _, gamma_client = _get_dependencies()
+
+        from src.pipeline.ingest import IngestionPipeline
+
+        pipeline = IngestionPipeline(
+            client, session_factory, category_filter, gamma_client=gamma_client
+        )
+
+        end_date_max = None
+        if closing_within:
+            from src.pipeline.time_utils import parse_closing_within
+
+            end_date_max = parse_closing_within(closing_within)
+
+        if niche or end_date_max:
+            markets_count = pipeline.ingest_targeted_markets(
+                niches=niche, end_date_max=end_date_max
+            )
+        else:
+            markets_count = pipeline.ingest_active_markets()
+
+        traders_discovered = 0
+        with get_session(session_factory) as session:
+            markets_orm = session.query(Market).filter_by(active=True).all()
+            detail_markets = [
+                m for m in markets_orm if category_filter.requires_detail(m.category)
+            ]
+
+        for market in detail_markets:
+            try:
+                new_traders = pipeline.discover_traders_from_market(market.condition_id)
+                traders_discovered += len(new_traders)
+            except Exception as e:
+                logger.warning(
+                    f"Failed to discover traders from {market.condition_id}: {e}"
+                )
+                continue
+
+        processing_time = time.time() - start_time
+
+    console.print(
+        f"\n[bold green]Discovery complete[/bold green] ({processing_time:.1f}s)"
+    )
+    console.print(f"  Markets scanned: {markets_count}")
+    console.print(f"  Detail markets:  {len(detail_markets)}")
+    console.print(f"  New traders:     [green]{traders_discovered}[/green]")
+    console.print(
+        "\n[dim]Run 'polymarket backfill' to fetch history for discovered traders.[/dim]"
+    )
+    logger.info(
+        f"DISCOVER completed: {markets_count} markets, {traders_discovered} traders ({processing_time:.1f}s)"
+    )
+
+
+@cli.command()
+@click.argument("address", required=False, default=None)
+@click.option(
+    "--limit",
+    "-l",
+    default=None,
+    type=int,
+    help="Maximum number of traders to backfill (default: all pending)",
+)
+@click.option("--verbose", "-v", is_flag=True, help="Enable debug logging")
+def backfill(address, limit, verbose):
+    """Backfill trade history for discovered traders.
+
+    Without ADDRESS, backfills all traders with pending history.
+    With ADDRESS, backfills only that specific trader.
+
+    Uses the 4-tier cost-optimized hierarchy:
+    JBecker (free) > API (free) > Graph (paid) > Blockchain (slow)
+
+    \b
+    Examples:
+        polymarket backfill
+        polymarket backfill --limit 10
+        polymarket backfill 0xeffd76
+    """
+    logger.info(f"BACKFILL command started (address={address}, limit={limit})")
+
+    if verbose:
+        logger.remove()
+        logger.add(sys.stderr, level="DEBUG")
+
+    console = Console()
+
+    session_factory, client, category_filter, _, gamma_client = _get_dependencies()
+
+    from src.pipeline.ingest import IngestionPipeline
+    from src.pipeline.queries import get_traders_by_backfill_status
+
+    pipeline = IngestionPipeline(
+        client, session_factory, category_filter, gamma_client=gamma_client
+    )
+
+    if address:
+        with get_session(session_factory) as session:
+            full_address = find_trader_by_prefix(session, address)
+            if not full_address:
+                return
+
+        console.print(f"[bold blue]Backfilling:[/bold blue] {full_address}")
+        with console.status(
+            f"[bold green]Backfilling {full_address[:10]}...", spinner="dots"
+        ):
+            try:
+                stats = pipeline.ingest_trader_history_hybrid(full_address)
+                console.print(f"[green]Backfill complete[/green]")
+                console.print(f"  Tiers used: {', '.join(stats.get('tiers_used', []))}")
+                console.print(f"  Detail trades: {stats.get('detail_count', 0)}")
+            except Exception as e:
+                console.print(f"[red]Backfill failed: {e}[/red]")
+                logger.error(f"Single trader backfill failed: {e}")
+    else:
+        with get_session(session_factory) as session:
+            pending = get_traders_by_backfill_status(session, backfilled=False)
+            trader_addresses = [t.address for t in pending]
+
+        if not trader_addresses:
+            console.print("[green]No traders pending backfill.[/green]")
+            logger.info("No traders pending backfill")
+            return
+
+        if limit:
+            trader_addresses = trader_addresses[:limit]
+
+        console.print(
+            f"[bold blue]Backfilling {len(trader_addresses)} traders[/bold blue]"
+            + (f" (limited to {limit})" if limit else "")
+        )
+
+        import time
+
+        start_time = time.time()
+        success_count = 0
+        error_count = 0
+
+        with console.status(
+            "[bold green]Backfilling traders...", spinner="dots"
+        ) as status:
+            for idx, addr in enumerate(trader_addresses, 1):
+                status.update(
+                    f"[bold green]Backfilling {idx}/{len(trader_addresses)}: {addr[:10]}..."
+                )
+                try:
+                    pipeline.ingest_trader_history_hybrid(addr)
+                    success_count += 1
+                except Exception as e:
+                    logger.warning(f"Backfill failed for {addr[:10]}...: {e}")
+                    error_count += 1
+                    continue
+
+        processing_time = time.time() - start_time
+
+        console.print(
+            f"\n[bold green]Backfill complete[/bold green] ({processing_time:.1f}s)"
+        )
+        console.print(f"  Successful: [green]{success_count}[/green]")
+        if error_count:
+            console.print(f"  Failed:     [red]{error_count}[/red]")
+        logger.info(
+            f"BACKFILL completed: {success_count} ok, {error_count} failed ({processing_time:.1f}s)"
+        )
+
+
+@cli.command()
+@click.option("--verbose", "-v", is_flag=True, help="Enable debug logging")
+def status(verbose):
+    """View pipeline discovery and backfill status.
+
+    Shows how many traders have been discovered vs. backfilled,
+    and lists traders pending backfill.
+
+    \b
+    Example:
+        polymarket status
+    """
+    logger.info("STATUS command started")
+
+    if verbose:
+        logger.remove()
+        logger.add(sys.stderr, level="DEBUG")
+
+    console = Console()
+
+    with console.status("[bold green]Fetching status...", spinner="dots"):
+        session_factory, _, _, _, _ = _get_dependencies()
+
+        from src.pipeline.queries import (
+            get_trader_counts_by_status,
+            get_traders_by_backfill_status,
+        )
+
+        with get_session(session_factory) as session:
+            counts = get_trader_counts_by_status(session)
+            pending = get_traders_by_backfill_status(session, backfilled=False)
+
+            pending_data = [
+                {
+                    "address": t.address,
+                    "first_seen": t.first_seen.strftime("%Y-%m-%d %H:%M")
+                    if t.first_seen
+                    else "",
+                }
+                for t in pending[:50]
+            ]
+
+    output = format_pipeline_status(counts, pending_data)
+    console.print(output)
+    logger.info(
+        f"STATUS completed: {counts['total']} total, {counts['discovered']} pending, {counts['backfilled']} backfilled"
     )
 
 

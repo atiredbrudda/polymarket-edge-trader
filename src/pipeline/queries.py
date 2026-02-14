@@ -24,6 +24,7 @@ from src.db.models import (
     Position,
     TaxonomyNode,
     Trade,
+    Trader,
     TraderCategorySummary,
 )
 
@@ -491,3 +492,60 @@ def get_positions_for_game(
 
     result = session.execute(query)
     return list(result.scalars().all())
+
+
+def get_traders_by_backfill_status(session: Session, backfilled: bool) -> list[Trader]:
+    """Get traders filtered by backfill completion status.
+
+    Args:
+        session: SQLAlchemy session
+        backfilled: True for completed traders, False for pending (discovered but not backfilled)
+
+    Returns:
+        List of Trader ORM objects ordered by first_seen DESC (most recent first)
+
+    Example:
+        # Get traders needing backfill
+        pending = get_traders_by_backfill_status(session, backfilled=False)
+
+        # Get traders with completed backfill
+        done = get_traders_by_backfill_status(session, backfilled=True)
+    """
+    query = (
+        select(Trader)
+        .where(Trader.backfill_complete == backfilled)
+        .order_by(Trader.first_seen.desc())
+    )
+    result = session.execute(query)
+    return list(result.scalars().all())
+
+
+def get_trader_counts_by_status(session: Session) -> dict[str, int]:
+    """Get counts of traders by backfill status.
+
+    Returns:
+        Dict with keys:
+        - discovered: Count of traders with backfill_complete=False
+        - backfilled: Count of traders with backfill_complete=True
+        - total: Total trader count
+
+    Example:
+        counts = get_trader_counts_by_status(session)
+        # {"discovered": 15, "backfilled": 42, "total": 57}
+    """
+    total = session.execute(select(func.count(Trader.id))).scalar() or 0
+
+    backfilled = (
+        session.execute(
+            select(func.count(Trader.id)).where(Trader.backfill_complete == True)
+        ).scalar()
+        or 0
+    )
+
+    discovered = total - backfilled
+
+    return {
+        "discovered": discovered,
+        "backfilled": backfilled,
+        "total": total,
+    }

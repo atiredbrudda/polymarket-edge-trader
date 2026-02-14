@@ -406,3 +406,56 @@ def format_batch_summary(results: list[dict]) -> Table:
         )
 
     return table
+
+
+def format_pipeline_status(counts: dict, pending_traders: list) -> Group:
+    """Format pipeline discovery/backfill status as Rich panels.
+
+    Args:
+        counts: Dict with keys 'discovered', 'backfilled', 'total' (from get_trader_counts_by_status)
+        pending_traders: List of dicts with keys 'address', 'first_seen' (traders needing backfill)
+
+    Returns:
+        Rich Group with summary panel and pending traders table
+
+    Example:
+        status = format_pipeline_status(
+            {"discovered": 5, "backfilled": 10, "total": 15},
+            [{"address": "0xAbc...", "first_seen": "2025-01-01 12:00"}]
+        )
+        console.print(status)
+    """
+    summary_table = Table(show_header=False, box=None, padding=(0, 2))
+    summary_table.add_column("Label", style="bold")
+    summary_table.add_column("Value", justify="right")
+
+    summary_table.add_row("Total traders", str(counts.get("total", 0)))
+    summary_table.add_row(
+        "Backfilled",
+        f"[green]{counts.get('backfilled', 0)}[/green]",
+    )
+    summary_table.add_row(
+        "Pending backfill",
+        f"[yellow]{counts.get('discovered', 0)}[/yellow]",
+    )
+
+    summary_panel = Panel(summary_table, title="Pipeline Status", border_style="blue")
+
+    if pending_traders:
+        traders_table = Table(
+            title=f"Traders Pending Backfill ({len(pending_traders)})"
+        )
+        traders_table.add_column("#", style="dim", width=4)
+        traders_table.add_column("Address", style="cyan")
+        traders_table.add_column("Discovered", style="dim")
+
+        for idx, trader in enumerate(pending_traders, 1):
+            traders_table.add_row(
+                str(idx),
+                truncate_address(trader["address"]),
+                trader.get("first_seen", ""),
+            )
+
+        return Group(summary_panel, Text(""), traders_table)
+
+    return Group(summary_panel, Text("\n[green]All traders backfilled![/green]"))

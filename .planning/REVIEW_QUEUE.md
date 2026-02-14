@@ -1,18 +1,14 @@
 # Review Queue
 
+## Reviewer Notes for Worker
+
+Read this section before starting work. These are patterns the reviewer has flagged from previous reviews.
+
+1. **When changing a function's return signature, update all test mocks too.** In 10-02, `_get_dependencies` went from 4-tuple to 5-tuple but `tests/test_cli_research.py` still mocked it as 4-tuple, causing a regression. Before submitting, grep test files for mocks of any function you modified: `grep -r "function_name" tests/`
+
 ## Pending Review
 
-### worker/10-02 — 2026-02-13
-- **Plan:** 10-02 (Targeted Market Scanning - CLI Integration)
-- **Branch:** worker/10-02
-- **Commits:** 0be4dd3
-- **Files changed:**
-  - src/pipeline/ingest.py (MODIFIED - added ingest_targeted_markets, updated run_full_sweep)
-  - src/cli/commands.py (MODIFIED - added --niche, --closing-within options to sweep/poll)
-  - src/cli/scheduler.py (MODIFIED - updated run_sweep, run_polling_loop to pass filters)
-  - tests/test_targeted_scanning.py (NEW)
-- **Worker notes:** Implemented targeted scanning flow from CLI to pipeline. When --niche or --closing-within provided, uses Gamma API for server-side filtering. Falls back to existing behavior when no filters. 9 new tests, all pass.
-- **Decisions made:** Reused gamma_client rate_limiter from client; filters passed through scheduler unchanged; validation of closing_within happens early in CLI.
+_No entries._
 
 ## Re-Review
 
@@ -23,6 +19,18 @@ _No entries._
 _No entries._
 
 ## Cleared
+
+### worker/10-02 — 2026-02-13
+- **Plan:** 10-02 (Targeted Market Scanning - CLI Integration)
+- **Cleared by:** Opus 4.6
+- **Review commit:** 3b4dcde
+- **Files in scope:**
+  - src/pipeline/ingest.py
+  - src/cli/commands.py
+  - src/cli/scheduler.py
+  - tests/test_targeted_scanning.py
+  - tests/test_cli_research.py (reviewer fix)
+- **Notes:** Good implementation. 1 regression found and fixed: test_batch_analyze_from_file broke because _get_dependencies mock returned 4-tuple instead of new 5-tuple. Lots of cosmetic reformatting in the diff (line wrapping) — functional changes are correct. 24/24 phase 10 tests pass, 0 net new regressions.
 
 ### worker/10-01 — 2026-02-13
 - **Plan:** 10-01 (Targeted Market Scanning - Filter Engine)

@@ -65,6 +65,8 @@ class Trader(Base):
     backfill_complete: Mapped[bool] = mapped_column(default=False, nullable=False)
     created_at: Mapped[datetime] = mapped_column(default=datetime.utcnow, nullable=False)
 
+    __table_args__ = (Index("ix_trader_backfill_complete", "backfill_complete"),)
+
 
 class Trade(Base):
     """Trade records for target categories (full detail storage).

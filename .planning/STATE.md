@@ -10,12 +10,12 @@ See: .planning/PROJECT.md (updated 2026-02-13)
 ## Current Position
 
 Milestone: v1.1 Targeted Scanning & Deep Niche Scoring
-Phase: 10 of 12 (Targeted Market Scanning)
-Plan: 2 of 2 complete (10-01, 10-02 complete with SUMMARY)
-Status: Phase 10 complete — ready to transition to Phase 11
-Last activity: 2026-02-13 — Plan 10-02 reviewed (worker model, 1 fix applied) and merged
+Phase: 11 of 12 (Pipeline Decoupling)
+Plan: 2 of 2 complete (11-01, 11-02 complete with SUMMARY)
+Status: Phase 11 complete — ready to transition to Phase 12
+Last activity: 2026-02-14 — Plan 11-02 complete (CLI commands discover, backfill, status)
 
-Progress: v1.1 [███░░░░░░░] 33%
+Progress: v1.1 [████░░░░░░] 42%
 
 ## Performance Metrics
 
@@ -54,7 +54,7 @@ None yet.
 
 ## Session Continuity
 
-Last session: 2026-02-13
-Stopped at: Phase 10 complete — both plans reviewed and merged
+Last session: 2026-02-14
+Stopped at: Phase 11 complete — both plans executed and merged
 Resume file: None
-Next: Phase 11 (Pipeline Decoupling) — needs planning
+Next: Phase 12 (Deep Niche Scoring) — needs planning
