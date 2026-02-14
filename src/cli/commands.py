@@ -714,6 +714,7 @@ def sweep(window, niche, closing_within, verbose):
             gamma_client=gamma_client,
             niches=niche,
             closing_within=closing_within,
+            skip_trader_discovery=True,
         )
 
         processing_time = time.time() - start_time
