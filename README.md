@@ -34,6 +34,17 @@ polymarket signals --min-conf 80   # High-confidence signals only
 polymarket leaderboard esports.cs2
 polymarket leaderboard esports.lol
 
+# NEW: Deep Niche Scoring - Leaderboard at any taxonomy depth
+polymarket leaderboard esports.cs2.iem-katowice --depth tournament
+polymarket leaderboard esports.cs2.iem-katowice.navi --depth team
+
+# NEW: Show trader's expertise breakdown across all taxonomy depths
+polymarket expertise 0xTrader123
+
+# NEW: Discover hidden specialists in a game
+polymarket specialists esports.cs2
+polymarket specialists esports.cs2 --game-threshold 50 --deep-threshold 80
+
 # Research trader history offline (requires JBecker dataset)
 polymarket research 0xAbCd         # Table output
 polymarket research 0xAbCd --output json --limit 100
@@ -41,6 +52,11 @@ polymarket research 0xAbCd --output json --limit 100
 # Bulk ingest traders from JBecker dataset
 polymarket batch-analyze 0xAddr1 0xAddr2
 polymarket batch-analyze --file traders.txt
+
+# Pipeline Decoupling - Run discovery and backfill independently
+polymarket discover                    # Find traders without backfilling
+polymarket backfill                    # Backfill discovered traders
+polymarket status                      # Show discovery/backfill status
 
 # Run manual signal detection sweep
 polymarket sweep
@@ -56,6 +72,8 @@ polymarket poll --interval 60      # Poll every 60 minutes
 - **First-Mover Tracking**: Distinguishes early movers from fast-followers (6-hour window)
 - **Signal Event Classification**: NEW, STRENGTHENING, WEAKENING, LOST
 - **Specialization Metrics**: Game-level concentration (CS2 specialist vs eSports generalist)
+- **Deep Niche Scoring**: NEW — Tournament and team-level expertise scoring beyond game level
+- **Hidden Specialist Detection**: NEW — Finds traders with average game scores but high tournament/team scores
 - **Consistency Detection**: Cross-timeframe stability analysis (30d, 90d, all-time)
 - **Multi-Source Data**: 4-tier cost-optimized ingestion (JBecker → API → Graph → Blockchain)
 - **Offline Research**: Query complete trader histories from 33.5GB historical dataset
@@ -257,6 +275,59 @@ The dataset enables:
 - Offline research (no API keys needed)
 - Cost-free bulk analysis (minimal Graph API consumption)
 
+## Deep Niche Scoring (v1.1)
+
+The system now scores expertise at three taxonomy depths:
+
+| Depth | Level | Example | Description |
+|-------|-------|---------|-------------|
+| 1 | Game | `esports.cs2` | CS2 specialists |
+| 2 | Tournament | `esports.cs2.iem-katowice` | IEM Katowice specialists |
+| 3 | Team | `esports.cs2.iem-katowice.navi` | NaVi specialists |
+
+### Key Concepts
+
+**Tournament Concentration**: What fraction of a trader's CS2 volume is in a specific tournament?
+- `tournament_volume / game_volume` — High values = focused on specific tournaments
+
+**Team Concentration**: What fraction of a tournament's volume is on a specific team?
+- `team_volume / tournament_volume` — High values = team specialists
+
+**Hidden Specialists**: Traders with average game scores but exceptional tournament/team scores
+- Example: A trader with 55 game score but 85 tournament score in IEM Katowice
+- These are "Chelsea traders" — experts in specific niches that game-level scoring misses
+
+### Commands
+
+```bash
+# Game leaderboard (default, depth=1)
+polymarket leaderboard esports.cs2
+
+# Tournament leaderboard (depth=2)
+polymarket leaderboard esports.cs2.iem-katowice --depth tournament
+
+# Team leaderboard (depth=3)
+polymarket leaderboard esports.cs2.iem-katowice.navi --depth team
+
+# Show trader's expertise breakdown across all depths
+polymarket expertise 0xTrader123
+
+# Discover hidden specialists in a game
+polymarket specialists esports.cs2
+
+# Custom thresholds
+polymarket specialists esports.cs2 --game-threshold 50 --deep-threshold 80
+```
+
+### How It Works
+
+1. Scores are computed at each depth independently
+2. Percentile normalization runs per-slug-per-depth (not mixed)
+3. Hidden specialists are found by comparing game-level scores to tournament/team scores
+4. A trader qualifies as hidden specialist if:
+   - Game score < threshold (default: 60)
+   - Tournament or team score >= threshold (default: 75)
+
 ## Architecture
 
 ### Data Flow
@@ -295,16 +366,21 @@ Telegram
 7. **CLI** (Phase 7): Commands, formatters, polling scheduler
 8. **Blockchain History** (Phase 8): Polygon RPC integration, complete trade history (workaround for 100-trade API limit)
 9. **JBecker Dataset** (Phase 9): DuckDB query layer, 4-tier cost-optimized ingestion, offline research commands
+10. **Targeted Market Scanning** (Phase 10): Niche filters, time-to-close filters, CLI integration
+11. **Pipeline Decoupling** (Phase 11): Independent discover/backfill commands, backfill state tracking
+12. **Deep Niche Scoring** (Phase 12): Tournament/team-level expertise, hidden specialist detection, CLI depth flag
 
 ### Key Design Decisions
 
 - **Event-first discovery**: Start from active events → find traders → backtrack history (avoids scanning entire trader database)
 - **Category-agnostic**: eSports is first case study; architecture extends to any Polymarket category via taxonomy YAML
 - **4-tier cost optimization**: JBecker (free) → API (free) → Graph (paid) → Blockchain (slow) - minimizes costs while maximizing coverage
+- **Multi-depth scoring**: Game (depth 1), tournament (depth 2), team (depth 3) for granular expertise detection
+- **Hidden specialist detection**: Find niche experts that game-level scoring misses
 - **Local-first storage**: SQLite with WAL mode (no external database required)
 - **Token bucket rate limiting**: 50 req/s (80% of 60/s sustained limit)
 - **Numeric precision**: Decimal types for all financial calculations (no float errors)
-- **TDD approach**: 509 tests (100% passing) across all components
+- **TDD approach**: 576 tests (100% passing) across all components
 
 ## Testing
 
@@ -324,7 +400,7 @@ pytest --cov=src --cov-report=term-missing
 ```
 
 **Test Stats:**
-- Total: 509 tests (100% passing)
+- Total: 576 tests (100% passing)
 - Foundation: 62
 - Classification: 51
 - Evaluation: 121
@@ -334,6 +410,7 @@ pytest --cov=src --cov-report=term-missing
 - CLI: 37
 - Blockchain: 35
 - JBecker Dataset: 53
+- Deep Scoring: 29
 
 ## Project Structure
 
@@ -454,20 +531,18 @@ This project was built using the GSD (Get Shit Done) workflow. See `.planning/` 
 
 ## Roadmap
 
-**v1.0 (Current)**: Complete eSports Intelligence Pipeline
+**v1.1 (Current)**: Targeted Scanning & Deep Niche Scoring
+- ✅ Phase 10: Targeted Market Scanning (niche + time filters)
+- ✅ Phase 11: Pipeline Decoupling (independent discover/backfill)
+- ✅ Phase 12: Deep Niche Scoring (tournament/team levels, hidden specialists)
+- ✅ 576 tests passing (100%)
+- ✅ Production-ready
+
+**v1.0**: Complete eSports Intelligence Pipeline
 - ✅ All 9 phases complete
 - ✅ 509 tests passing (100%)
 - ✅ 4-tier cost-optimized data ingestion
 - ✅ Offline research capability with JBecker dataset
-- ✅ Production-ready
-
-**Future enhancements:**
-- Additional categories (politics, crypto, sports)
-- Web dashboard for visualization
-- Historical signal performance tracking
-- Multi-channel alert routing (Discord, Slack)
-- Advanced herding detection (currently stubbed)
-- Real-time WebSocket feeds
 
 ---
 
