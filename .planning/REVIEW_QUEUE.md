@@ -8,15 +8,29 @@ Read this section before starting work. These are patterns the reviewer has flag
 
 ## Pending Review
 
-_No entries._
+### worker/debugging — 2026-02-15
+- **Branch:** worker/debugging
+- **Commits:** 2623508
+- **Files changed:**
+  - src/cli/commands.py (MODIFIED)
+- **Worker notes:** Debug session - cli_log_file error. Issue: Log rotation was size-based (10MB), user couldn't see fresh outputs for debugging. Also cleared old database for fresh tracking.
+- **Fix applied:** Changed rotation from '10 MB' to '00:00' (midnight daily) for time-based rotation. Deleted data/polymarket.db (6.2MB) to clear old entries.
+- **Decisions made:** Time-based rotation ensures fresh log each day, easier for debugging sessions.
 
-## Re-Review
-
-_No entries._
-
-## Review Feedback
-
-_No entries._
+### worker/debugging — 2026-02-14
+- **Branch:** worker/debugging
+- **Commits:** uncommitted (local changes)
+- **Files changed:**
+  - src/pipeline/ingest.py (MODIFIED)
+- **Worker notes:** Debug session - Gamma API filtering broken. Two issues found:
+  1. Gamma API server-side filtering is broken (returns wrong markets for any tag)
+  2. EndDate filter not working (returns past-dated markets)
+  3. Category fallback incorrectly labeled non-esports as Esports
+- **Fix applied:** Added client-side filtering in `_filter_market_by_niche()` function to validate:
+  - Markets have valid tags matching requested niche
+  - Markets haven't ended (endDate not in past)
+  - Removed problematic category fallback
+- **Decisions made:** Client-side filtering compensates for broken Gamma API
 
 ## Cleared
 
