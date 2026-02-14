@@ -92,6 +92,58 @@ def calculate_game_concentration(
     return game_volume / esports_volume
 
 
+def calculate_tournament_concentration(
+    tournament_volume: Decimal, game_volume: Decimal
+) -> Decimal:
+    """
+    Calculate tournament-level concentration (fraction of game volume in specific tournament).
+
+    Args:
+        tournament_volume: Volume in specific tournament (pre-computed Decimal)
+        game_volume: Total volume in the game (pre-computed Decimal)
+
+    Returns:
+        Fraction of game volume in this tournament (0-1). Returns Decimal("0") if game_volume is 0.
+
+    Examples:
+        >>> calculate_tournament_concentration(Decimal("30"), Decimal("100"))
+        Decimal('0.3')
+
+        >>> calculate_tournament_concentration(Decimal("0"), Decimal("0"))
+        Decimal('0')
+    """
+    if game_volume == Decimal("0"):
+        return Decimal("0")
+
+    return tournament_volume / game_volume
+
+
+def calculate_team_concentration(
+    team_volume: Decimal, tournament_volume: Decimal
+) -> Decimal:
+    """
+    Calculate team-level concentration (fraction of tournament volume for specific team).
+
+    Args:
+        team_volume: Volume for specific team (pre-computed Decimal)
+        tournament_volume: Total volume in the tournament (pre-computed Decimal)
+
+    Returns:
+        Fraction of tournament volume for this team (0-1). Returns Decimal("0") if tournament_volume is 0.
+
+    Examples:
+        >>> calculate_team_concentration(Decimal("20"), Decimal("50"))
+        Decimal('0.4')
+
+        >>> calculate_team_concentration(Decimal("0"), Decimal("0"))
+        Decimal('0')
+    """
+    if tournament_volume == Decimal("0"):
+        return Decimal("0")
+
+    return team_volume / tournament_volume
+
+
 def classify_specialization(
     esports_concentration: Decimal,
     game_concentration: Decimal,
@@ -135,9 +187,7 @@ def classify_specialization(
     )
 
     # Classify game level
-    game_level = (
-        "specialist" if game_concentration >= game_threshold else "generalist"
-    )
+    game_level = "specialist" if game_concentration >= game_threshold else "generalist"
 
     # Set primary_game only if game-level specialist
     primary_game = game_slug if game_level == "specialist" else None
