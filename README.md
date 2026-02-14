@@ -50,6 +50,11 @@ polymarket discover                    # Find traders without backfilling
 polymarket backfill                    # Backfill discovered traders
 polymarket status                      # Show discovery/backfill status
 
+# Targeted Market Scanning - Filter by niche and time
+polymarket sweep --niche esports --niche crypto                    # Scan specific niches
+polymarket sweep --closing-within 48h   # Only markets closing within 48 hours
+polymarket sweep --niche esports --closing-within 24h             # Combined filters
+
 # Research trader history offline (requires JBecker dataset)
 polymarket research 0xAbCd         # Table output
 polymarket research 0xAbCd --output json --limit 100
@@ -74,6 +79,7 @@ polymarket poll --interval 60      # Poll every 60 minutes
 - **Specialization Metrics**: Game-level concentration (CS2 specialist vs eSports generalist)
 - **Deep Niche Scoring**: Tournament and team-level expertise scoring beyond game level
 - **Hidden Specialist Detection**: Finds traders with average game scores but high tournament/team scores
+- **Targeted Market Scanning**: Filter by niche category and time-to-close window
 - **Consistency Detection**: Cross-timeframe stability analysis (30d, 90d, all-time)
 - **Multi-Source Data**: 4-tier cost-optimized ingestion (JBecker → API → Graph → Blockchain)
 - **Offline Research**: Query complete trader histories from 33.5GB historical dataset
@@ -274,6 +280,48 @@ The dataset enables:
 - Complete trader history (no 100-trade API limit)
 - Offline research (no API keys needed)
 - Cost-free bulk analysis (minimal Graph API consumption)
+
+## Targeted Market Scanning (v1.1)
+
+Instead of scanning all markets, you can filter by niche category and time-to-close:
+
+### Filters
+
+**--niche / -n**: Filter by category (repeatable)
+- `esports` — eSports markets only
+- `crypto` — Cryptocurrency markets
+- Can combine: `--niche esports --niche crypto`
+
+**--closing-within**: Only scan markets closing within time window
+- `24h` — Markets closing within 24 hours
+- `48h` — Markets closing within 48 hours
+- `7d` — Markets closing within 7 days
+
+### Examples
+
+```bash
+# Scan only eSports markets
+polymarket sweep --niche esports
+
+# Scan multiple niches
+polymarket sweep --niche esports --niche crypto
+
+# Scan markets closing soon
+polymarket sweep --closing-within 48h
+
+# Combined: eSports closing within 24 hours
+polymarket sweep --niche esports --closing-within 24h
+
+# Run signal detection on targeted markets
+polymarket signals --niche esports
+```
+
+### How It Works
+
+The Gamma API client sends niche and time filters directly to the API, avoiding client-side filtering. This reduces:
+- API calls (fewer markets fetched)
+- Processing time (less data to filter)
+- Database writes (only relevant markets stored)
 
 ## Deep Niche Scoring (v1.1)
 
