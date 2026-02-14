@@ -94,7 +94,10 @@ def get_trades_by_resolution_status(
             trader_address="0xTrader1"
         )
     """
-    query = select(Trade).join(Market, Trade.market_id == Market.condition_id)
+    query = (
+        select(Trade)
+        .join(Market, Trade.market_id == Market.condition_id)
+    )
 
     if resolved:
         query = query.where(Market.outcome.is_not(None))
@@ -143,9 +146,7 @@ def get_trader_trades(
     return list(result.scalars().all())
 
 
-def get_trader_summary(
-    session: Session, trader_address: str
-) -> list[TraderCategorySummary]:
+def get_trader_summary(session: Session, trader_address: str) -> list[TraderCategorySummary]:
     """Query all category summaries for a trader.
 
     Returns aggregated data for non-detail categories.
@@ -294,17 +295,16 @@ def get_trader_unique_markets(session: Session, trader_address: str) -> int:
         # Get count of markets trader participated in
         count = get_trader_unique_markets(session, "0xTrader1")
     """
-    query = select(func.count(func.distinct(Position.market_id))).where(
-        Position.trader_address == trader_address
+    query = (
+        select(func.count(func.distinct(Position.market_id)))
+        .where(Position.trader_address == trader_address)
     )
 
     result = session.execute(query)
     return result.scalar() or 0
 
 
-def get_trader_outcomes_chronological(
-    session: Session, trader_address: str
-) -> list[str]:
+def get_trader_outcomes_chronological(session: Session, trader_address: str) -> list[str]:
     """Get trader's position outcomes in chronological order.
 
     Excludes void and flat outcomes for consistency analysis.
@@ -421,14 +421,111 @@ def get_trader_score_history(
         # Get trader's CS2 score history
         cs2_history = get_trader_score_history(session, "0xTrader1", game_slug="esports.cs2")
     """
-    query = select(ExpertiseScore).where(
-        ExpertiseScore.trader_address == trader_address
-    )
+    query = select(ExpertiseScore).where(ExpertiseScore.trader_address == trader_address)
 
     if game_slug is not None:
         query = query.where(ExpertiseScore.game_slug == game_slug)
 
     query = query.order_by(ExpertiseScore.computed_at.desc()).limit(limit)
+
+    result = session.execute(query)
+    return list(result.scalars().all())
+
+
+def get_all_game_slugs_with_positions(session: Session) -> list[str]:
+    """Query distinct game slugs that have Position + MarketClassification data.
+
+    Args:
+        session: SQLAlchemy session
+
+    Returns:
+        List of game slug strings (e.g., ["esports.cs2", "esports.dota2"])
+
+    Example:
+        # Get all games with positions
+        games = get_all_game_slugs_with_positions(session)
+    """
+    query = (
+        select(TaxonomyNode.slug)
+        .join(MarketClassification, MarketClassification.taxonomy_node_id == TaxonomyNode.id)
+        .join(Position, Position.market_id == MarketClassification.market_id)
+        .where(TaxonomyNode.node_type == "game")
+        .distinct()
+    )
+
+    result = session.execute(query)
+    return list(result.scalars().all())
+
+
+def get_positions_for_game(
+    session: Session, game_slug: str, trader_address: str | None = None
+) -> list[Position]:
+    """Query positions in markets classified under a specific game slug.
+
+    Joins Position -> MarketClassification -> TaxonomyNode to filter by game.
+    Uses slug LIKE pattern to capture game and sub-nodes (tournaments, teams).
+
+    Args:
+        session: SQLAlchemy session
+        game_slug: Game identifier (e.g., "esports.cs2")
+        trader_address: Optional trader address filter
+
+    Returns:
+        List of Position ORM objects
+
+    Example:
+        # Get all positions for CS2
+        positions = get_positions_for_game(session, "esports.cs2")
+
+        # Get trader's positions in CS2
+        trader_positions = get_positions_for_game(session, "esports.cs2", trader_address="0xTrader1")
+    """
+    query = (
+        select(Position)
+        .join(MarketClassification, Position.market_id == MarketClassification.market_id)
+        .join(TaxonomyNode, MarketClassification.taxonomy_node_id == TaxonomyNode.id)
+        .where(TaxonomyNode.slug.like(f"{game_slug}%"))
+    )
+
+    if trader_address is not None:
+        query = query.where(Position.trader_address == trader_address)
+
+    result = session.execute(query)
+    return list(result.scalars().all())
+
+
+def get_positions_for_slug(
+    session: Session, slug: str, trader_address: str | None = None
+) -> list[Position]:
+    """Query positions in markets under any taxonomy slug (game, tournament, or team).
+
+    Similar to get_positions_for_game but generalized to work at any taxonomy depth.
+    Uses slug LIKE pattern to capture the slug and all its descendants.
+
+    Args:
+        session: SQLAlchemy session
+        slug: Taxonomy identifier (e.g., "esports.cs2", "esports.cs2.iem-katowice")
+        trader_address: Optional trader address filter
+
+    Returns:
+        List of Position ORM objects
+
+    Example:
+        # Get all positions for tournament
+        positions = get_positions_for_slug(session, "esports.cs2.iem-katowice")
+
+        # Get trader's positions in tournament
+        trader_positions = get_positions_for_slug(session, "esports.cs2.iem-katowice", trader_address="0xTrader1")
+    """
+    query = (
+        select(Position)
+        .join(MarketClassification, Position.market_id == MarketClassification.market_id)
+        .join(TaxonomyNode, MarketClassification.taxonomy_node_id == TaxonomyNode.id)
+        .where(TaxonomyNode.slug.like(f"{slug}%"))
+    )
+
+    if trader_address is not None:
+        query = query.where(Position.trader_address == trader_address)
 
     result = session.execute(query)
     return list(result.scalars().all())
@@ -528,112 +625,6 @@ def get_all_slugs_with_positions_at_depth(session: Session, depth: int) -> list[
 
     result = session.execute(query)
     return [s for s in result.scalars().all() if s is not None]
-
-
-def get_all_game_slugs_with_positions(session: Session) -> list[str]:
-    """Query distinct game slugs that have Position + MarketClassification data.
-
-    Args:
-        session: SQLAlchemy session
-
-    Returns:
-        List of game slug strings (e.g., ["esports.cs2", "esports.dota2"])
-
-    Example:
-        # Get all games with positions
-        games = get_all_game_slugs_with_positions(session)
-    """
-    query = (
-        select(TaxonomyNode.slug)
-        .join(
-            MarketClassification,
-            MarketClassification.taxonomy_node_id == TaxonomyNode.id,
-        )
-        .join(Position, Position.market_id == MarketClassification.market_id)
-        .where(TaxonomyNode.node_type == "game")
-        .distinct()
-    )
-
-    result = session.execute(query)
-    return list(result.scalars().all())
-
-
-def get_positions_for_game(
-    session: Session, game_slug: str, trader_address: str | None = None
-) -> list[Position]:
-    """Query positions in markets classified under a specific game slug.
-
-    Joins Position -> MarketClassification -> TaxonomyNode to filter by game.
-    Uses slug LIKE pattern to capture game and sub-nodes (tournaments, teams).
-
-    Args:
-        session: SQLAlchemy session
-        game_slug: Game identifier (e.g., "esports.cs2")
-        trader_address: Optional trader address filter
-
-    Returns:
-        List of Position ORM objects
-
-    Example:
-        # Get all positions for CS2
-        positions = get_positions_for_game(session, "esports.cs2")
-
-        # Get trader's positions in CS2
-        trader_positions = get_positions_for_game(session, "esports.cs2", trader_address="0xTrader1")
-    """
-    query = (
-        select(Position)
-        .join(
-            MarketClassification, Position.market_id == MarketClassification.market_id
-        )
-        .join(TaxonomyNode, MarketClassification.taxonomy_node_id == TaxonomyNode.id)
-        .where(TaxonomyNode.slug.like(f"{game_slug}%"))
-    )
-
-    if trader_address is not None:
-        query = query.where(Position.trader_address == trader_address)
-
-    result = session.execute(query)
-    return list(result.scalars().all())
-
-
-def get_positions_for_slug(
-    session: Session, slug: str, trader_address: str | None = None
-) -> list[Position]:
-    """Query positions in markets under any taxonomy slug (game, tournament, or team).
-
-    Similar to get_positions_for_game but generalized to work at any taxonomy depth.
-    Uses slug LIKE pattern to capture the slug and all its descendants.
-
-    Args:
-        session: SQLAlchemy session
-        slug: Taxonomy identifier (e.g., "esports.cs2", "esports.cs2.iem-katowice")
-        trader_address: Optional trader address filter
-
-    Returns:
-        List of Position ORM objects
-
-    Example:
-        # Get all positions for tournament
-        positions = get_positions_for_slug(session, "esports.cs2.iem-katowice")
-
-        # Get trader's positions in tournament
-        trader_positions = get_positions_for_slug(session, "esports.cs2.iem-katowice", trader_address="0xTrader1")
-    """
-    query = (
-        select(Position)
-        .join(
-            MarketClassification, Position.market_id == MarketClassification.market_id
-        )
-        .join(TaxonomyNode, MarketClassification.taxonomy_node_id == TaxonomyNode.id)
-        .where(TaxonomyNode.slug.like(f"{slug}%"))
-    )
-
-    if trader_address is not None:
-        query = query.where(Position.trader_address == trader_address)
-
-    result = session.execute(query)
-    return list(result.scalars().all())
 
 
 def get_traders_by_backfill_status(session: Session, backfilled: bool) -> list[Trader]:

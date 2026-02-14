@@ -187,7 +187,9 @@ def classify_specialization(
     )
 
     # Classify game level
-    game_level = "specialist" if game_concentration >= game_threshold else "generalist"
+    game_level = (
+        "specialist" if game_concentration >= game_threshold else "generalist"
+    )
 
     # Set primary_game only if game-level specialist
     primary_game = game_slug if game_level == "specialist" else None
