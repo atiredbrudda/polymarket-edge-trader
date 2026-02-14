@@ -72,10 +72,12 @@ Plans:
   3. System identifies "hidden specialists" with high tournament/team scores despite average game scores
   4. Leaderboard supports filtering by any taxonomy depth (game, tournament, or team)
   5. User can discover niche experts (e.g., "Chelsea traders") who specialize at deep taxonomy levels
-**Plans**: TBD
+**Plans**: 3 plans
 
 Plans:
-- [ ] 12-01: TBD
+- [ ] 12-01-PLAN.md — TDD multi-depth scoring foundations (schema, concentration, queries)
+- [ ] 12-02-PLAN.md — Scoring pipeline extension + hidden specialist detection
+- [ ] 12-03-PLAN.md — CLI integration (leaderboard --depth, expertise, specialists)
 
 ## Progress
 
@@ -92,4 +94,4 @@ Plans:
 | 9. JBecker Dataset | v1.0 | 3/3 | Complete | 2026-02-12 |
 | 10. Targeted Market Scanning | v1.1 | 0/2 | Planned | - |
 | 11. Pipeline Decoupling | v1.1 | 0/2 | Planned | - |
-| 12. Deep Niche Scoring | v1.1 | 0/? | Not started | - |
+| 12. Deep Niche Scoring | v1.1 | 0/3 | Planned | - |
