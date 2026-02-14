@@ -271,6 +271,7 @@ class ExpertiseScore(Base):
     id: Mapped[int] = mapped_column(primary_key=True, autoincrement=True)
     trader_address: Mapped[str] = mapped_column(String(42), nullable=False)
     game_slug: Mapped[str] = mapped_column(String(100), nullable=False)
+    taxonomy_depth: Mapped[int] = mapped_column(nullable=False, default=1)
     raw_score: Mapped[Decimal] = mapped_column(Numeric(10, 6), nullable=False)
     percentile_rank: Mapped[Decimal | None] = mapped_column(Numeric(10, 6), nullable=True)
     win_rate_component: Mapped[Decimal] = mapped_column(Numeric(10, 6), nullable=False)
@@ -286,6 +287,7 @@ class ExpertiseScore(Base):
         Index("ix_expertise_trader_game", "trader_address", "game_slug"),
         Index("ix_expertise_game_score", "game_slug", "raw_score"),
         Index("ix_expertise_computed_at", "computed_at"),
+        Index("ix_expertise_game_depth", "game_slug", "taxonomy_depth"),
     )
 
 

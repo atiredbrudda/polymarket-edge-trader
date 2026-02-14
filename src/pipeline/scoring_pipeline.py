@@ -27,16 +27,32 @@ from typing import Any
 
 from sqlalchemy.orm import Session
 
-from sqlalchemy import select
+from sqlalchemy import func, select
 
-from src.db.models import ExpertiseScore, MarketClassification, PerformanceSnapshot, Position, TaxonomyNode
+from src.db.models import (
+    ExpertiseScore,
+    MarketClassification,
+    PerformanceSnapshot,
+    Position,
+    TaxonomyNode,
+)
 from src.evaluation.concentration import (
     calculate_esports_concentration,
     calculate_game_concentration,
+    calculate_team_concentration,
+    calculate_tournament_concentration,
 )
 from src.evaluation.metrics import calculate_total_volume
-from src.evaluation.scoring import calculate_expertise_score, normalize_scores_to_percentiles
-from src.pipeline.queries import get_all_game_slugs_with_positions, get_positions_for_game
+from src.evaluation.scoring import (
+    calculate_expertise_score,
+    normalize_scores_to_percentiles,
+)
+from src.pipeline.queries import (
+    get_all_game_slugs_with_positions,
+    get_all_slugs_with_positions_at_depth,
+    get_positions_for_game,
+    get_positions_for_slug,
+)
 
 
 @dataclass(frozen=True)
@@ -47,6 +63,7 @@ class LeaderboardEntry:
         rank: int - Position in leaderboard (1 = best)
         trader_address: str - Trader Ethereum address
         game_slug: str - Game identifier
+        taxonomy_depth: int - Taxonomy depth (1=game, 2=tournament, 3=team)
         raw_score: Decimal - Weighted composite score (0-100)
         percentile_rank: Decimal - Population-relative rank (0-100)
         win_rate: Decimal | None - Win rate percentage (0-100), None if no wins/losses
@@ -60,6 +77,7 @@ class LeaderboardEntry:
     rank: int
     trader_address: str
     game_slug: str
+    taxonomy_depth: int
     raw_score: Decimal
     percentile_rank: Decimal
     win_rate: Decimal | None
@@ -119,7 +137,9 @@ def _get_esports_positions(session: Session, trader_address: str) -> list[Any]:
     """
     query = (
         select(Position)
-        .join(MarketClassification, Position.market_id == MarketClassification.market_id)
+        .join(
+            MarketClassification, Position.market_id == MarketClassification.market_id
+        )
         .join(TaxonomyNode, MarketClassification.taxonomy_node_id == TaxonomyNode.id)
         .where(TaxonomyNode.slug.like("esports%"))
         .where(Position.trader_address == trader_address)
@@ -153,7 +173,10 @@ def _get_consistency_data(session: Session, trader_address: str) -> tuple[Decima
 
     # If snapshot exists AND consistency_score is not None, use stored values
     if snapshot is not None and snapshot.consistency_score is not None:
-        return snapshot.consistency_score, snapshot.consistency_signal or "insufficient_data"
+        return (
+            snapshot.consistency_score,
+            snapshot.consistency_signal or "insufficient_data",
+        )
 
     # Otherwise return defaults
     return Decimal("50"), "insufficient_data"
@@ -230,11 +253,15 @@ def compute_game_scores(
         )
 
         # Compute concentration ratios
-        esports_concentration = calculate_esports_concentration(esports_volume, total_volume)
+        esports_concentration = calculate_esports_concentration(
+            esports_volume, total_volume
+        )
         game_concentration = calculate_game_concentration(game_volume, esports_volume)
 
         # Retrieve consistency data
-        consistency_score, consistency_signal = _get_consistency_data(session, trader_address)
+        consistency_score, consistency_signal = _get_consistency_data(
+            session, trader_address
+        )
 
         # Compute expertise score
         result = calculate_expertise_score(
@@ -261,6 +288,7 @@ def compute_game_scores(
         expertise_score = ExpertiseScore(
             trader_address=trader_address,
             game_slug=game_slug,
+            taxonomy_depth=1,
             raw_score=result.raw_score,
             percentile_rank=percentiles[trader_address],
             win_rate_component=result.win_rate_component,
@@ -294,18 +322,27 @@ def compute_game_scores(
         unique_markets = len(set(p.market_id for p in trader_positions))
 
         last_active = max(
-            (p.last_trade_timestamp for p in trader_positions if p.last_trade_timestamp),
+            (
+                p.last_trade_timestamp
+                for p in trader_positions
+                if p.last_trade_timestamp
+            ),
             default=None,
         )
 
         # Win rate from result
-        win_rate = result.win_rate_component if result.win_rate_component > Decimal("0") else None
+        win_rate = (
+            result.win_rate_component
+            if result.win_rate_component > Decimal("0")
+            else None
+        )
 
         leaderboard.append(
             LeaderboardEntry(
                 rank=0,  # Will be set after sorting
                 trader_address=trader_address,
                 game_slug=game_slug,
+                taxonomy_depth=1,
                 raw_score=result.raw_score,
                 percentile_rank=percentiles[trader_address],
                 win_rate=win_rate,
@@ -326,6 +363,7 @@ def compute_game_scores(
             rank=idx + 1,
             trader_address=entry.trader_address,
             game_slug=entry.game_slug,
+            taxonomy_depth=entry.taxonomy_depth,
             raw_score=entry.raw_score,
             percentile_rank=entry.percentile_rank,
             win_rate=entry.win_rate,
@@ -364,3 +402,395 @@ def compute_all_game_scores(
         results[game_slug] = leaderboard
 
     return results
+
+
+def _get_positions_for_depth(
+    session: Session,
+    slug: str,
+    taxonomy_depth: int,
+    trader_address: str | None = None,
+) -> tuple[list[Any], Decimal]:
+    """Get positions at a specific taxonomy depth and compute parent volume.
+
+    Args:
+        session: SQLAlchemy session
+        slug: The taxonomy slug to query
+        taxonomy_depth: Depth of the slug (1=game, 2=tournament, 3=team)
+        trader_address: Optional trader filter
+
+    Returns:
+        Tuple of (positions list, parent_volume Decimal)
+    """
+    positions = get_positions_for_slug(session, slug, trader_address=trader_address)
+
+    if not positions:
+        return [], Decimal("0")
+
+    current_volume = sum((_compute_position_volume(p) for p in positions), Decimal("0"))
+
+    if taxonomy_depth <= 1:
+        return positions, Decimal("0")
+
+    parent_slug = ".".join(slug.split(".")[:-1])
+    parent_positions = get_positions_for_slug(
+        session, parent_slug, trader_address=trader_address
+    )
+    parent_volume = sum(
+        (_compute_position_volume(p) for p in parent_positions), Decimal("0")
+    )
+
+    return positions, parent_volume
+
+
+def compute_taxonomy_scores(
+    session: Session,
+    slug: str,
+    taxonomy_depth: int,
+    weights: dict[str, Decimal] | None = None,
+    now: datetime | None = None,
+) -> list[LeaderboardEntry]:
+    """Compute expertise scores for all traders at a specific taxonomy depth.
+
+    Similar to compute_game_scores but generalizes to tournament (depth 2) and team (depth 3).
+
+    Pipeline:
+    1. Query positions for slug at given depth
+    2. Group by trader_address
+    3. Filter to traders with >= 5 resolved markets
+    4. Calculate concentrations per trader (depth-appropriate)
+    5. Retrieve consistency data per trader
+    6. Compute expertise scores
+    7. Normalize to percentiles
+    8. Persist ExpertiseScore snapshots with taxonomy_depth
+    9. Build LeaderboardEntry list
+    10. Return sorted by percentile_rank DESC
+
+    Args:
+        session: SQLAlchemy session
+        slug: Taxonomy identifier (e.g., "esports.cs2.iem-katowice")
+        taxonomy_depth: Depth level (1=game, 2=tournament, 3=team)
+        weights: Optional custom scoring weights
+        now: Optional current timestamp (default: datetime.now(UTC))
+
+    Returns:
+        List of LeaderboardEntry objects sorted by percentile_rank DESC
+    """
+    if now is None:
+        now = datetime.now(UTC)
+
+    positions_by_trader: dict[str, list[Any]] = {}
+    trader_parent_volumes: dict[str, Decimal] = {}
+
+    trader_addresses = (
+        session.execute(
+            select(Position.trader_address)
+            .join(
+                MarketClassification,
+                Position.market_id == MarketClassification.market_id,
+            )
+            .join(
+                TaxonomyNode, MarketClassification.taxonomy_node_id == TaxonomyNode.id
+            )
+            .where(TaxonomyNode.slug.like(f"{slug}%"))
+            .distinct()
+        )
+        .scalars()
+        .all()
+    )
+
+    for trader_address in trader_addresses:
+        positions, parent_volume = _get_positions_for_depth(
+            session, slug, taxonomy_depth, trader_address
+        )
+        if positions:
+            positions_by_trader[trader_address] = positions
+            trader_parent_volumes[trader_address] = parent_volume
+
+    score_results = {}
+    for trader_address, trader_positions in positions_by_trader.items():
+        resolved_positions = [
+            p for p in trader_positions if p.resolved and p.outcome != "void"
+        ]
+
+        if len(resolved_positions) < 5:
+            continue
+
+        slug_volume = sum(
+            (_compute_position_volume(p) for p in trader_positions), Decimal("0")
+        )
+
+        esports_positions = _get_esports_positions(session, trader_address)
+        esports_volume = sum(
+            (_compute_position_volume(p) for p in esports_positions), Decimal("0")
+        )
+
+        all_positions = _get_all_trader_positions(session, trader_address)
+        total_volume = sum(
+            (_compute_position_volume(p) for p in all_positions), Decimal("0")
+        )
+
+        esports_concentration = calculate_esports_concentration(
+            esports_volume, total_volume
+        )
+
+        parent_volume = trader_parent_volumes.get(trader_address, Decimal("0"))
+        if taxonomy_depth == 2:
+            game_concentration = calculate_tournament_concentration(
+                slug_volume, parent_volume
+            )
+        elif taxonomy_depth == 3:
+            game_concentration = calculate_team_concentration(
+                slug_volume, parent_volume
+            )
+        else:
+            game_concentration = calculate_game_concentration(
+                slug_volume, esports_volume
+            )
+
+        consistency_score, consistency_signal = _get_consistency_data(
+            session, trader_address
+        )
+
+        result = calculate_expertise_score(
+            positions=trader_positions,
+            trader_address=trader_address,
+            game_slug=slug,
+            esports_concentration=esports_concentration,
+            game_concentration=game_concentration,
+            consistency_score=consistency_score,
+            consistency_signal=consistency_signal,
+            weights=weights,
+            now=now,
+        )
+
+        if result is not None:
+            score_results[trader_address] = result
+
+    raw_scores = {addr: result.raw_score for addr, result in score_results.items()}
+    percentiles = normalize_scores_to_percentiles(raw_scores)
+
+    for trader_address, result in score_results.items():
+        expertise_score = ExpertiseScore(
+            trader_address=trader_address,
+            game_slug=slug,
+            taxonomy_depth=taxonomy_depth,
+            raw_score=result.raw_score,
+            percentile_rank=percentiles[trader_address],
+            win_rate_component=result.win_rate_component,
+            concentration_component=result.concentration_component,
+            recency_component=result.recency_component,
+            sample_size_component=result.sample_size_component,
+            consistency_multiplier=result.consistency_multiplier,
+            specialization_label=result.specialization_label,
+            resolved_market_count=result.resolved_market_count,
+            computed_at=now,
+        )
+        session.add(expertise_score)
+
+    session.commit()
+
+    leaderboard: list[LeaderboardEntry] = []
+    for trader_address, result in score_results.items():
+        trader_positions = positions_by_trader[trader_address]
+        resolved_positions = [
+            p for p in trader_positions if p.resolved and p.outcome != "void"
+        ]
+
+        realized_pnl = sum(
+            (p.pnl for p in resolved_positions if p.pnl is not None), Decimal("0")
+        )
+
+        trade_count = len(resolved_positions)
+
+        unique_markets = len(set(p.market_id for p in trader_positions))
+
+        last_active = max(
+            (
+                p.last_trade_timestamp
+                for p in trader_positions
+                if p.last_trade_timestamp
+            ),
+            default=None,
+        )
+
+        win_rate = (
+            result.win_rate_component
+            if result.win_rate_component > Decimal("0")
+            else None
+        )
+
+        leaderboard.append(
+            LeaderboardEntry(
+                rank=0,
+                trader_address=trader_address,
+                game_slug=slug,
+                taxonomy_depth=taxonomy_depth,
+                raw_score=result.raw_score,
+                percentile_rank=percentiles[trader_address],
+                win_rate=win_rate,
+                realized_pnl=realized_pnl,
+                trade_count=trade_count,
+                unique_markets=unique_markets,
+                last_active=last_active,
+                specialization_label=result.specialization_label,
+            )
+        )
+
+    leaderboard.sort(key=lambda x: x.percentile_rank, reverse=True)
+
+    leaderboard = [
+        LeaderboardEntry(
+            rank=idx + 1,
+            trader_address=entry.trader_address,
+            game_slug=entry.game_slug,
+            taxonomy_depth=entry.taxonomy_depth,
+            raw_score=entry.raw_score,
+            percentile_rank=entry.percentile_rank,
+            win_rate=entry.win_rate,
+            realized_pnl=entry.realized_pnl,
+            trade_count=entry.trade_count,
+            unique_markets=entry.unique_markets,
+            last_active=entry.last_active,
+            specialization_label=entry.specialization_label,
+        )
+        for idx, entry in enumerate(leaderboard)
+    ]
+
+    return leaderboard
+
+
+def compute_all_taxonomy_scores(
+    session: Session,
+    depth: int,
+    weights: dict[str, Decimal] | None = None,
+    now: datetime | None = None,
+) -> dict[str, list[LeaderboardEntry]]:
+    """Compute scores for all slugs at a given taxonomy depth.
+
+    Args:
+        session: SQLAlchemy session
+        depth: Taxonomy depth (1=game, 2=tournament, 3=team)
+        weights: Optional custom scoring weights
+        now: Optional current timestamp (default: datetime.now(UTC))
+
+    Returns:
+        Dict mapping slug -> leaderboard
+    """
+    slugs = get_all_slugs_with_positions_at_depth(session, depth)
+
+    results = {}
+    for slug in slugs:
+        leaderboard = compute_taxonomy_scores(
+            session, slug, depth, weights=weights, now=now
+        )
+        results[slug] = leaderboard
+
+    return results
+
+
+def identify_hidden_specialists(
+    session: Session,
+    game_slug: str,
+    game_score_threshold: Decimal = Decimal("60"),
+    deep_score_threshold: Decimal = Decimal("75"),
+) -> list[dict]:
+    """Identify traders with low game scores but high tournament/team scores.
+
+    These are "hidden specialists" — traders who appear average at the game level
+    but have deep expertise in specific tournaments or teams.
+
+    Args:
+        session: SQLAlchemy session
+        game_slug: Game identifier (e.g., "esports.cs2")
+        game_score_threshold: Max raw_score at depth 1 to consider (default 60)
+        deep_score_threshold: Min raw_score at depth 2/3 to qualify (default 75)
+
+    Returns:
+        List of dicts with trader_address, game_slug, game_score, deep_slug,
+        deep_depth, deep_score, score_delta. Sorted by score_delta DESC.
+    """
+    game_subquery = (
+        select(
+            ExpertiseScore.trader_address,
+            ExpertiseScore.game_slug,
+            ExpertiseScore.raw_score,
+            func.max(ExpertiseScore.computed_at).label("max_computed_at"),
+        )
+        .where(ExpertiseScore.game_slug == game_slug)
+        .where(ExpertiseScore.taxonomy_depth == 1)
+        .where(ExpertiseScore.raw_score < game_score_threshold)
+        .group_by(
+            ExpertiseScore.trader_address,
+            ExpertiseScore.game_slug,
+            ExpertiseScore.raw_score,
+        )
+        .subquery()
+    )
+
+    game_scores = (
+        select(ExpertiseScore)
+        .join(
+            game_subquery,
+            (ExpertiseScore.trader_address == game_subquery.c.trader_address)
+            & (ExpertiseScore.computed_at == game_subquery.c.max_computed_at),
+        )
+        .where(ExpertiseScore.game_slug == game_slug)
+        .where(ExpertiseScore.taxonomy_depth == 1)
+        .where(ExpertiseScore.raw_score < game_score_threshold)
+    )
+
+    game_results = session.execute(game_scores).scalars().all()
+
+    hidden_specialists = []
+
+    for game_score in game_results:
+        deep_subquery = (
+            select(
+                ExpertiseScore.trader_address,
+                ExpertiseScore.game_slug,
+                ExpertiseScore.taxonomy_depth,
+                ExpertiseScore.raw_score,
+                func.max(ExpertiseScore.computed_at).label("max_computed_at"),
+            )
+            .where(ExpertiseScore.game_slug.like(f"{game_slug}.%"))
+            .where(ExpertiseScore.taxonomy_depth.in_([2, 3]))
+            .where(ExpertiseScore.raw_score >= deep_score_threshold)
+            .group_by(
+                ExpertiseScore.trader_address,
+                ExpertiseScore.game_slug,
+                ExpertiseScore.taxonomy_depth,
+                ExpertiseScore.raw_score,
+            )
+            .subquery()
+        )
+
+        deep_scores = (
+            select(ExpertiseScore)
+            .join(
+                deep_subquery,
+                (ExpertiseScore.trader_address == deep_subquery.c.trader_address)
+                & (ExpertiseScore.computed_at == deep_subquery.c.max_computed_at),
+            )
+            .where(ExpertiseScore.game_slug.like(f"{game_slug}.%"))
+            .where(ExpertiseScore.taxonomy_depth.in_([2, 3]))
+            .where(ExpertiseScore.raw_score >= deep_score_threshold)
+        )
+
+        deep_results = session.execute(deep_scores).scalars().all()
+
+        for deep_score in deep_results:
+            hidden_specialists.append(
+                {
+                    "trader_address": game_score.trader_address,
+                    "game_slug": game_slug,
+                    "game_score": game_score.raw_score,
+                    "deep_slug": deep_score.game_slug,
+                    "deep_depth": deep_score.taxonomy_depth,
+                    "deep_score": deep_score.raw_score,
+                    "score_delta": deep_score.raw_score - game_score.raw_score,
+                }
+            )
+
+    hidden_specialists.sort(key=lambda x: x["score_delta"], reverse=True)
+
+    return hidden_specialists

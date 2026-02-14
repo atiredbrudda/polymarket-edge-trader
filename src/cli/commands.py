@@ -407,59 +407,88 @@ def signals(window, min_confidence, verbose):
 
 
 @cli.command()
-@click.argument("game_slug")
+@click.argument("slug")
 @click.option("--top-n", "-n", default=20, help="Number of entries to display")
+@click.option(
+    "--depth",
+    "-d",
+    type=click.Choice(["game", "tournament", "team"]),
+    default="game",
+    help="Taxonomy depth: game (default), tournament, or team",
+)
 @click.option("--verbose", "-v", is_flag=True, help="Enable debug logging")
-def leaderboard(game_slug, top_n, verbose):
-    """Display game leaderboard rankings.
+def leaderboard(slug, top_n, depth, verbose):
+    """Display rankings at game, tournament, or team level.
 
-    GAME_SLUG is the game identifier (e.g., esports.cs2, esports.lol).
+    SLUG is the taxonomy identifier (game, tournament, or team slug).
+    Use --depth to specify the taxonomy level.
 
-    Example:
+    Examples:
         polymarket leaderboard esports.cs2
-        polymarket leaderboard esports.lol --top-n 10
+        polymarket leaderboard esports.cs2.iem-katowice --depth tournament
+        polymarket leaderboard esports.cs2.iem-katowice.navi --depth team
     """
     logger.info(
-        f"LEADERBOARD command started (game_slug={game_slug}, top_n={top_n}, verbose={verbose})"
+        f"LEADERBOARD command started (slug={slug}, top_n={top_n}, depth={depth}, verbose={verbose})"
     )
 
     if verbose:
         logger.remove()
         logger.add(sys.stderr, level="DEBUG")
 
+    depth_map = {"game": 1, "tournament": 2, "team": 3}
+    depth_int = depth_map[depth]
+
     console = Console()
 
     with console.status("[bold green]Fetching leaderboard...", spinner="dots"):
-        # Get dependencies
         session_factory, _, _, _, _ = _get_dependencies()
 
         with get_session(session_factory) as session:
-            # Validate game slug exists
-            query = select(TaxonomyNode.slug).where(
-                TaxonomyNode.slug.like("esports.%"), TaxonomyNode.node_type == "game"
+            from src.pipeline.queries import (
+                get_game_leaderboard,
+                get_taxonomy_leaderboard,
             )
-            result = session.execute(query)
-            valid_games = result.scalars().all()
 
-            if game_slug not in valid_games:
-                logger.error(
-                    f"Invalid game slug: {game_slug}. Valid games: {valid_games}"
+            if depth == "game":
+                query = select(TaxonomyNode.slug).where(
+                    TaxonomyNode.slug.like("esports.%"),
+                    TaxonomyNode.node_type == "game",
                 )
-                console.print(
-                    f"[bold red]Error: Game '{game_slug}' not found.[/bold red]"
+                result = session.execute(query)
+                valid_slugs = result.scalars().all()
+
+                if slug not in valid_slugs:
+                    logger.error(
+                        f"Invalid game slug: {slug}. Valid games: {valid_slugs}"
+                    )
+                    console.print(
+                        f"[bold red]Error: Game '{slug}' not found.[/bold red]"
+                    )
+                    console.print("\n[bold]Available games:[/bold]")
+                    for game in sorted(valid_slugs):
+                        console.print(f"  - {game}")
+                    return
+
+                leaderboard_entries = get_game_leaderboard(session, slug, top_n=top_n)
+            else:
+                query = select(TaxonomyNode.slug).where(
+                    TaxonomyNode.slug == slug, TaxonomyNode.depth == depth_int
                 )
-                console.print("\n[bold]Available games:[/bold]")
-                for game in sorted(valid_games):
-                    console.print(f"  - {game}")
-                return
+                result = session.execute(query)
+                valid_slugs = result.scalars().all()
 
-            # Import queries here
-            from src.pipeline.queries import get_game_leaderboard
+                if slug not in valid_slugs:
+                    logger.error(f"Invalid {depth} slug: {slug}")
+                    console.print(
+                        f"[bold red]Error: {depth.title()} '{slug}' not found.[/bold red]"
+                    )
+                    return
 
-            # Get leaderboard
-            leaderboard_entries = get_game_leaderboard(session, game_slug, top_n=top_n)
+                leaderboard_entries = get_taxonomy_leaderboard(
+                    session, slug, depth_int, top_n=top_n
+                )
 
-            # Convert to dicts for formatter
             entries_data = [
                 {
                     "rank": idx + 1,
@@ -470,12 +499,148 @@ def leaderboard(game_slug, top_n, verbose):
                 for idx, entry in enumerate(leaderboard_entries)
             ]
 
-    logger.info(f"Leaderboard loaded: {len(entries_data)} entries for {game_slug}")
+    logger.info(f"Leaderboard loaded: {len(entries_data)} entries for {slug}")
 
-    # Format and display
-    table = format_leaderboard_table(entries_data, game_slug)
+    depth_label = depth.title() if depth != "game" else "Game"
+    table = format_leaderboard_table(entries_data, slug, depth_label=depth_label)
     console.print(table)
     logger.info("LEADERBOARD command completed")
+
+
+@cli.command()
+@click.argument("address")
+@click.option("--verbose", "-v", is_flag=True, help="Enable debug logging")
+def expertise(address, verbose):
+    """Show trader expertise breakdown across all taxonomy depths.
+
+    Displays scores at game, tournament, and team levels to reveal
+    where a trader truly specializes.
+
+    Example:
+        polymarket expertise 0xTrader123
+    """
+    logger.info(f"EXPERTISE command started (address={address}, verbose={verbose})")
+
+    if verbose:
+        logger.remove()
+        logger.add(sys.stderr, level="DEBUG")
+
+    console = Console()
+
+    with console.status("[bold green]Fetching expertise breakdown...", spinner="dots"):
+        session_factory, _, _, _, _ = _get_dependencies()
+
+        with get_session(session_factory) as session:
+            address = find_trader_by_prefix(session, address)
+            if not address:
+                console.print("[bold red]Error: Trader not found.[/bold red]")
+                return
+
+            from sqlalchemy import func
+            from src.db.models import ExpertiseScore
+            from src.pipeline.scoring_pipeline import LeaderboardEntry
+
+            scores_by_depth: dict[int, list] = {1: [], 2: [], 3: []}
+
+            for depth in [1, 2, 3]:
+                subquery = (
+                    select(
+                        ExpertiseScore.trader_address,
+                        ExpertiseScore.game_slug,
+                        func.max(ExpertiseScore.computed_at).label("max_computed_at"),
+                    )
+                    .where(ExpertiseScore.trader_address == address)
+                    .where(ExpertiseScore.taxonomy_depth == depth)
+                    .group_by(ExpertiseScore.trader_address, ExpertiseScore.game_slug)
+                    .subquery()
+                )
+
+                query = (
+                    select(ExpertiseScore)
+                    .join(
+                        subquery,
+                        (ExpertiseScore.trader_address == subquery.c.trader_address)
+                        & (ExpertiseScore.computed_at == subquery.c.max_computed_at),
+                    )
+                    .where(ExpertiseScore.trader_address == address)
+                    .where(ExpertiseScore.taxonomy_depth == depth)
+                )
+
+                results = session.execute(query).scalars().all()
+
+                for score in results:
+                    scores_by_depth[depth].append(
+                        {
+                            "slug": score.game_slug,
+                            "score": score.raw_score,
+                            "percentile": score.percentile_rank or score.raw_score,
+                            "specialization": score.specialization_label,
+                        }
+                    )
+
+    logger.info(f"Expertise loaded for {address}")
+
+    from src.cli.formatters import format_expertise_breakdown
+
+    output = format_expertise_breakdown(address, scores_by_depth)
+    console.print(output)
+    logger.info("EXPERTISE command completed")
+
+
+@cli.command()
+@click.argument("game_slug")
+@click.option(
+    "--game-threshold", default=60.0, help="Max game score for 'average' (default 60)"
+)
+@click.option(
+    "--deep-threshold",
+    default=75.0,
+    help="Min deep score for 'specialist' (default 75)",
+)
+@click.option("--verbose", "-v", is_flag=True, help="Enable debug logging")
+def specialists(game_slug, game_threshold, deep_threshold, verbose):
+    """Discover hidden specialists in a game.
+
+    Finds traders with average game-level scores but high tournament/team scores.
+    These are niche experts who specialize deeply.
+
+    Example:
+        polymarket specialists esports.cs2
+        polymarket specialists esports.cs2 --game-threshold 50 --deep-threshold 80
+    """
+    logger.info(
+        f"SPECIALISTS command started (game_slug={game_slug}, "
+        f"game_threshold={game_threshold}, deep_threshold={deep_threshold}, verbose={verbose})"
+    )
+
+    if verbose:
+        logger.remove()
+        logger.add(sys.stderr, level="DEBUG")
+
+    console = Console()
+
+    with console.status(
+        "[bold green]Discovering hidden specialists...", spinner="dots"
+    ):
+        session_factory, _, _, _, _ = _get_dependencies()
+
+        with get_session(session_factory) as session:
+            from src.pipeline.scoring_pipeline import identify_hidden_specialists
+
+            specialists_list = identify_hidden_specialists(
+                session,
+                game_slug,
+                game_score_threshold=Decimal(str(game_threshold)),
+                deep_score_threshold=Decimal(str(deep_threshold)),
+            )
+
+    logger.info(f"Found {len(specialists_list)} hidden specialists")
+
+    from src.cli.formatters import format_specialists_table
+
+    table = format_specialists_table(specialists_list, game_slug)
+    console.print(table)
+    logger.info("SPECIALISTS command completed")
 
 
 @cli.command()

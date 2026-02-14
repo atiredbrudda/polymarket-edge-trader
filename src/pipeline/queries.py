@@ -494,6 +494,139 @@ def get_positions_for_game(
     return list(result.scalars().all())
 
 
+def get_positions_for_slug(
+    session: Session, slug: str, trader_address: str | None = None
+) -> list[Position]:
+    """Query positions in markets under any taxonomy slug (game, tournament, or team).
+
+    Similar to get_positions_for_game but generalized to work at any taxonomy depth.
+    Uses slug LIKE pattern to capture the slug and all its descendants.
+
+    Args:
+        session: SQLAlchemy session
+        slug: Taxonomy identifier (e.g., "esports.cs2", "esports.cs2.iem-katowice")
+        trader_address: Optional trader address filter
+
+    Returns:
+        List of Position ORM objects
+
+    Example:
+        # Get all positions for tournament
+        positions = get_positions_for_slug(session, "esports.cs2.iem-katowice")
+
+        # Get trader's positions in tournament
+        trader_positions = get_positions_for_slug(session, "esports.cs2.iem-katowice", trader_address="0xTrader1")
+    """
+    query = (
+        select(Position)
+        .join(MarketClassification, Position.market_id == MarketClassification.market_id)
+        .join(TaxonomyNode, MarketClassification.taxonomy_node_id == TaxonomyNode.id)
+        .where(TaxonomyNode.slug.like(f"{slug}%"))
+    )
+
+    if trader_address is not None:
+        query = query.where(Position.trader_address == trader_address)
+
+    result = session.execute(query)
+    return list(result.scalars().all())
+
+
+def get_taxonomy_leaderboard(
+    session: Session,
+    slug: str,
+    taxonomy_depth: int,
+    top_n: int = 20,
+    min_score: Decimal | None = None,
+) -> list[ExpertiseScore]:
+    """Query latest expertise scores for a taxonomy leaderboard at any depth.
+
+    Returns the most recent score snapshot for each trader in a taxonomy node,
+    filtered by taxonomy_depth, ordered by percentile_rank (or raw_score if percentile_rank is None).
+
+    Args:
+        session: SQLAlchemy session
+        slug: Taxonomy identifier (e.g., "esports.cs2.iem-katowice")
+        taxonomy_depth: Depth level (1=game, 2=tournament, 3=team)
+        top_n: Maximum number of entries to return (default: 20)
+        min_score: Optional minimum raw_score filter
+
+    Returns:
+        List of ExpertiseScore ORM objects, ordered by rank DESC
+
+    Example:
+        # Get top 20 traders in tournament
+        leaderboard = get_taxonomy_leaderboard(session, "esports.cs2.iem-katowice", taxonomy_depth=2, top_n=20)
+
+        # Get traders with score >= 70
+        high_performers = get_taxonomy_leaderboard(session, "esports.cs2.iem-katowice", taxonomy_depth=2, min_score=Decimal("70"))
+    """
+    subquery = (
+        select(
+            ExpertiseScore.trader_address,
+            func.max(ExpertiseScore.computed_at).label("max_computed_at"),
+        )
+        .where(ExpertiseScore.game_slug == slug)
+        .where(ExpertiseScore.taxonomy_depth == taxonomy_depth)
+        .group_by(ExpertiseScore.trader_address)
+        .subquery()
+    )
+
+    query = (
+        select(ExpertiseScore)
+        .join(
+            subquery,
+            (ExpertiseScore.trader_address == subquery.c.trader_address)
+            & (ExpertiseScore.computed_at == subquery.c.max_computed_at),
+        )
+        .where(ExpertiseScore.game_slug == slug)
+        .where(ExpertiseScore.taxonomy_depth == taxonomy_depth)
+    )
+
+    if min_score is not None:
+        query = query.where(ExpertiseScore.raw_score >= min_score)
+
+    query = query.order_by(
+        func.coalesce(ExpertiseScore.percentile_rank, ExpertiseScore.raw_score).desc()
+    )
+
+    query = query.limit(top_n)
+
+    result = session.execute(query)
+    return list(result.scalars().all())
+
+
+def get_all_slugs_with_positions_at_depth(session: Session, depth: int) -> list[str]:
+    """Query distinct taxonomy slugs at a specific depth that have positions.
+
+    Args:
+        session: SQLAlchemy session
+        depth: Taxonomy depth (0=root, 1=game, 2=tournament, 3=team)
+
+    Returns:
+        List of slug strings (e.g., ["esports.cs2", "esports.dota2"])
+
+    Example:
+        # Get all tournament slugs with positions
+        tournaments = get_all_slugs_with_positions_at_depth(session, depth=2)
+
+        # Get all team slugs with positions
+        teams = get_all_slugs_with_positions_at_depth(session, depth=3)
+    """
+    query = (
+        select(TaxonomyNode.slug)
+        .join(
+            MarketClassification,
+            MarketClassification.taxonomy_node_id == TaxonomyNode.id,
+        )
+        .join(Position, Position.market_id == MarketClassification.market_id)
+        .where(TaxonomyNode.depth == depth)
+        .distinct()
+    )
+
+    result = session.execute(query)
+    return [s for s in result.scalars().all() if s is not None]
+
+
 def get_traders_by_backfill_status(session: Session, backfilled: bool) -> list[Trader]:
     """Get traders filtered by backfill completion status.
 

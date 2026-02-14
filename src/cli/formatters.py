@@ -104,7 +104,9 @@ def format_trader_profile(
 
     # Section 2: Category summary table
     if summaries:
-        summary_table = Table(title="Category Summary", show_header=True, header_style="bold")
+        summary_table = Table(
+            title="Category Summary", show_header=True, header_style="bold"
+        )
         summary_table.add_column("Category", style="cyan")
         summary_table.add_column("Volume", justify="right", style="green")
         summary_table.add_column("Trades", justify="right", style="yellow")
@@ -119,7 +121,9 @@ def format_trader_profile(
 
     # Section 3: Current positions table
     if positions:
-        positions_table = Table(title="Current Positions", show_header=True, header_style="bold")
+        positions_table = Table(
+            title="Current Positions", show_header=True, header_style="bold"
+        )
         positions_table.add_column("Market", style="white", no_wrap=False)
         positions_table.add_column("Direction", style="cyan")
         positions_table.add_column("Size", justify="right", style="green")
@@ -131,13 +135,17 @@ def format_trader_profile(
             size = position.get("size", Decimal("0"))
             entry_price = position.get("avg_entry_price")
             entry_str = f"{entry_price:.4f}" if entry_price else "N/A"
-            positions_table.add_row(market_question, direction, f"{size:,.2f}", entry_str)
+            positions_table.add_row(
+                market_question, direction, f"{size:,.2f}", entry_str
+            )
 
         sections.append(positions_table)
 
     # Section 4: Expertise scores table
     if scores:
-        scores_table = Table(title="Expertise Scores", show_header=True, header_style="bold")
+        scores_table = Table(
+            title="Expertise Scores", show_header=True, header_style="bold"
+        )
         scores_table.add_column("Game", style="cyan")
         scores_table.add_column("Score", justify="right", style="green")
         scores_table.add_column("Percentile", justify="right", style="yellow")
@@ -208,22 +216,27 @@ def format_signals_table(signals: list) -> Table:
     return table
 
 
-def format_leaderboard_table(entries: list, game_slug: str) -> Table:
+def format_leaderboard_table(
+    entries: list, slug: str, depth_label: str = "Game"
+) -> Table:
     """Format leaderboard entries as a Rich Table.
 
     Args:
         entries: List of dicts with rank, trader_address, score, win_rate fields
-        game_slug: Game identifier for table title
+        slug: Taxonomy identifier for table title
+        depth_label: Label for depth (default "Game", or "Tournament", "Team")
 
     Returns:
         Rich Table with columns: Rank, Trader, Score, Win Rate
 
     Example:
         >>> entries = [{"rank": 1, "trader_address": "0xTrader123", "score": 95.5, ...}]
-        >>> table = format_leaderboard_table(entries, "esports.cs2")
+        >>> table = format_leaderboard_table(entries, "esports.cs2", depth_label="Game")
     """
     table = Table(
-        title=f"Leaderboard: {game_slug}", show_header=True, header_style="bold cyan"
+        title=f"{depth_label} Leaderboard: {slug}",
+        show_header=True,
+        header_style="bold cyan",
     )
     table.add_column("Rank", justify="right", style="cyan")
     table.add_column("Trader", style="white")
@@ -277,7 +290,9 @@ Alerts Sent: {alerts_sent}"""
     return Panel(content, border_style="green", title="Sweep Summary")
 
 
-def format_research_table(trades_data: list[dict], trader_address: str, total_count: int) -> Table:
+def format_research_table(
+    trades_data: list[dict], trader_address: str, total_count: int
+) -> Table:
     """Format JBecker trade history as Rich table.
 
     Args:
@@ -295,7 +310,7 @@ def format_research_table(trades_data: list[dict], trader_address: str, total_co
     table = Table(
         title=f"Trade History: {truncate_address(trader_address)} ({total_count} trades)",
         show_header=True,
-        header_style="bold cyan"
+        header_style="bold cyan",
     )
 
     table.add_column("#", justify="right", style="dim")
@@ -347,7 +362,7 @@ def format_research_table(trades_data: list[dict], trader_address: str, total_co
             Text.from_markup(side_display),
             f"{size:,.2f}",
             price_str,
-            str(block)
+            str(block),
         )
 
     # Add footer if truncated
@@ -371,9 +386,7 @@ def format_batch_summary(results: list[dict]) -> Table:
         >>> table = format_batch_summary(results)
     """
     table = Table(
-        title="Batch Analysis Summary",
-        show_header=True,
-        header_style="bold cyan"
+        title="Batch Analysis Summary", show_header=True, header_style="bold cyan"
     )
 
     table.add_column("Trader", style="white")
@@ -402,7 +415,7 @@ def format_batch_summary(results: list[dict]) -> Table:
             str(found),
             str(inserted),
             str(skipped),
-            Text.from_markup(status_display)
+            Text.from_markup(status_display),
         )
 
     return table
@@ -459,3 +472,96 @@ def format_pipeline_status(counts: dict, pending_traders: list) -> Group:
         return Group(summary_panel, Text(""), traders_table)
 
     return Group(summary_panel, Text("\n[green]All traders backfilled![/green]"))
+
+
+def format_expertise_breakdown(address: str, scores_by_depth: dict[int, list]) -> Group:
+    """Format trader expertise breakdown across taxonomy depths.
+
+    Args:
+        address: Trader wallet address
+        scores_by_depth: Dict mapping depth (1,2,3) to list of score dicts
+            Each dict: {"slug": str, "score": Decimal, "percentile": Decimal, "specialization": str}
+
+    Returns:
+        Rich Group with Panel for each depth level
+    """
+    from rich.panel import Panel
+    from rich.table import Table
+
+    depth_names = {1: "Game Scores", 2: "Tournament Scores", 3: "Team Scores"}
+
+    panels = []
+
+    for depth in [1, 2, 3]:
+        scores = scores_by_depth.get(depth, [])
+
+        if scores:
+            table = Table(show_header=True, header_style="bold cyan")
+            table.add_column("Slug", style="white")
+            table.add_column("Score", justify="right", style="green")
+            table.add_column("Percentile", justify="right", style="yellow")
+            table.add_column("Specialization", style="magenta")
+
+            for score in scores:
+                table.add_row(
+                    score["slug"],
+                    f"{score['score']:.1f}",
+                    f"{score['percentile']:.1f}",
+                    score["specialization"],
+                )
+
+            panels.append(
+                Panel(
+                    table,
+                    title=f"[bold]{depth_names[depth]}[/bold]",
+                    border_style="cyan",
+                )
+            )
+        else:
+            panels.append(
+                Panel(
+                    "[dim]No scores at this depth[/dim]",
+                    title=f"[bold]{depth_names[depth]}[/bold]",
+                    border_style="cyan",
+                )
+            )
+
+    header = Panel(
+        f"[bold cyan]Expertise Breakdown[/bold cyan]\n[dim]Trader: {address}[/dim]",
+        border_style="cyan",
+    )
+
+    return Group(header, Text(""), *panels)
+
+
+def format_specialists_table(specialists: list[dict], game_slug: str) -> Table:
+    """Format hidden specialists as a Rich Table.
+
+    Args:
+        specialists: List of specialist dicts with trader_address, game_score, deep_slug, deep_score, score_delta
+        game_slug: Game identifier for table title
+
+    Returns:
+        Rich Table with columns: Trader, Game Score, Niche, Niche Score, Delta
+    """
+    table = Table(
+        title=f"Hidden Specialists: {game_slug}",
+        show_header=True,
+        header_style="bold cyan",
+    )
+    table.add_column("Trader", style="white")
+    table.add_column("Game Score", justify="right", style="yellow")
+    table.add_column("Niche", style="cyan")
+    table.add_column("Niche Score", justify="right", style="green")
+    table.add_column("Delta", justify="right", style="magenta")
+
+    for spec in specialists:
+        table.add_row(
+            truncate_address(spec["trader_address"]),
+            f"{spec['game_score']:.1f}",
+            spec["deep_slug"],
+            f"{spec['deep_score']:.1f}",
+            f"+{spec['score_delta']:.1f}",
+        )
+
+    return table
