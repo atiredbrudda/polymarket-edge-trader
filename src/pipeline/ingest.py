@@ -573,6 +573,9 @@ class IngestionPipeline:
                 end_date_iso = market_dict.get("endDateIso") or market_dict.get(
                     "end_date"
                 )
+                start_date_iso = market_dict.get("startDate") or market_dict.get(
+                    "event_startDate"
+                )
                 closed = market_dict.get("closed", False)
                 active = not closed
 
@@ -617,6 +620,14 @@ class IngestionPipeline:
                         except Exception:
                             pass
 
+                    if start_date_iso:
+                        try:
+                            existing.start_date = datetime.fromisoformat(
+                                start_date_iso.replace("Z", "+00:00")
+                            )
+                        except Exception:
+                            pass
+
                     if tokens:
                         existing.tokens = json.dumps(tokens)
                 else:
@@ -632,6 +643,14 @@ class IngestionPipeline:
                         try:
                             market.end_date = datetime.fromisoformat(
                                 end_date_iso.replace("Z", "+00:00")
+                            )
+                        except Exception:
+                            pass
+
+                    if start_date_iso:
+                        try:
+                            market.start_date = datetime.fromisoformat(
+                                start_date_iso.replace("Z", "+00:00")
                             )
                         except Exception:
                             pass
@@ -1834,6 +1853,9 @@ class IngestionPipeline:
                     "condition_id": market.condition_id,
                     "question": market.question,
                     "category": market.category,
+                    "start_date": market.start_date.isoformat()
+                    if market.start_date
+                    else None,
                     "end_date": market.end_date.isoformat()
                     if market.end_date
                     else None,
