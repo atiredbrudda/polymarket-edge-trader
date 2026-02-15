@@ -10,6 +10,32 @@ Read this section before starting work. These are patterns the reviewer has flag
 
 ### worker/debugging — 2026-02-15
 - **Branch:** worker/debugging
+- **Commits:** 2623508, 95058fc
+- **Files changed:**
+  - src/api/gamma_client.py (MODIFIED)
+  - src/api/models.py (MODIFIED)
+  - src/cli/commands.py (MODIFIED)
+  - src/cli/scheduler.py (MODIFIED)
+  - src/pipeline/ingest.py (MODIFIED)
+- **Worker notes:** Debug session - Multiple issues fixed:
+  1. cli_log_file error - log rotation was size-based, changed to time-based (midnight)
+  2. Gamma API /markets endpoint completely broken - ignores ALL filters
+  3. Discovered /events endpoint works correctly - returns real game times
+  4. Fixed discover command session handling (detached instance error)
+  5. Added start_date to Market model for debugging
+- **Fix applied:**
+  - Changed CLI log rotation from '10 MB' to '00:00' (midnight daily)
+  - Switched from /markets to /events endpoint for targeted scanning
+  - Added get_events() to gamma_client.py with tag_id filtering
+  - Added NICHE_TAG_IDS mapping for niche->tag_id conversion
+  - Added _convert_events_to_markets() to extract markets from events
+  - Ordered events by endDate (earliest first)
+  - Fixed discover command SQLAlchemy session handling
+- **Decisions made:** /events endpoint provides actual game times vs midnight UTC defaults from /markets
+- **Test result:** discover --niche esports --closing-within 12h found 258 markets and 1016 traders in 131s
+
+### worker/debugging — 2026-02-15
+- **Branch:** worker/debugging
 - **Commits:** 2623508
 - **Files changed:**
   - src/cli/commands.py (MODIFIED)
