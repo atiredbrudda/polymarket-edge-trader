@@ -170,6 +170,102 @@ def _filter_market_by_niche(
     return True
 
 
+NICHE_TAG_IDS = {
+    "esports": 64,
+    "esport": 64,
+    "sports": 1,
+    "ncaab": 1,
+    "nba": 1,
+    "nfl": 1,
+    "nhl": 1,
+    "soccer": 1,
+    "tennis": 1,
+    "mma": 1,
+    "ufc": 1,
+    "boxing": 1,
+    "politics": 100,
+    "crypto": 100630,
+}
+
+
+def _convert_events_to_markets(
+    events: list[dict[str, Any]],
+    niche: str,
+    end_date_max: datetime | None,
+) -> list[dict[str, Any]]:
+    """Convert Gamma API events to market format.
+
+    The /events endpoint actually filters correctly and returns real game times.
+    This function extracts markets from events and uses event's startDate/endDate.
+
+    Args:
+        events: List of event dictionaries from Gamma API
+        niche: The niche being filtered
+        end_date_max: Maximum end date filter
+
+    Returns:
+        List of market dictionaries with corrected dates
+    """
+    markets = []
+    now = datetime.now(UTC)
+
+    for event in events:
+        event_start = event.get("startDate")
+        event_end = event.get("endDate")
+
+        event_start_dt = None
+        event_end_dt = None
+
+        if event_start:
+            try:
+                event_start_dt = datetime.fromisoformat(
+                    event_start.replace("Z", "+00:00")
+                )
+            except (ValueError, TypeError):
+                pass
+
+        if event_end:
+            try:
+                event_end_dt = datetime.fromisoformat(event_end.replace("Z", "+00:00"))
+            except (ValueError, TypeError):
+                pass
+
+        if end_date_max and event_start_dt and event_start_dt > end_date_max:
+            logger.debug(
+                f"Filtering out event '{event.get('title', '')[:50]}' - "
+                f"startDate {event_start} exceeds max {end_date_max}"
+            )
+            continue
+
+        event_markets = event.get("markets", [])
+        if not event_markets:
+            continue
+
+        for market in event_markets:
+            market_copy = dict(market)
+
+            market_copy["event_startDate"] = event_start
+            market_copy["event_endDate"] = event_end
+
+            if event_end:
+                market_copy["endDate"] = event_end
+                market_copy["endDateIso"] = event_end
+
+            if event_start:
+                market_copy["startDate"] = event_start
+
+            market_copy["event_title"] = event.get("title")
+            market_copy["event_id"] = event.get("id")
+
+            if niche.lower() in ["esports", "esport"]:
+                market_copy["tags"] = ["esports"]
+                market_copy["category"] = "eSports"
+
+            markets.append(market_copy)
+
+    return markets
+
+
 class IngestionPipeline:
     """Orchestrates data ingestion from Polymarket API to SQLite database.
 
@@ -351,15 +447,13 @@ class IngestionPipeline:
     ) -> int:
         """Fetch and persist markets matching niche and time filters via Gamma API.
 
-        Uses Gamma API for server-side filtering instead of fetching all markets.
-        For each niche, queries Gamma API with tag filter. If end_date_max provided,
-        includes it as additional filter. Results are unioned (OR semantics).
-
-        Falls back to CLOB API + client-side filtering if Gamma client unavailable.
+        Uses Gamma API /events endpoint (which actually works correctly) instead of
+        /markets which ignores all filters. For each niche, queries Gamma API with
+        tag_id filter and start_date_max for time filtering.
 
         Args:
             niches: Tuple of niche category strings (e.g., ("esports", "crypto"))
-            end_date_max: Maximum end date for market closing time filter
+            end_date_max: Maximum start date for market filtering
 
         Returns:
             Count of markets processed
@@ -379,60 +473,82 @@ class IngestionPipeline:
 
         if niches:
             for niche in niches:
-                logger.info(f"Fetching markets for niche: {niche}")
+                tag_id = NICHE_TAG_IDS.get(niche.lower())
+                if tag_id is None:
+                    logger.warning(f"Unknown niche '{niche}', skipping")
+                    continue
+
+                logger.info(f"Fetching events for niche: {niche} (tag_id={tag_id})")
                 try:
-                    markets = self.gamma_client.get_markets(
-                        tag=niche,
-                        end_date_max=end_date_max,
-                        closed=False,
+                    events = self.gamma_client.get_events(
+                        tag_id=tag_id,
+                        start_date_max=end_date_max,
+                        active=True,
+                        limit=100,
                     )
-                    # Apply client-side filtering since Gamma API server-side filtering is broken
+
+                    markets = _convert_events_to_markets(events, niche, end_date_max)
+
                     filtered_count = 0
                     for market in markets:
-                        # Client-side filter: validate niche and endDate
+                        condition_id = market.get("condition_id") or market.get(
+                            "conditionId"
+                        )
+                        if not condition_id:
+                            continue
+
+                        if condition_id in seen_condition_ids:
+                            continue
+
                         if not _filter_market_by_niche(market, niche, end_date_max):
                             filtered_count += 1
                             continue
 
-                        condition_id = market.get("condition_id") or market.get(
-                            "conditionId"
-                        )
-                        if condition_id and condition_id not in seen_condition_ids:
-                            seen_condition_ids.add(condition_id)
-                            all_markets.append(market)
+                        seen_condition_ids.add(condition_id)
+                        all_markets.append(market)
+
                     logger.info(
-                        f"Fetched {len(markets)} markets for niche '{niche}', "
-                        f"filtered {filtered_count} invalid markets"
+                        f"Fetched {len(events)} events for niche '{niche}', "
+                        f"extracted {len(markets)} markets, filtered {filtered_count}"
                     )
                 except Exception as e:
-                    logger.error(f"Failed to fetch markets for niche '{niche}': {e}")
+                    logger.error(f"Failed to fetch events for niche '{niche}': {e}")
                     continue
         elif end_date_max:
-            logger.info(f"Fetching markets with end_date_max: {end_date_max}")
+            logger.info(f"Fetching events with start_date_max: {end_date_max}")
             try:
-                markets = self.gamma_client.get_markets(
-                    end_date_max=end_date_max,
-                    closed=False,
+                events = self.gamma_client.get_events(
+                    start_date_max=end_date_max,
+                    active=True,
+                    limit=100,
                 )
-                # Apply client-side filtering for endDate
+
+                markets = _convert_events_to_markets(events, "", end_date_max)
+
                 filtered_count = 0
                 for market in markets:
+                    condition_id = market.get("condition_id") or market.get(
+                        "conditionId"
+                    )
+                    if not condition_id:
+                        continue
+
+                    if condition_id in seen_condition_ids:
+                        continue
+
                     if not _filter_market_by_niche(market, None, end_date_max):
                         filtered_count += 1
                         continue
 
-                    condition_id = market.get("condition_id") or market.get(
-                        "conditionId"
-                    )
-                    if condition_id and condition_id not in seen_condition_ids:
-                        seen_condition_ids.add(condition_id)
-                        all_markets.append(market)
+                    seen_condition_ids.add(condition_id)
+                    all_markets.append(market)
+
                 logger.info(
-                    f"Fetched {len(markets)} markets with time filter, "
-                    f"filtered {filtered_count} expired markets"
+                    f"Fetched {len(events)} events, extracted {len(markets)} markets, "
+                    f"filtered {filtered_count}"
                 )
             except Exception as e:
-                logger.error(f"Failed to fetch markets with time filter: {e}")
+                logger.error(f"Failed to fetch events with time filter: {e}")
                 all_markets = []
 
         if not all_markets:
@@ -454,7 +570,9 @@ class IngestionPipeline:
                     continue
 
                 question = market_dict.get("question", "")
-                end_date_iso = market_dict.get("end_date")
+                end_date_iso = market_dict.get("endDateIso") or market_dict.get(
+                    "end_date"
+                )
                 closed = market_dict.get("closed", False)
                 active = not closed
 
