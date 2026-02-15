@@ -133,7 +133,7 @@ class GammaMarketClient:
                 "active": str(active).lower(),
                 "limit": limit,
                 "offset": offset,
-                "order": "startDate",
+                "order": "endDate",
                 "ascending": "false",
             }
 
