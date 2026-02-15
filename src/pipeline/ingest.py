@@ -1664,20 +1664,22 @@ class IngestionPipeline:
         niches: tuple[str, ...] = (),
         closing_within: str | None = None,
         skip_trader_discovery: bool = False,
+        skip_trader_backfill: bool = False,
     ) -> dict:
         """Execute complete ingestion sweep.
 
         Steps:
         1. Ingest active markets (targeted or full based on filters)
         2. Discover traders from markets with detail categories (optional)
-        3. Backfill history for newly discovered traders
+        3. Backfill history for newly discovered traders (optional - can be decoupled)
 
         Args:
             use_jbecker: If True and jbecker_client configured, use JBecker dataset as primary (default: True)
             use_blockchain_fallback: If True, fallback to blockchain as last resort (default: True)
             niches: Tuple of niche category strings for targeted scanning
             closing_within: Duration string for time-based filtering (e.g., "48h", "2d")
-            skip_trader_discovery: If True, skip trader discovery and backfill (default: False)
+            skip_trader_discovery: If True, skip trader discovery AND backfill (default: False)
+            skip_trader_backfill: If True, discover traders but skip backfill (default: False)
 
         Returns:
             Overall stats dict with keys:
@@ -1769,7 +1771,17 @@ class IngestionPipeline:
         finally:
             session.close()
 
-        # Step 3: Backfill newly discovered traders
+        # Step 3: Backfill newly discovered traders (can be skipped independently)
+        if skip_trader_backfill:
+            logger.info(
+                "Skipping trader backfill (skip_trader_backfill=True). "
+                "Run 'backfill' command separately to fetch history."
+            )
+            overall_stats["markets_ingested"] = overall_stats.get(
+                "markets_ingested", 0
+            ) or self._get_ingested_market_count(session_factory=self.session_factory)
+            return overall_stats
+
         session = self.session_factory()
         try:
             # Get traders that need backfill

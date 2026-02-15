@@ -134,7 +134,7 @@ class GammaMarketClient:
                 "limit": limit,
                 "offset": offset,
                 "order": "endDate",
-                "ascending": "false",
+                "ascending": "true",
             }
 
             if start_date_max is not None:

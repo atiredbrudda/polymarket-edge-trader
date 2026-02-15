@@ -185,6 +185,7 @@ def run_sweep(
     niches: tuple[str, ...] = (),
     closing_within: str | None = None,
     skip_trader_discovery: bool = False,
+    skip_trader_backfill: bool = False,
 ) -> dict:
     """Execute single full pipeline sweep.
 
@@ -205,7 +206,8 @@ def run_sweep(
         gamma_client: Optional GammaMarketClient for targeted scanning
         niches: Tuple of niche categories for targeted scanning
         closing_within: Duration string for time-based filtering
-        skip_trader_discovery: If True, skip trader discovery and backfill (for market-only sweep)
+        skip_trader_discovery: If True, skip trader discovery AND backfill (for market-only sweep)
+        skip_trader_backfill: If True, discover traders but skip backfill
 
     Returns:
         Stats dict with keys:
@@ -257,6 +259,7 @@ def run_sweep(
             niches=niches,
             closing_within=closing_within,
             skip_trader_discovery=skip_trader_discovery,
+            skip_trader_backfill=skip_trader_backfill,
         )
         stats["markets_ingested"] = ingest_stats.get("markets_ingested", 0)
         stats["traders_discovered"] = ingest_stats.get("traders_discovered", 0)
