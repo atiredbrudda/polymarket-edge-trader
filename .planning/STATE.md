@@ -12,8 +12,8 @@ See: .planning/PROJECT.md (updated 2026-02-13)
 Milestone: v1.1 Targeted Scanning & Deep Niche Scoring
 Phase: 12 of 12 (Deep Niche Scoring)
 Plan: 3 of 3 complete (12-01, 12-02, 12-03 reviewed and merged)
-Status: v1.1 milestone complete — all 12 phases shipped
-Last activity: 2026-02-14 — Phase 12 reviewed, cosmetic cleanup applied, merged to main
+Status: v1.1 milestone complete — all 12 phases shipped, post-release debug fixes merged
+Last activity: 2026-02-16 — worker/debugging reviewed and merged (Gamma API /events migration, 6 review fixes)
 
 Progress: v1.1 [██████████] 100%
 
@@ -40,7 +40,8 @@ Decisions are logged in PROJECT.md Key Decisions table.
 
 ### Known Limitations
 
-- 9 pre-existing test failures in test_api_client.py and test_ingest.py (unrelated to v1.1 work)
+- 9 pre-existing test failures in test_api_client.py, test_ingest.py, test_ingest_blockchain.py (mock signature mismatches from Graph integration)
+- Gamma API /markets endpoint broken server-side — using /events endpoint instead (see .planning/debug/events-endpoint-migration.md)
 
 ### Pending Todos
 
@@ -52,7 +53,7 @@ None yet.
 
 ## Session Continuity
 
-Last session: 2026-02-14
-Stopped at: v1.1 milestone complete — all phases reviewed and merged
+Last session: 2026-02-16
+Stopped at: v1.1 complete + post-release debug fixes merged + Worker Code Standards added to HANDOFF_PROTOCOL.md
 Resume file: None
 Next: /gsd:complete-milestone or /gsd:new-milestone
