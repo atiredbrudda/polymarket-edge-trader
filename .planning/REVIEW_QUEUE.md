@@ -16,7 +16,7 @@ Read this section before starting work. These are patterns the reviewer has flag
 ### worker/proxy-address-resolution — 2026-02-16
 - **Plan:** Proxy Address Resolution (WORKER_TASK_PROXY_RESOLUTION.md)
 - **Branch:** worker/proxy-address-resolution
-- **Commits:** (first..last commit hash - to be added after push)
+- **Commits:** 3917af0..3917af0
 - **Files changed:**
   - src/db/models.py (MODIFIED) — Added columns to Trader model
   - src/api/gamma_client.py (MODIFIED) — Added get_public_profile() method
