@@ -1340,8 +1340,13 @@ def resolve_profiles(limit, verbose):
         client, session_factory, category_filter, gamma_client=gamma_client
     )
 
-    with get_session(session_factory) as session:
-        pending_count = session.query(Trader).filter_by(profile_resolved=False).count()
+    try:
+        with get_session(session_factory) as session:
+            pending_count = (
+                session.query(Trader).filter_by(profile_resolved=False).count()
+            )
+    except Exception:
+        pending_count = 0
 
     if pending_count == 0:
         console.print("[green]No traders pending profile resolution.[/green]")
