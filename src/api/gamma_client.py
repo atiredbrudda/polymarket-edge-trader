@@ -101,20 +101,20 @@ class GammaMarketClient:
 
     def get_events(
         self,
-        start_date_max: datetime | None = None,
-        start_date_min: datetime | None = None,
+        end_date_max: datetime | None = None,
+        end_date_min: datetime | None = None,
         tag_id: int | None = None,
         active: bool = True,
         limit: int = 50,
     ) -> list[dict[str, Any]]:
         """Fetch events from Gamma API with optional filters.
 
-        The /events endpoint actually works correctly (unlike /markets which ignores filters).
+        The /events endpoint works correctly (unlike /markets which ignores filters).
         Returns real game times in startDate/endDate fields.
 
         Args:
-            start_date_max: Maximum start date filter (events starting before this)
-            start_date_min: Minimum start date filter (events starting after this)
+            end_date_max: Maximum end date filter (events ending before this)
+            end_date_min: Minimum end date filter (events ending after this)
             tag_id: Tag ID filter (e.g., 64 for esports)
             active: Only return active events
             limit: Number of results per page
@@ -137,11 +137,11 @@ class GammaMarketClient:
                 "ascending": "true",
             }
 
-            if start_date_max is not None:
-                params["start_date_max"] = start_date_max.isoformat()
+            if end_date_max is not None:
+                params["end_date_max"] = end_date_max.isoformat()
 
-            if start_date_min is not None:
-                params["start_date_min"] = start_date_min.isoformat()
+            if end_date_min is not None:
+                params["end_date_min"] = end_date_min.isoformat()
 
             if tag_id is not None:
                 params["tag_id"] = tag_id
@@ -151,7 +151,7 @@ class GammaMarketClient:
 
             logger.debug(
                 f"Fetching events (offset={offset}, limit={limit}, "
-                f"active={active}, tag_id={tag_id}, start_date_max={start_date_max})"
+                f"active={active}, tag_id={tag_id}, end_date_max={end_date_max})"
             )
 
             response = httpx.get(self.BASE_URL + "/events", params=params, timeout=30.0)

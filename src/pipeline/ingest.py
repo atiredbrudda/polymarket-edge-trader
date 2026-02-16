@@ -330,36 +330,8 @@ class IngestionPipeline:
         """
         logger.info("Starting active market ingestion")
 
-        # TEMPORARY DEBUG MODE: Use hardcoded test market instead of full scan
-        # TODO: Remove this after debugging - this is ONLY for testing the pipeline
-        # Market: LoL: Dragons Esports vs GnG Amazigh (BO3) - Arabian League
-        # https://polymarket.com/event/lol-drg-gng-2026-02-11
-        test_condition_ids = [
-            "0xd6f59f7f6dd3fa5e30e20b12cb13579dad60f4c61243e4dfd40636c3112fab1d",
-        ]
-
-        all_markets: list[MarketResponse] = []
-
-        if test_condition_ids:
-            logger.info(
-                f"DEBUG MODE: Testing with {len(test_condition_ids)} hardcoded markets"
-            )
-            for condition_id in test_condition_ids:
-                market = self.client.get_market(condition_id)
-                if market:
-                    all_markets.append(market)
-            logger.info(f"Loaded {len(all_markets)} test markets")
-        else:
-            # Full scan mode (slow)
-            logger.info("Full scan mode - fetching ALL markets (this will be slow)")
-            all_markets_full: list[MarketResponse] = self.client.get_markets(
-                active=True
-            )
-            esports_markets = [m for m in all_markets_full if m.category == "eSports"]
-            logger.info(
-                f"Found {len(all_markets_full)} total markets, {len(esports_markets)} eSports markets"
-            )
-            all_markets = esports_markets
+        all_markets: list[MarketResponse] = self.client.get_markets(active=True)
+        logger.info(f"Fetched {len(all_markets)} active markets")
 
         # Persist markets in batches
         batch_size = 100
@@ -449,11 +421,11 @@ class IngestionPipeline:
 
         Uses Gamma API /events endpoint (which actually works correctly) instead of
         /markets which ignores all filters. For each niche, queries Gamma API with
-        tag_id filter and start_date_max for time filtering.
+        tag_id filter and end_date_max for time filtering.
 
         Args:
             niches: Tuple of niche category strings (e.g., ("esports", "crypto"))
-            end_date_max: Maximum start date for market filtering
+            end_date_max: Maximum end date for market closing time filter
 
         Returns:
             Count of markets processed
@@ -482,7 +454,7 @@ class IngestionPipeline:
                 try:
                     events = self.gamma_client.get_events(
                         tag_id=tag_id,
-                        start_date_max=end_date_max,
+                        end_date_max=end_date_max,
                         active=True,
                         limit=100,
                     )
@@ -515,10 +487,10 @@ class IngestionPipeline:
                     logger.error(f"Failed to fetch events for niche '{niche}': {e}")
                     continue
         elif end_date_max:
-            logger.info(f"Fetching events with start_date_max: {end_date_max}")
+            logger.info(f"Fetching events with end_date_max: {end_date_max}")
             try:
                 events = self.gamma_client.get_events(
-                    start_date_max=end_date_max,
+                    end_date_max=end_date_max,
                     active=True,
                     limit=100,
                 )
@@ -1719,8 +1691,9 @@ class IngestionPipeline:
             logger.error(f"Market ingestion failed: {e}")
             return overall_stats
 
-        # Generate debug JSON output for ingested markets
-        self._write_sweep_debug_json(niches, closing_within)
+        # Generate debug JSON output for ingested markets (opt-in via env var)
+        if os.environ.get("POLYMARKET_DEBUG"):
+            self._write_sweep_debug_json(niches, closing_within)
 
         # Skip trader discovery and backfill if requested (for sweep command)
         if skip_trader_discovery:
