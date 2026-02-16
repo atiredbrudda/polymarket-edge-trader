@@ -171,3 +171,32 @@ class GammaMarketClient:
 
         logger.info(f"Fetched {len(all_events)} events from Gamma API")
         return all_events
+
+    def get_public_profile(self, address: str) -> dict | None:
+        """Fetch public profile for a Polymarket address.
+
+        Works for both proxy wallet addresses and EOA addresses.
+        Returns None if no profile exists (404).
+
+        Args:
+            address: Wallet address to look up
+
+        Returns:
+            Profile dictionary on success, None on 404
+        """
+        if self.rate_limiter is not None:
+            self.rate_limiter.acquire()
+
+        url = f"{self.BASE_URL}/public-profile"
+        params = {"address": address.lower()}
+
+        logger.debug(f"Fetching public profile for {address[:10]}...")
+
+        response = httpx.get(url, params=params, timeout=30.0)
+
+        if response.status_code == 404:
+            logger.debug(f"No profile found for {address[:10]}...")
+            return None
+
+        response.raise_for_status()
+        return response.json()

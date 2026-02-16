@@ -1629,6 +1629,122 @@ class IngestionPipeline:
 
         return combined_stats
 
+    def resolve_trader_profiles(self, limit: int | None = None) -> int:
+        """Resolve Polymarket profiles for traders with profile_resolved=False.
+
+        For each unresolved trader:
+        1. Call gamma API get_public_profile(address)
+        2. If profile found: set has_profile=True, store display_name, proxy_wallet
+        3. If 404: set has_profile=False
+        4. Always set profile_resolved=True
+
+        Args:
+            limit: Maximum number of traders to resolve (default: all)
+
+        Returns:
+            Count of profiles found
+        """
+        if self.gamma_client is None:
+            logger.warning("Gamma client not available, cannot resolve profiles")
+            return 0
+
+        logger.info("Starting trader profile resolution")
+
+        session = self.session_factory()
+        profiles_found = 0
+
+        try:
+            from sqlalchemy import inspect, text
+            from sqlalchemy.engine import Engine
+
+            engine = self.session_factory.kw.get("bind")
+            if engine is None:
+                from src.config.settings import get_settings
+                from sqlalchemy import create_engine
+
+                settings = get_settings()
+                engine = create_engine(settings.database_url)
+
+            inspector = inspect(engine)
+            existing_cols = [c["name"] for c in inspector.get_columns("traders")]
+
+            with engine.begin() as conn:
+                if "profile_resolved" not in existing_cols:
+                    conn.execute(
+                        text(
+                            "ALTER TABLE traders ADD COLUMN profile_resolved BOOLEAN DEFAULT 0 NOT NULL"
+                        )
+                    )
+                if "has_profile" not in existing_cols:
+                    conn.execute(
+                        text(
+                            "ALTER TABLE traders ADD COLUMN has_profile BOOLEAN DEFAULT 0 NOT NULL"
+                        )
+                    )
+                if "proxy_wallet" not in existing_cols:
+                    conn.execute(
+                        text("ALTER TABLE traders ADD COLUMN proxy_wallet VARCHAR(42)")
+                    )
+                if "display_name" not in existing_cols:
+                    conn.execute(
+                        text("ALTER TABLE traders ADD COLUMN display_name VARCHAR(100)")
+                    )
+
+            query = session.query(Trader).filter_by(profile_resolved=False)
+
+            if limit:
+                traders = query.limit(limit).all()
+            else:
+                traders = query.all()
+
+            total_pending = len(traders)
+            logger.info(f"Resolving profiles for {total_pending} traders")
+
+            for trader in traders:
+                try:
+                    profile = self.gamma_client.get_public_profile(trader.address)
+
+                    if profile:
+                        trader.has_profile = True
+                        trader.profile_resolved = True
+
+                        if profile.get("proxyWallet"):
+                            trader.proxy_wallet = profile["proxyWallet"]
+                        if profile.get("name"):
+                            trader.display_name = profile["name"]
+                        elif profile.get("pseudonym"):
+                            trader.display_name = profile["pseudonym"]
+
+                        profiles_found += 1
+                        logger.debug(
+                            f"Profile found for {trader.address[:10]}...: {trader.display_name}"
+                        )
+                    else:
+                        trader.has_profile = False
+                        trader.profile_resolved = True
+                        logger.debug(f"No profile for {trader.address[:10]}...")
+
+                    session.commit()
+
+                except Exception as e:
+                    logger.warning(
+                        f"Failed to resolve profile for {trader.address[:10]}...: {e}"
+                    )
+                    session.rollback()
+                    continue
+
+            logger.info(
+                f"Profile resolution complete: {profiles_found} profiles found, {total_pending - profiles_found} no profile"
+            )
+
+        except Exception as e:
+            logger.error(f"Failed to resolve trader profiles: {e}")
+            raise
+        finally:
+            session.close()
+
+        return profiles_found
+
     def run_full_sweep(
         self,
         use_jbecker: bool = True,

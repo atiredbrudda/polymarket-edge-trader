@@ -1294,6 +1294,91 @@ def backfill(address, limit, verbose):
         )
 
 
+@cli.command("resolve-profiles")
+@click.option(
+    "--limit",
+    "-l",
+    default=None,
+    type=int,
+    help="Maximum number of traders to resolve (default: all pending)",
+)
+@click.option("--verbose", "-v", is_flag=True, help="Enable debug logging")
+def resolve_profiles(limit, verbose):
+    """Resolve Polymarket profiles for discovered traders.
+
+    Queries the Polymarket public profile API to resolve proxy wallet
+    addresses to real user profiles. This helps identify:
+    - Traders with actual Polymarket profiles (not just proxy contracts)
+    - Display names for verified traders
+    - Filter out bots/contracts without profiles
+
+    \b
+    Examples:
+        polymarket resolve-profiles
+        polymarket resolve-profiles --limit 50
+    """
+    logger.info(f"RESOLVE-PROFILES command started (limit={limit})")
+
+    if verbose:
+        logger.remove()
+        logger.add(sys.stderr, level="DEBUG")
+
+    console = Console()
+
+    session_factory, client, category_filter, _, gamma_client = _get_dependencies()
+
+    if gamma_client is None:
+        console.print("[red]Error: Gamma client not configured.[/red]")
+        logger.error("Gamma client not available")
+        return
+
+    from src.pipeline.ingest import IngestionPipeline
+    from src.db.models import Trader
+    from src.db.session import get_session
+
+    pipeline = IngestionPipeline(
+        client, session_factory, category_filter, gamma_client=gamma_client
+    )
+
+    with get_session(session_factory) as session:
+        pending_count = session.query(Trader).filter_by(profile_resolved=False).count()
+
+    if pending_count == 0:
+        console.print("[green]No traders pending profile resolution.[/green]")
+        logger.info("No traders pending profile resolution")
+        return
+
+    console.print(
+        f"[bold blue]Resolving profiles...[/bold blue] {pending_count} traders pending"
+    )
+
+    import time
+
+    start_time = time.time()
+
+    with console.status("[bold green]Resolving profiles...", spinner="dots"):
+        try:
+            profiles_found = pipeline.resolve_trader_profiles(limit=limit)
+        except Exception as e:
+            console.print(f"[red]Profile resolution failed: {e}[/red]")
+            logger.error(f"Profile resolution failed: {e}")
+            return
+
+    processing_time = time.time() - start_time
+
+    total_resolved = limit if limit and limit < pending_count else pending_count
+    no_profile_count = total_resolved - profiles_found
+
+    console.print(
+        f"\n[bold green]Profile resolution complete[/bold green] ({processing_time:.1f}s)"
+    )
+    console.print(f"  Found profiles:   [green]{profiles_found}[/green]")
+    console.print(f"  No profile:      [yellow]{no_profile_count}[/yellow]")
+    logger.info(
+        f"RESOLVE-PROFILES completed: {profiles_found} profiles, {no_profile_count} no profile ({processing_time:.1f}s)"
+    )
+
+
 @cli.command()
 @click.option("--verbose", "-v", is_flag=True, help="Enable debug logging")
 def status(verbose):

@@ -40,7 +40,9 @@ class Market(Base):
     outcome: Mapped[str | None] = mapped_column(String(50), nullable=True)
     active: Mapped[bool] = mapped_column(default=True, nullable=False, index=True)
     tokens: Mapped[str | None] = mapped_column(String(1000), nullable=True)
-    created_at: Mapped[datetime] = mapped_column(default=datetime.utcnow, nullable=False)
+    created_at: Mapped[datetime] = mapped_column(
+        default=datetime.utcnow, nullable=False
+    )
     updated_at: Mapped[datetime] = mapped_column(
         default=datetime.utcnow, onupdate=datetime.utcnow, nullable=False
     )
@@ -60,11 +62,23 @@ class Trader(Base):
     __tablename__ = "traders"
 
     id: Mapped[int] = mapped_column(primary_key=True, autoincrement=True)
-    address: Mapped[str] = mapped_column(String(42), unique=True, nullable=False, index=True)
-    first_seen: Mapped[datetime] = mapped_column(default=datetime.utcnow, nullable=False)
-    last_active: Mapped[datetime] = mapped_column(default=datetime.utcnow, nullable=False)
+    address: Mapped[str] = mapped_column(
+        String(42), unique=True, nullable=False, index=True
+    )
+    proxy_wallet: Mapped[str | None] = mapped_column(String(42), nullable=True)
+    display_name: Mapped[str | None] = mapped_column(String(100), nullable=True)
+    profile_resolved: Mapped[bool] = mapped_column(default=False, nullable=False)
+    has_profile: Mapped[bool] = mapped_column(default=False, nullable=False)
+    first_seen: Mapped[datetime] = mapped_column(
+        default=datetime.utcnow, nullable=False
+    )
+    last_active: Mapped[datetime] = mapped_column(
+        default=datetime.utcnow, nullable=False
+    )
     backfill_complete: Mapped[bool] = mapped_column(default=False, nullable=False)
-    created_at: Mapped[datetime] = mapped_column(default=datetime.utcnow, nullable=False)
+    created_at: Mapped[datetime] = mapped_column(
+        default=datetime.utcnow, nullable=False
+    )
 
     __table_args__ = (Index("ix_trader_backfill_complete", "backfill_complete"),)
 
@@ -88,8 +102,12 @@ class Trade(Base):
     price: Mapped[Decimal] = mapped_column(Numeric(10, 6), nullable=False)
     timestamp: Mapped[datetime] = mapped_column(nullable=False)
     asset_ticker: Mapped[str | None] = mapped_column(String(20), nullable=True)
-    trade_id: Mapped[str | None] = mapped_column(String(100), unique=True, nullable=True)
-    created_at: Mapped[datetime] = mapped_column(default=datetime.utcnow, nullable=False)
+    trade_id: Mapped[str | None] = mapped_column(
+        String(100), unique=True, nullable=True
+    )
+    created_at: Mapped[datetime] = mapped_column(
+        default=datetime.utcnow, nullable=False
+    )
 
     __table_args__ = (
         Index("ix_trade_trader_timestamp", "trader_address", "timestamp"),
@@ -113,7 +131,9 @@ class TraderCategorySummary(Base):
     id: Mapped[int] = mapped_column(primary_key=True, autoincrement=True)
     trader_address: Mapped[str] = mapped_column(String(42), nullable=False)
     category: Mapped[str] = mapped_column(String(50), nullable=False)
-    total_volume: Mapped[Decimal] = mapped_column(Numeric(20, 6), nullable=False, default=0)
+    total_volume: Mapped[Decimal] = mapped_column(
+        Numeric(20, 6), nullable=False, default=0
+    )
     trade_count: Mapped[int] = mapped_column(default=0, nullable=False)
     first_trade: Mapped[datetime] = mapped_column(nullable=False)
     last_trade: Mapped[datetime] = mapped_column(nullable=False)
@@ -121,7 +141,9 @@ class TraderCategorySummary(Base):
         default=datetime.utcnow, onupdate=datetime.utcnow, nullable=False
     )
 
-    __table_args__ = (Index("ix_summary_trader_category", "trader_address", "category", unique=True),)
+    __table_args__ = (
+        Index("ix_summary_trader_category", "trader_address", "category", unique=True),
+    )
 
 
 class TaxonomyNode(Base):
@@ -135,12 +157,24 @@ class TaxonomyNode(Base):
 
     id: Mapped[int] = mapped_column(primary_key=True, autoincrement=True)
     name: Mapped[str] = mapped_column(String(100), nullable=False)
-    slug: Mapped[str] = mapped_column(String(100), nullable=False)  # e.g., "esports.cs2.iem-katowice"
-    parent_id: Mapped[int | None] = mapped_column(ForeignKey("taxonomy_nodes.id"), nullable=True)
-    depth: Mapped[int] = mapped_column(nullable=False)  # 0=root, 1=game, 2=tournament, 3=team
-    node_type: Mapped[str] = mapped_column(String(20), nullable=False)  # root/game/tournament/team
-    patterns_json: Mapped[str] = mapped_column(String(2000), nullable=False)  # JSON-encoded list
-    created_at: Mapped[datetime] = mapped_column(default=datetime.utcnow, nullable=False)
+    slug: Mapped[str] = mapped_column(
+        String(100), nullable=False
+    )  # e.g., "esports.cs2.iem-katowice"
+    parent_id: Mapped[int | None] = mapped_column(
+        ForeignKey("taxonomy_nodes.id"), nullable=True
+    )
+    depth: Mapped[int] = mapped_column(
+        nullable=False
+    )  # 0=root, 1=game, 2=tournament, 3=team
+    node_type: Mapped[str] = mapped_column(
+        String(20), nullable=False
+    )  # root/game/tournament/team
+    patterns_json: Mapped[str] = mapped_column(
+        String(2000), nullable=False
+    )  # JSON-encoded list
+    created_at: Mapped[datetime] = mapped_column(
+        default=datetime.utcnow, nullable=False
+    )
 
     __table_args__ = (
         Index("ix_taxonomy_parent", "parent_id"),
@@ -159,13 +193,23 @@ class MarketClassification(Base):
     __tablename__ = "market_classifications"
 
     id: Mapped[int] = mapped_column(primary_key=True, autoincrement=True)
-    market_id: Mapped[str] = mapped_column(String(100), nullable=False, unique=True)  # condition_id
-    taxonomy_node_id: Mapped[int | None] = mapped_column(ForeignKey("taxonomy_nodes.id"), nullable=True)
-    node_path: Mapped[str | None] = mapped_column(String(300), nullable=True)  # e.g., "eSports.CS2.IEM Katowice.NaVi"
-    market_type: Mapped[str | None] = mapped_column(String(10), nullable=True)  # "match" or "prop"
+    market_id: Mapped[str] = mapped_column(
+        String(100), nullable=False, unique=True
+    )  # condition_id
+    taxonomy_node_id: Mapped[int | None] = mapped_column(
+        ForeignKey("taxonomy_nodes.id"), nullable=True
+    )
+    node_path: Mapped[str | None] = mapped_column(
+        String(300), nullable=True
+    )  # e.g., "eSports.CS2.IEM Katowice.NaVi"
+    market_type: Mapped[str | None] = mapped_column(
+        String(10), nullable=True
+    )  # "match" or "prop"
     matched_pattern: Mapped[str | None] = mapped_column(String(200), nullable=True)
     flagged_for_review: Mapped[bool] = mapped_column(default=False, nullable=False)
-    classified_at: Mapped[datetime] = mapped_column(default=datetime.utcnow, nullable=False)
+    classified_at: Mapped[datetime] = mapped_column(
+        default=datetime.utcnow, nullable=False
+    )
 
     __table_args__ = (
         Index("ix_classification_node", "taxonomy_node_id"),
@@ -186,16 +230,24 @@ class Position(Base):
     market_id: Mapped[str] = mapped_column(String(100), nullable=False)
     trader_address: Mapped[str] = mapped_column(String(42), nullable=False)
     size: Mapped[Decimal] = mapped_column(Numeric(20, 6), nullable=False)
-    direction: Mapped[str] = mapped_column(String(5), nullable=False)  # "LONG", "SHORT", or "FLAT"
-    avg_entry_price: Mapped[Decimal | None] = mapped_column(Numeric(10, 6), nullable=True)
+    direction: Mapped[str] = mapped_column(
+        String(5), nullable=False
+    )  # "LONG", "SHORT", or "FLAT"
+    avg_entry_price: Mapped[Decimal | None] = mapped_column(
+        Numeric(10, 6), nullable=True
+    )
     entry_timestamp: Mapped[datetime | None] = mapped_column(nullable=True)
     first_trade_timestamp: Mapped[datetime | None] = mapped_column(nullable=True)
     last_trade_timestamp: Mapped[datetime | None] = mapped_column(nullable=True)
     trade_count: Mapped[int] = mapped_column(default=0, nullable=False)
     resolved: Mapped[bool] = mapped_column(default=False, nullable=False)
-    outcome: Mapped[str | None] = mapped_column(String(50), nullable=True)  # win/loss/void/flat
+    outcome: Mapped[str | None] = mapped_column(
+        String(50), nullable=True
+    )  # win/loss/void/flat
     pnl: Mapped[Decimal | None] = mapped_column(Numeric(20, 6), nullable=True)
-    computed_at: Mapped[datetime] = mapped_column(default=datetime.utcnow, nullable=False)
+    computed_at: Mapped[datetime] = mapped_column(
+        default=datetime.utcnow, nullable=False
+    )
 
     __table_args__ = (
         Index("ix_position_trader_market", "trader_address", "market_id", unique=True),
@@ -215,14 +267,22 @@ class TraderProfileDB(Base):
     __tablename__ = "trader_profiles"
 
     id: Mapped[int] = mapped_column(primary_key=True, autoincrement=True)
-    trader_address: Mapped[str] = mapped_column(String(42), unique=True, nullable=False, index=True)
-    profile_type: Mapped[str] = mapped_column(String(10), nullable=False)  # "selective" or "active"
+    trader_address: Mapped[str] = mapped_column(
+        String(42), unique=True, nullable=False, index=True
+    )
+    profile_type: Mapped[str] = mapped_column(
+        String(10), nullable=False
+    )  # "selective" or "active"
     unique_markets: Mapped[int] = mapped_column(nullable=False)
     total_trades: Mapped[int] = mapped_column(nullable=False)
     threshold_used: Mapped[int] = mapped_column(nullable=False)
-    computed_at: Mapped[datetime] = mapped_column(default=datetime.utcnow, nullable=False)
+    computed_at: Mapped[datetime] = mapped_column(
+        default=datetime.utcnow, nullable=False
+    )
 
-    __table_args__ = (Index("ix_trader_profile_address", "trader_address", unique=True),)
+    __table_args__ = (
+        Index("ix_trader_profile_address", "trader_address", unique=True),
+    )
 
 
 class PerformanceSnapshot(Base):
@@ -236,25 +296,41 @@ class PerformanceSnapshot(Base):
 
     id: Mapped[int] = mapped_column(primary_key=True, autoincrement=True)
     trader_address: Mapped[str] = mapped_column(String(42), nullable=False)
-    timeframe: Mapped[str] = mapped_column(String(10), nullable=False)  # "7d", "30d", "90d", "all"
-    realized_pnl: Mapped[Decimal] = mapped_column(Numeric(20, 6), nullable=False, default=0)
-    unrealized_pnl: Mapped[Decimal] = mapped_column(Numeric(20, 6), nullable=False, default=0)
-    total_pnl: Mapped[Decimal] = mapped_column(Numeric(20, 6), nullable=False, default=0)
+    timeframe: Mapped[str] = mapped_column(
+        String(10), nullable=False
+    )  # "7d", "30d", "90d", "all"
+    realized_pnl: Mapped[Decimal] = mapped_column(
+        Numeric(20, 6), nullable=False, default=0
+    )
+    unrealized_pnl: Mapped[Decimal] = mapped_column(
+        Numeric(20, 6), nullable=False, default=0
+    )
+    total_pnl: Mapped[Decimal] = mapped_column(
+        Numeric(20, 6), nullable=False, default=0
+    )
     wins: Mapped[int] = mapped_column(nullable=False, default=0)
     losses: Mapped[int] = mapped_column(nullable=False, default=0)
     total_resolved: Mapped[int] = mapped_column(nullable=False, default=0)
     win_rate: Mapped[Decimal | None] = mapped_column(Numeric(10, 6), nullable=True)
-    total_volume: Mapped[Decimal] = mapped_column(Numeric(20, 6), nullable=False, default=0)
+    total_volume: Mapped[Decimal] = mapped_column(
+        Numeric(20, 6), nullable=False, default=0
+    )
     resolved_markets: Mapped[int] = mapped_column(nullable=False, default=0)
     unresolved_markets: Mapped[int] = mapped_column(nullable=False, default=0)
     is_low_confidence: Mapped[bool] = mapped_column(nullable=False, default=False)
-    consistency_score: Mapped[Decimal | None] = mapped_column(Numeric(10, 6), nullable=True)
+    consistency_score: Mapped[Decimal | None] = mapped_column(
+        Numeric(10, 6), nullable=True
+    )
     consistency_signal: Mapped[str | None] = mapped_column(String(20), nullable=True)
     profile_type: Mapped[str | None] = mapped_column(String(10), nullable=True)
-    computed_at: Mapped[datetime] = mapped_column(default=datetime.utcnow, nullable=False)
+    computed_at: Mapped[datetime] = mapped_column(
+        default=datetime.utcnow, nullable=False
+    )
 
     __table_args__ = (
-        Index("ix_snapshot_trader_timeframe", "trader_address", "timeframe", unique=True),
+        Index(
+            "ix_snapshot_trader_timeframe", "trader_address", "timeframe", unique=True
+        ),
         Index("ix_snapshot_trader", "trader_address"),
         Index("ix_snapshot_timeframe", "timeframe"),
     )
@@ -274,15 +350,25 @@ class ExpertiseScore(Base):
     game_slug: Mapped[str] = mapped_column(String(100), nullable=False)
     taxonomy_depth: Mapped[int] = mapped_column(nullable=False, default=1)
     raw_score: Mapped[Decimal] = mapped_column(Numeric(10, 6), nullable=False)
-    percentile_rank: Mapped[Decimal | None] = mapped_column(Numeric(10, 6), nullable=True)
+    percentile_rank: Mapped[Decimal | None] = mapped_column(
+        Numeric(10, 6), nullable=True
+    )
     win_rate_component: Mapped[Decimal] = mapped_column(Numeric(10, 6), nullable=False)
-    concentration_component: Mapped[Decimal] = mapped_column(Numeric(10, 6), nullable=False)
+    concentration_component: Mapped[Decimal] = mapped_column(
+        Numeric(10, 6), nullable=False
+    )
     recency_component: Mapped[Decimal] = mapped_column(Numeric(10, 6), nullable=False)
-    sample_size_component: Mapped[Decimal] = mapped_column(Numeric(10, 6), nullable=False)
-    consistency_multiplier: Mapped[Decimal] = mapped_column(Numeric(10, 6), nullable=False)
+    sample_size_component: Mapped[Decimal] = mapped_column(
+        Numeric(10, 6), nullable=False
+    )
+    consistency_multiplier: Mapped[Decimal] = mapped_column(
+        Numeric(10, 6), nullable=False
+    )
     specialization_label: Mapped[str] = mapped_column(String(50), nullable=False)
     resolved_market_count: Mapped[int] = mapped_column(nullable=False)
-    computed_at: Mapped[datetime] = mapped_column(default=datetime.utcnow, nullable=False)
+    computed_at: Mapped[datetime] = mapped_column(
+        default=datetime.utcnow, nullable=False
+    )
 
     __table_args__ = (
         Index("ix_expertise_trader_game", "trader_address", "game_slug"),
@@ -304,15 +390,21 @@ class SignalSnapshot(Base):
 
     id: Mapped[int] = mapped_column(primary_key=True, autoincrement=True)
     market_id: Mapped[str] = mapped_column(String(100), nullable=False)
-    direction: Mapped[str] = mapped_column(String(5), nullable=False)  # "LONG" or "SHORT"
+    direction: Mapped[str] = mapped_column(
+        String(5), nullable=False
+    )  # "LONG" or "SHORT"
     confidence_score: Mapped[Decimal] = mapped_column(Numeric(10, 6), nullable=False)
     expert_count: Mapped[int] = mapped_column(nullable=False)
     total_experts_in_market: Mapped[int] = mapped_column(nullable=False)
-    agreement_percentage: Mapped[Decimal] = mapped_column(Numeric(10, 6), nullable=False)
+    agreement_percentage: Mapped[Decimal] = mapped_column(
+        Numeric(10, 6), nullable=False
+    )
     expert_addresses_json: Mapped[str] = mapped_column(String(5000), nullable=False)
     first_mover_address: Mapped[str | None] = mapped_column(String(42), nullable=True)
     status: Mapped[str] = mapped_column(String(10), nullable=False, default="active")
-    computed_at: Mapped[datetime] = mapped_column(default=datetime.utcnow, nullable=False)
+    computed_at: Mapped[datetime] = mapped_column(
+        default=datetime.utcnow, nullable=False
+    )
 
     __table_args__ = (
         Index("ix_signal_market_direction", "market_id", "direction"),
@@ -332,9 +424,13 @@ class BlockchainSyncState(Base):
     __tablename__ = "blockchain_sync_state"
 
     id: Mapped[int] = mapped_column(primary_key=True, autoincrement=True)
-    trader_address: Mapped[str] = mapped_column(String(42), unique=True, nullable=False, index=True)
+    trader_address: Mapped[str] = mapped_column(
+        String(42), unique=True, nullable=False, index=True
+    )
     last_queried_block: Mapped[int] = mapped_column(nullable=False, default=0)
-    last_sync_at: Mapped[datetime] = mapped_column(default=datetime.utcnow, nullable=False)
+    last_sync_at: Mapped[datetime] = mapped_column(
+        default=datetime.utcnow, nullable=False
+    )
     total_trades_found: Mapped[int] = mapped_column(default=0, nullable=False)
 
     __table_args__ = (Index("ix_sync_state_trader", "trader_address", unique=True),)
