@@ -1340,22 +1340,7 @@ def resolve_profiles(limit, verbose):
         client, session_factory, category_filter, gamma_client=gamma_client
     )
 
-    try:
-        with get_session(session_factory) as session:
-            pending_count = (
-                session.query(Trader).filter_by(profile_resolved=False).count()
-            )
-    except Exception:
-        pending_count = 0
-
-    if pending_count == 0:
-        console.print("[green]No traders pending profile resolution.[/green]")
-        logger.info("No traders pending profile resolution")
-        return
-
-    console.print(
-        f"[bold blue]Resolving profiles...[/bold blue] {pending_count} traders pending"
-    )
+    console.print("[bold blue]Running database migration...[/bold blue]")
 
     import time
 
@@ -1371,16 +1356,28 @@ def resolve_profiles(limit, verbose):
 
     processing_time = time.time() - start_time
 
-    total_resolved = limit if limit and limit < pending_count else pending_count
-    no_profile_count = total_resolved - profiles_found
+    try:
+        with get_session(session_factory) as session:
+            pending_count = (
+                session.query(Trader).filter_by(profile_resolved=False).count()
+            )
+    except Exception:
+        pending_count = 0
 
-    console.print(
-        f"\n[bold green]Profile resolution complete[/bold green] ({processing_time:.1f}s)"
-    )
-    console.print(f"  Found profiles:   [green]{profiles_found}[/green]")
-    console.print(f"  No profile:      [yellow]{no_profile_count}[/yellow]")
+    if pending_count == 0:
+        console.print("[green]All traders have been resolved already.[/green]")
+        logger.info("All traders already resolved")
+    else:
+        console.print(
+            f"[bold green]Profile resolution complete[/bold green] ({processing_time:.1f}s)"
+        )
+        console.print(f"  Found profiles:   [green]{profiles_found}[/green]")
+        console.print(
+            f"  No profile:      [yellow]{pending_count - profiles_found}[/yellow]"
+        )
+
     logger.info(
-        f"RESOLVE-PROFILES completed: {profiles_found} profiles, {no_profile_count} no profile ({processing_time:.1f}s)"
+        f"RESOLVE-PROFILES completed: {profiles_found} profiles ({processing_time:.1f}s)"
     )
 
 
