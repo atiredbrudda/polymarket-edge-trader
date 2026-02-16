@@ -16,7 +16,7 @@ class MarketResponse(BaseModel):
 
     condition_id: str
     question: str
-    end_date_iso: str | None = None
+    end_date_iso: str | None = Field(default=None, validation_alias="endDateIso")
     category: str | None = None  # Derived from tags
     tags: list[str] | None = None
     outcome: str | None = None

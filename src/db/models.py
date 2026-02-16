@@ -35,6 +35,7 @@ class Market(Base):
     condition_id: Mapped[str] = mapped_column(String(100), unique=True, nullable=False)
     question: Mapped[str] = mapped_column(String(500), nullable=False)
     category: Mapped[str] = mapped_column(String(50), nullable=False, index=True)
+    start_date: Mapped[datetime | None] = mapped_column(nullable=True)
     end_date: Mapped[datetime | None] = mapped_column(nullable=True)
     outcome: Mapped[str | None] = mapped_column(String(50), nullable=True)
     active: Mapped[bool] = mapped_column(default=True, nullable=False, index=True)

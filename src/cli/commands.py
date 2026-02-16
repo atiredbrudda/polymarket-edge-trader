@@ -141,10 +141,10 @@ def _setup_cli_logging():
     # Remove default handler to avoid duplicate stderr output
     logger.remove()
 
-    # Add file handler with rotation (10 MB max, keep 3 files)
+    # Add file handler with rotation (midnight daily)
     logger.add(
         settings.cli_log_file,
-        rotation="10 MB",
+        rotation="00:00",
         retention=3,
         level="DEBUG",
         format="{time:YYYY-MM-DD HH:mm:ss} | {level: <8} | {message}",
@@ -714,6 +714,7 @@ def sweep(window, niche, closing_within, verbose):
             gamma_client=gamma_client,
             niches=niche,
             closing_within=closing_within,
+            skip_trader_backfill=True,
         )
 
         processing_time = time.time() - start_time
@@ -1153,15 +1154,17 @@ def discover(niche, closing_within, verbose):
                 m for m in markets_orm if category_filter.requires_detail(m.category)
             ]
 
-        for market in detail_markets:
-            try:
-                new_traders = pipeline.discover_traders_from_market(market.condition_id)
-                traders_discovered += len(new_traders)
-            except Exception as e:
-                logger.warning(
-                    f"Failed to discover traders from {market.condition_id}: {e}"
-                )
-                continue
+            for market in detail_markets:
+                try:
+                    new_traders = pipeline.discover_traders_from_market(
+                        market.condition_id
+                    )
+                    traders_discovered += len(new_traders)
+                except Exception as e:
+                    logger.warning(
+                        f"Failed to discover traders from {market.condition_id}: {e}"
+                    )
+                    continue
 
         processing_time = time.time() - start_time
 

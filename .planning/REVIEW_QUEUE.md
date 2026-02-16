@@ -5,21 +5,38 @@
 Read this section before starting work. These are patterns the reviewer has flagged from previous reviews.
 
 1. **When changing a function's return signature, update all test mocks too.** In 10-02, `_get_dependencies` went from 4-tuple to 5-tuple but `tests/test_cli_research.py` still mocked it as 4-tuple, causing a regression. Before submitting, grep test files for mocks of any function you modified: `grep -r "function_name" tests/`
-2. **Do not reformat existing code.** The executor model keeps line-wrapping existing `mapped_column()` and import lines. Only change lines you need to change functionally. Cosmetic reformatting creates noise in diffs and slows review.
+2. **Do not reformat existing code.** Only change lines you need to change functionally. Cosmetic reformatting creates noise in diffs and slows review.
+3. **When switching API endpoints, update tests that mock the old endpoint.** In worker/debugging, `get_markets()` was replaced by `get_events()` but targeted scanning tests still mocked `get_markets`, causing 2 regressions.
+4. **Remove debug hardcodes before submitting.** `ingest_active_markets()` had a hardcoded `test_condition_ids` list that bypassed normal operation — broke 2 tests and would have broken production.
+5. **Attach debug summaries to all significant changes.** The /events migration (biggest change in the branch) had no debug session file explaining why or documenting the evidence. Debug summaries exist to give future readers context.
+6. **Read the Worker Code Standards section in HANDOFF_PROTOCOL.md.** It covers all of the above in detail plus additional rules.
 
 ## Pending Review
 
-_No entries._
-
-## Re-Review
-
-_No entries._
-
-## Review Feedback
-
-_No entries._
+(none)
 
 ## Cleared
+
+### worker/debugging — 2026-02-16
+- **Branch:** worker/debugging
+- **Cleared by:** Opus 4.6 (reviewer)
+- **Original items:** 3 debug sessions (Feb 14-15)
+- **Files in scope:**
+  - src/api/gamma_client.py
+  - src/api/models.py
+  - src/cli/commands.py
+  - src/cli/scheduler.py
+  - src/pipeline/ingest.py
+  - src/db/models.py
+  - tests/test_targeted_scanning.py (reviewer fix)
+- **Issues found and fixed by reviewer:**
+  1. 2 test regressions: targeted scanning tests mocked `get_markets` but code switched to `get_events` — updated tests
+  2. Debug hardcode in `ingest_active_markets()` — removed, restored normal full-scan operation (also fixed 2 pre-existing test failures)
+  3. Missing debug summary for /events migration — created `.planning/debug/events-endpoint-migration.md`
+  4. Cosmetic reformatting of db/models.py (~120 lines) — reverted, kept only `start_date` field addition
+  5. `end_date_max` passed as `start_date_max` to get_events — fixed to use actual `end_date_max` param (confirmed /events endpoint supports it)
+  6. Debug JSON written unconditionally — gated behind `POLYMARKET_DEBUG` env var
+- **Test result:** 9 failed (all pre-existing from main), 578 passed — 2 fewer failures than main (11→9) due to debug hardcode removal
 
 ### worker/12-01 — 2026-02-14
 - **Plan:** 12-01, 12-02, 12-03 (Deep Niche Scoring - all 3 plans)
@@ -33,7 +50,7 @@ _No entries._
   - src/cli/commands.py (leaderboard --depth, expertise, specialists commands)
   - src/cli/formatters.py (format_expertise_breakdown, format_specialists_table)
   - tests/test_deep_scoring.py, tests/test_scoring_pipeline_deep.py, tests/test_cli_deep_scoring.py
-- **Notes:** 29/29 phase 12 tests pass, 0 new regressions. Heavy cosmetic reformatting cleaned up during review (models.py went from +186/-62 to +2 lines). Added reviewer note about reformatting.
+- **Notes:** 29/29 phase 12 tests pass, 0 new regressions. Heavy cosmetic reformatting cleaned up during review (models.py went from +186/-62 to +2 lines). Added reviewer note about reformatting. **NOTE: This was docs-only (README updates) — Phase 12 code was never executed. Plans exist but no implementation.**
 
 ### worker/10-02 — 2026-02-13
 - **Plan:** 10-02 (Targeted Market Scanning - CLI Integration)

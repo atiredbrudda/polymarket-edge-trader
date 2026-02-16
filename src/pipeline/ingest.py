@@ -10,7 +10,8 @@ This is the integration layer that fulfills DATA-01 through DATA-06.
 """
 
 import json
-from datetime import datetime
+import os
+from datetime import datetime, UTC
 from typing import Any, Optional
 
 from loguru import logger
@@ -32,6 +33,237 @@ from src.pipeline.filters import CategoryFilter, TradeWithCategory
 from src.graph.client import GraphClient
 from src.graph.converters import graph_trade_to_api_response
 from src.datasources.converters import jbecker_trade_to_api_response
+
+
+def _filter_market_by_niche(
+    market: dict[str, Any],
+    niche: str | None,
+    end_date_max: datetime | None,
+) -> bool:
+    """Client-side filter to validate market matches requested niche and end date.
+
+    Gamma API server-side filtering is broken (returns wrong markets for any tag).
+    This function provides client-side validation to ensure markets match criteria.
+
+    Args:
+        market: Market dictionary from Gamma API
+        niche: Expected niche/tag (e.g., "esports")
+        end_date_max: Maximum end date filter
+
+    Returns:
+        True if market passes filters, False otherwise
+    """
+    # Check endDate filter - filter out markets with past end dates
+    end_date_str = market.get("endDate")
+    if end_date_str:
+        try:
+            # Parse ISO format end date
+            if isinstance(end_date_str, str):
+                # Handle both formats: "2025-12-31T12:00:00Z" and "2025-12-31"
+                if end_date_str.endswith("Z"):
+                    end_date = datetime.fromisoformat(
+                        end_date_str.replace("Z", "+00:00")
+                    )
+                else:
+                    end_date = datetime.fromisoformat(end_date_str)
+            else:
+                end_date = end_date_str
+
+            # Check if market has already ended
+            now = datetime.now(UTC)
+            if end_date.replace(tzinfo=UTC) < now:
+                logger.debug(
+                    f"Filtering out market '{market.get('question', '')[:50]}' - "
+                    f"endDate {end_date_str} is in the past"
+                )
+                return False
+
+            # Check end_date_max constraint
+            if end_date_max:
+                end_date_aware = (
+                    end_date.replace(tzinfo=UTC)
+                    if end_date.tzinfo is None
+                    else end_date
+                )
+                if end_date_aware > end_date_max:
+                    logger.debug(
+                        f"Filtering out market '{market.get('question', '')[:50]}' - "
+                        f"endDate {end_date_str} exceeds max {end_date_max}"
+                    )
+                    return False
+        except (ValueError, TypeError) as e:
+            logger.warning(f"Could not parse endDate '{end_date_str}': {e}")
+
+    # Check niche/tag filter - validate market actually has the requested tag
+    if niche:
+        tags = market.get("tags", [])
+
+        # If no tags, check the question for niche keywords
+        if not tags:
+            question = market.get("question", "").lower()
+            niche_lower = niche.lower()
+
+            # Specific esports game keywords (must be present for fallback match)
+            # Removed generic words like "major", "tournament", "championship"
+            # that match non-esports markets
+            esports_keywords = [
+                "esports",
+                "league of legends",
+                "lol ",
+                " lol",
+                "dota",
+                "cs:go",
+                "csgo",
+                "counter-strike",
+                "valorant",
+                "overwatch",
+                "fortnite",
+                "pubg",
+                "starcraft",
+                "heroes of the storm",
+                "rocket league",
+                "rlew",
+                "worlds",
+                "msi",
+                "iem",
+            ]
+
+            # Check if question contains specific esports game keywords
+            keyword_match = (
+                any(kw in question for kw in esports_keywords)
+                if niche_lower == "esports"
+                else niche_lower in question
+            )
+
+            if keyword_match:
+                return True
+
+            # No tags and question doesn't contain niche - filter it out
+            logger.debug(
+                f"Filtering out market '{market.get('question', '')[:50]}' - "
+                f"no tags and question doesn't contain niche '{niche}'"
+            )
+            return False
+
+        # Check if any tag matches the requested niche (case-insensitive)
+        niche_lower = niche.lower()
+        tag_match = False
+        for tag in tags:
+            if isinstance(tag, dict):
+                tag_label = tag.get("label", "").lower()
+            elif isinstance(tag, str):
+                tag_label = tag.lower()
+            else:
+                continue
+
+            if niche_lower in tag_label or tag_label in niche_lower:
+                tag_match = True
+                break
+
+        if not tag_match:
+            logger.debug(
+                f"Filtering out market '{market.get('question', '')[:50]}' - "
+                f"tags {tags} don't match niche '{niche}'"
+            )
+            return False
+
+    return True
+
+
+NICHE_TAG_IDS = {
+    "esports": 64,
+    "esport": 64,
+    "sports": 1,
+    "ncaab": 1,
+    "nba": 1,
+    "nfl": 1,
+    "nhl": 1,
+    "soccer": 1,
+    "tennis": 1,
+    "mma": 1,
+    "ufc": 1,
+    "boxing": 1,
+    "politics": 100,
+    "crypto": 100630,
+}
+
+
+def _convert_events_to_markets(
+    events: list[dict[str, Any]],
+    niche: str,
+    end_date_max: datetime | None,
+) -> list[dict[str, Any]]:
+    """Convert Gamma API events to market format.
+
+    The /events endpoint actually filters correctly and returns real game times.
+    This function extracts markets from events and uses event's startDate/endDate.
+
+    Args:
+        events: List of event dictionaries from Gamma API
+        niche: The niche being filtered
+        end_date_max: Maximum end date filter
+
+    Returns:
+        List of market dictionaries with corrected dates
+    """
+    markets = []
+    now = datetime.now(UTC)
+
+    for event in events:
+        event_start = event.get("startDate")
+        event_end = event.get("endDate")
+
+        event_start_dt = None
+        event_end_dt = None
+
+        if event_start:
+            try:
+                event_start_dt = datetime.fromisoformat(
+                    event_start.replace("Z", "+00:00")
+                )
+            except (ValueError, TypeError):
+                pass
+
+        if event_end:
+            try:
+                event_end_dt = datetime.fromisoformat(event_end.replace("Z", "+00:00"))
+            except (ValueError, TypeError):
+                pass
+
+        if end_date_max and event_start_dt and event_start_dt > end_date_max:
+            logger.debug(
+                f"Filtering out event '{event.get('title', '')[:50]}' - "
+                f"startDate {event_start} exceeds max {end_date_max}"
+            )
+            continue
+
+        event_markets = event.get("markets", [])
+        if not event_markets:
+            continue
+
+        for market in event_markets:
+            market_copy = dict(market)
+
+            market_copy["event_startDate"] = event_start
+            market_copy["event_endDate"] = event_end
+
+            if event_end:
+                market_copy["endDate"] = event_end
+                market_copy["endDateIso"] = event_end
+
+            if event_start:
+                market_copy["startDate"] = event_start
+
+            market_copy["event_title"] = event.get("title")
+            market_copy["event_id"] = event.get("id")
+
+            if niche.lower() in ["esports", "esport"]:
+                market_copy["tags"] = ["esports"]
+                market_copy["category"] = "eSports"
+
+            markets.append(market_copy)
+
+    return markets
 
 
 class IngestionPipeline:
@@ -98,36 +330,8 @@ class IngestionPipeline:
         """
         logger.info("Starting active market ingestion")
 
-        # TEMPORARY DEBUG MODE: Use hardcoded test market instead of full scan
-        # TODO: Remove this after debugging - this is ONLY for testing the pipeline
-        # Market: LoL: Dragons Esports vs GnG Amazigh (BO3) - Arabian League
-        # https://polymarket.com/event/lol-drg-gng-2026-02-11
-        test_condition_ids = [
-            "0xd6f59f7f6dd3fa5e30e20b12cb13579dad60f4c61243e4dfd40636c3112fab1d",
-        ]
-
-        all_markets: list[MarketResponse] = []
-
-        if test_condition_ids:
-            logger.info(
-                f"DEBUG MODE: Testing with {len(test_condition_ids)} hardcoded markets"
-            )
-            for condition_id in test_condition_ids:
-                market = self.client.get_market(condition_id)
-                if market:
-                    all_markets.append(market)
-            logger.info(f"Loaded {len(all_markets)} test markets")
-        else:
-            # Full scan mode (slow)
-            logger.info("Full scan mode - fetching ALL markets (this will be slow)")
-            all_markets_full: list[MarketResponse] = self.client.get_markets(
-                active=True
-            )
-            esports_markets = [m for m in all_markets_full if m.category == "eSports"]
-            logger.info(
-                f"Found {len(all_markets_full)} total markets, {len(esports_markets)} eSports markets"
-            )
-            all_markets = esports_markets
+        all_markets: list[MarketResponse] = self.client.get_markets(active=True)
+        logger.info(f"Fetched {len(all_markets)} active markets")
 
         # Persist markets in batches
         batch_size = 100
@@ -215,11 +419,9 @@ class IngestionPipeline:
     ) -> int:
         """Fetch and persist markets matching niche and time filters via Gamma API.
 
-        Uses Gamma API for server-side filtering instead of fetching all markets.
-        For each niche, queries Gamma API with tag filter. If end_date_max provided,
-        includes it as additional filter. Results are unioned (OR semantics).
-
-        Falls back to CLOB API + client-side filtering if Gamma client unavailable.
+        Uses Gamma API /events endpoint (which actually works correctly) instead of
+        /markets which ignores all filters. For each niche, queries Gamma API with
+        tag_id filter and end_date_max for time filtering.
 
         Args:
             niches: Tuple of niche category strings (e.g., ("esports", "crypto"))
@@ -243,37 +445,82 @@ class IngestionPipeline:
 
         if niches:
             for niche in niches:
-                logger.info(f"Fetching markets for niche: {niche}")
-                try:
-                    markets = self.gamma_client.get_markets(
-                        tag=niche,
-                        end_date_max=end_date_max,
-                        closed=False,
-                    )
-                    for market in markets:
-                        condition_id = market.get("condition_id")
-                        if condition_id and condition_id not in seen_condition_ids:
-                            seen_condition_ids.add(condition_id)
-                            all_markets.append(market)
-                    logger.info(f"Fetched {len(markets)} markets for niche '{niche}'")
-                except Exception as e:
-                    logger.error(f"Failed to fetch markets for niche '{niche}': {e}")
+                tag_id = NICHE_TAG_IDS.get(niche.lower())
+                if tag_id is None:
+                    logger.warning(f"Unknown niche '{niche}', skipping")
                     continue
-        elif end_date_max:
-            logger.info(f"Fetching markets with end_date_max: {end_date_max}")
-            try:
-                markets = self.gamma_client.get_markets(
-                    end_date_max=end_date_max,
-                    closed=False,
-                )
-                for market in markets:
-                    condition_id = market.get("condition_id")
-                    if condition_id and condition_id not in seen_condition_ids:
+
+                logger.info(f"Fetching events for niche: {niche} (tag_id={tag_id})")
+                try:
+                    events = self.gamma_client.get_events(
+                        tag_id=tag_id,
+                        end_date_max=end_date_max,
+                        active=True,
+                        limit=100,
+                    )
+
+                    markets = _convert_events_to_markets(events, niche, end_date_max)
+
+                    filtered_count = 0
+                    for market in markets:
+                        condition_id = market.get("condition_id") or market.get(
+                            "conditionId"
+                        )
+                        if not condition_id:
+                            continue
+
+                        if condition_id in seen_condition_ids:
+                            continue
+
+                        if not _filter_market_by_niche(market, niche, end_date_max):
+                            filtered_count += 1
+                            continue
+
                         seen_condition_ids.add(condition_id)
                         all_markets.append(market)
-                logger.info(f"Fetched {len(markets)} markets with time filter")
+
+                    logger.info(
+                        f"Fetched {len(events)} events for niche '{niche}', "
+                        f"extracted {len(markets)} markets, filtered {filtered_count}"
+                    )
+                except Exception as e:
+                    logger.error(f"Failed to fetch events for niche '{niche}': {e}")
+                    continue
+        elif end_date_max:
+            logger.info(f"Fetching events with end_date_max: {end_date_max}")
+            try:
+                events = self.gamma_client.get_events(
+                    end_date_max=end_date_max,
+                    active=True,
+                    limit=100,
+                )
+
+                markets = _convert_events_to_markets(events, "", end_date_max)
+
+                filtered_count = 0
+                for market in markets:
+                    condition_id = market.get("condition_id") or market.get(
+                        "conditionId"
+                    )
+                    if not condition_id:
+                        continue
+
+                    if condition_id in seen_condition_ids:
+                        continue
+
+                    if not _filter_market_by_niche(market, None, end_date_max):
+                        filtered_count += 1
+                        continue
+
+                    seen_condition_ids.add(condition_id)
+                    all_markets.append(market)
+
+                logger.info(
+                    f"Fetched {len(events)} events, extracted {len(markets)} markets, "
+                    f"filtered {filtered_count}"
+                )
             except Exception as e:
-                logger.error(f"Failed to fetch markets with time filter: {e}")
+                logger.error(f"Failed to fetch events with time filter: {e}")
                 all_markets = []
 
         if not all_markets:
@@ -288,12 +535,19 @@ class IngestionPipeline:
         session = self.session_factory()
         try:
             for i, market_dict in enumerate(all_markets):
-                condition_id = market_dict.get("condition_id")
+                condition_id = market_dict.get("condition_id") or market_dict.get(
+                    "conditionId"
+                )
                 if not condition_id:
                     continue
 
                 question = market_dict.get("question", "")
-                end_date_iso = market_dict.get("end_date")
+                end_date_iso = market_dict.get("endDateIso") or market_dict.get(
+                    "end_date"
+                )
+                start_date_iso = market_dict.get("startDate") or market_dict.get(
+                    "event_startDate"
+                )
                 closed = market_dict.get("closed", False)
                 active = not closed
 
@@ -305,6 +559,11 @@ class IngestionPipeline:
                         category = first_tag.get("label")
                     elif isinstance(first_tag, str):
                         category = first_tag
+
+                # Fallback: use niche as category since Gamma API doesn't return category
+                # This is safe now because client-side filtering ensures market relevance
+                if not category and niches:
+                    category = niches[0].capitalize()
 
                 tokens = market_dict.get("tokens", [])
                 outcome = None
@@ -333,6 +592,14 @@ class IngestionPipeline:
                         except Exception:
                             pass
 
+                    if start_date_iso:
+                        try:
+                            existing.start_date = datetime.fromisoformat(
+                                start_date_iso.replace("Z", "+00:00")
+                            )
+                        except Exception:
+                            pass
+
                     if tokens:
                         existing.tokens = json.dumps(tokens)
                 else:
@@ -348,6 +615,14 @@ class IngestionPipeline:
                         try:
                             market.end_date = datetime.fromisoformat(
                                 end_date_iso.replace("Z", "+00:00")
+                            )
+                        except Exception:
+                            pass
+
+                    if start_date_iso:
+                        try:
+                            market.start_date = datetime.fromisoformat(
+                                start_date_iso.replace("Z", "+00:00")
                             )
                         except Exception:
                             pass
@@ -1360,19 +1635,23 @@ class IngestionPipeline:
         use_blockchain_fallback: bool = True,
         niches: tuple[str, ...] = (),
         closing_within: str | None = None,
+        skip_trader_discovery: bool = False,
+        skip_trader_backfill: bool = False,
     ) -> dict:
         """Execute complete ingestion sweep.
 
         Steps:
         1. Ingest active markets (targeted or full based on filters)
-        2. Discover traders from markets with detail categories
-        3. Backfill history for newly discovered traders
+        2. Discover traders from markets with detail categories (optional)
+        3. Backfill history for newly discovered traders (optional - can be decoupled)
 
         Args:
             use_jbecker: If True and jbecker_client configured, use JBecker dataset as primary (default: True)
             use_blockchain_fallback: If True, fallback to blockchain as last resort (default: True)
             niches: Tuple of niche category strings for targeted scanning
             closing_within: Duration string for time-based filtering (e.g., "48h", "2d")
+            skip_trader_discovery: If True, skip trader discovery AND backfill (default: False)
+            skip_trader_backfill: If True, discover traders but skip backfill (default: False)
 
         Returns:
             Overall stats dict with keys:
@@ -1412,11 +1691,38 @@ class IngestionPipeline:
             logger.error(f"Market ingestion failed: {e}")
             return overall_stats
 
-        # Step 2: Discover traders from detail category markets
+        # Generate debug JSON output for ingested markets (opt-in via env var)
+        if os.environ.get("POLYMARKET_DEBUG"):
+            self._write_sweep_debug_json(niches, closing_within)
+
+        # Skip trader discovery and backfill if requested (for sweep command)
+        if skip_trader_discovery:
+            logger.info(
+                "Skipping trader discovery and backfill (skip_trader_discovery=True)"
+            )
+            overall_stats["markets_ingested"] = overall_stats.get(
+                "markets_ingested", 0
+            ) or self._get_ingested_market_count(session_factory=self.session_factory)
+            return overall_stats
+
+        # Step 2: Discover traders from detail category markets (only filtered markets)
         session = self.session_factory()
         try:
-            # Get all active markets in detail categories
-            markets = session.query(Market).filter_by(active=True).all()
+            # Get markets that match the niche filter (not all active markets)
+            # This ensures we only discover traders from filtered markets
+            if niches:
+                # Query markets that match the niche filter
+                niche_filter = niches[0].lower()
+                markets = (
+                    session.query(Market)
+                    .filter(Market.active == True)
+                    .filter(Market.category.ilike(f"%{niche_filter}%"))
+                    .all()
+                )
+            else:
+                # No niche filter - get all active markets in detail categories
+                markets = session.query(Market).filter_by(active=True).all()
+
             detail_markets = [
                 m for m in markets if self.category_filter.requires_detail(m.category)
             ]
@@ -1438,7 +1744,17 @@ class IngestionPipeline:
         finally:
             session.close()
 
-        # Step 3: Backfill newly discovered traders
+        # Step 3: Backfill newly discovered traders (can be skipped independently)
+        if skip_trader_backfill:
+            logger.info(
+                "Skipping trader backfill (skip_trader_backfill=True). "
+                "Run 'backfill' command separately to fetch history."
+            )
+            overall_stats["markets_ingested"] = overall_stats.get(
+                "markets_ingested", 0
+            ) or self._get_ingested_market_count(session_factory=self.session_factory)
+            return overall_stats
+
         session = self.session_factory()
         try:
             # Get traders that need backfill
@@ -1476,3 +1792,91 @@ class IngestionPipeline:
         )
 
         return overall_stats
+
+    def _write_sweep_debug_json(
+        self,
+        niches: tuple[str, ...],
+        closing_within: str | None,
+    ) -> None:
+        """Write debug JSON file with ingested market details.
+
+        Args:
+            niches: Tuple of niche categories used in the sweep
+            closing_within: Time filter used in the sweep
+        """
+        session = None
+        try:
+            session = self.session_factory()
+
+            # Get recently ingested/updated markets
+            # Query markets that match the niche filter
+            if niches:
+                niche_filter = niches[0].lower()
+                markets = (
+                    session.query(Market)
+                    .filter(Market.active == True)
+                    .filter(Market.category.ilike(f"%{niche_filter}%"))
+                    .all()
+                )
+            else:
+                markets = session.query(Market).filter_by(active=True).all()
+
+            # Build debug data
+            debug_data = {
+                "sweep_params": {
+                    "niches": list(niches) if niches else [],
+                    "closing_within": closing_within,
+                },
+                "markets": [],
+            }
+
+            for market in markets:
+                # Build event/link info
+                event_link = f"https://polymarket.com/event/{market.condition_id}"
+
+                market_data = {
+                    "condition_id": market.condition_id,
+                    "question": market.question,
+                    "category": market.category,
+                    "start_date": market.start_date.isoformat()
+                    if market.start_date
+                    else None,
+                    "end_date": market.end_date.isoformat()
+                    if market.end_date
+                    else None,
+                    "active": market.active,
+                    "event_link": event_link,
+                }
+                debug_data["markets"].append(market_data)
+
+            # Write to file
+            debug_dir = "logs"
+            os.makedirs(debug_dir, exist_ok=True)
+            debug_file = os.path.join(debug_dir, "sweep_debug.json")
+
+            with open(debug_file, "w") as f:
+                json.dump(debug_data, f, indent=2)
+
+            logger.info(
+                f"Wrote debug JSON to {debug_file} with {len(debug_data['markets'])} markets"
+            )
+
+        except Exception as e:
+            logger.warning(f"Failed to write debug JSON: {e}")
+        finally:
+            if session:
+                session.close()
+
+    def _get_ingested_market_count(self, session_factory) -> int:
+        """Get count of currently active markets in database."""
+        session = None
+        try:
+            session = session_factory()
+            count = session.query(Market).filter_by(active=True).count()
+            return count
+        except Exception as e:
+            logger.warning(f"Failed to get market count: {e}")
+            return 0
+        finally:
+            if session:
+                session.close()

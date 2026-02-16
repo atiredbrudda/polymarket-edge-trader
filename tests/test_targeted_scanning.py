@@ -35,6 +35,50 @@ MOCK_GAMMA_MARKETS = [
     },
 ]
 
+# Events wrap markets — the /events endpoint returns this structure
+MOCK_GAMMA_EVENTS = [
+    {
+        "id": "evt-1",
+        "title": "Team A vs Team B",
+        "startDate": "2026-02-15T18:00:00Z",
+        "endDate": "2026-02-15T21:00:00Z",
+        "tags": [{"label": "eSports", "id": 64}],
+        "markets": [
+            {
+                "conditionId": "0xabc123",
+                "question": "Will Team A win?",
+                "endDateIso": "2026-02-15T21:00:00Z",
+                "closed": False,
+                "active": True,
+                "tokens": [
+                    {"token_id": "tok1", "outcome": "Yes"},
+                    {"token_id": "tok2", "outcome": "No"},
+                ],
+            },
+        ],
+    },
+    {
+        "id": "evt-2",
+        "title": "Team C vs Team D",
+        "startDate": "2026-02-16T15:00:00Z",
+        "endDate": "2026-02-16T18:00:00Z",
+        "tags": [{"label": "eSports", "id": 64}],
+        "markets": [
+            {
+                "conditionId": "0xdef456",
+                "question": "Will Team C win?",
+                "endDateIso": "2026-02-16T18:00:00Z",
+                "closed": False,
+                "active": True,
+                "tokens": [
+                    {"token_id": "tok3", "outcome": "Yes"},
+                    {"token_id": "tok4", "outcome": "No"},
+                ],
+            },
+        ],
+    },
+]
+
 
 class TestCLITargetedOptions(unittest.TestCase):
     """Test CLI shows targeted scanning options."""
@@ -84,14 +128,14 @@ class TestIngestionPipeline(unittest.TestCase):
     """Test IngestionPipeline targeted methods."""
 
     def test_ingest_targeted_markets_with_niches(self):
-        """Test ingest_targeted_markets calls Gamma client for each niche."""
+        """Test ingest_targeted_markets calls Gamma get_events for each niche."""
         mock_client = MagicMock()
         mock_session_factory = MagicMock()
         mock_category_filter = MagicMock()
 
         mock_gamma_client = MagicMock()
-        mock_gamma_client.get_markets.side_effect = [
-            [MOCK_GAMMA_MARKETS[0]],
+        mock_gamma_client.get_events.side_effect = [
+            [MOCK_GAMMA_EVENTS[0]],
             [],
         ]
 
@@ -109,13 +153,13 @@ class TestIngestionPipeline(unittest.TestCase):
 
             result = pipeline.ingest_targeted_markets(niches=("esports", "crypto"))
 
-            self.assertEqual(mock_gamma_client.get_markets.call_count, 2)
-            call_args_list = mock_gamma_client.get_markets.call_args_list
-            self.assertEqual(call_args_list[0].kwargs.get("tag"), "esports")
-            self.assertEqual(call_args_list[1].kwargs.get("tag"), "crypto")
+            self.assertEqual(mock_gamma_client.get_events.call_count, 2)
+            call_args_list = mock_gamma_client.get_events.call_args_list
+            self.assertEqual(call_args_list[0].kwargs.get("tag_id"), 64)
+            self.assertEqual(call_args_list[1].kwargs.get("tag_id"), 100630)
 
     def test_ingest_targeted_markets_with_time_filter(self):
-        """Test ingest_targeted_markets passes end_date_max to Gamma client."""
+        """Test ingest_targeted_markets passes end_date_max to Gamma get_events."""
         from datetime import datetime, UTC
 
         mock_client = MagicMock()
@@ -123,7 +167,7 @@ class TestIngestionPipeline(unittest.TestCase):
         mock_category_filter = MagicMock()
 
         mock_gamma_client = MagicMock()
-        mock_gamma_client.get_markets.return_value = MOCK_GAMMA_MARKETS
+        mock_gamma_client.get_events.return_value = MOCK_GAMMA_EVENTS
 
         pipeline = IngestionPipeline(
             mock_client,
@@ -141,8 +185,8 @@ class TestIngestionPipeline(unittest.TestCase):
 
             result = pipeline.ingest_targeted_markets(niches=(), end_date_max=test_date)
 
-            mock_gamma_client.get_markets.assert_called_once()
-            call_kwargs = mock_gamma_client.get_markets.call_args.kwargs
+            mock_gamma_client.get_events.assert_called_once()
+            call_kwargs = mock_gamma_client.get_events.call_args.kwargs
             self.assertEqual(call_kwargs.get("end_date_max"), test_date)
 
     def test_ingest_targeted_markets_fallback(self):

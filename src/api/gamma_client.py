@@ -98,3 +98,76 @@ class GammaMarketClient:
 
         logger.info(f"Fetched {len(all_markets)} markets from Gamma API")
         return all_markets
+
+    def get_events(
+        self,
+        end_date_max: datetime | None = None,
+        end_date_min: datetime | None = None,
+        tag_id: int | None = None,
+        active: bool = True,
+        limit: int = 50,
+    ) -> list[dict[str, Any]]:
+        """Fetch events from Gamma API with optional filters.
+
+        The /events endpoint works correctly (unlike /markets which ignores filters).
+        Returns real game times in startDate/endDate fields.
+
+        Args:
+            end_date_max: Maximum end date filter (events ending before this)
+            end_date_min: Minimum end date filter (events ending after this)
+            tag_id: Tag ID filter (e.g., 64 for esports)
+            active: Only return active events
+            limit: Number of results per page
+
+        Returns:
+            List of event dictionaries with real game times
+
+        Raises:
+            httpx.HTTPStatusError: If the API returns an error response
+        """
+        all_events = []
+        offset = 0
+
+        while True:
+            params: dict[str, Any] = {
+                "active": str(active).lower(),
+                "limit": limit,
+                "offset": offset,
+                "order": "endDate",
+                "ascending": "true",
+            }
+
+            if end_date_max is not None:
+                params["end_date_max"] = end_date_max.isoformat()
+
+            if end_date_min is not None:
+                params["end_date_min"] = end_date_min.isoformat()
+
+            if tag_id is not None:
+                params["tag_id"] = tag_id
+
+            if self.rate_limiter is not None:
+                self.rate_limiter.acquire()
+
+            logger.debug(
+                f"Fetching events (offset={offset}, limit={limit}, "
+                f"active={active}, tag_id={tag_id}, end_date_max={end_date_max})"
+            )
+
+            response = httpx.get(self.BASE_URL + "/events", params=params, timeout=30.0)
+            response.raise_for_status()
+
+            events = response.json()
+
+            if not events:
+                break
+
+            all_events.extend(events)
+
+            if len(events) < limit:
+                break
+
+            offset += limit
+
+        logger.info(f"Fetched {len(all_events)} events from Gamma API")
+        return all_events
