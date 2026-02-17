@@ -13,6 +13,17 @@ Read this section before starting work. These are patterns the reviewer has flag
 
 ## Pending Review
 
+### worker/esports-backfill-fix — 2026-02-16
+- **Issue:** eSports trades not found during backfill (debug session)
+- **Branch:** worker/esports-backfill-fix
+- **Commits:** 91eb9b8
+- **Files changed:**
+  - src/cli/commands.py (MODIFIED) — Wired JBecker client into backfill command
+  - src/datasources/converters.py (MODIFIED) — Rewrote to handle snake_case columns
+  - src/pipeline/ingest.py (MODIFIED) — Added taxonomy lookup + Gamma API lookups
+  - .planning/debug/esports-backfill-missing.md (NEW) — Debug summary
+- **Worker notes:** Fixed 4 bugs: (1) converter used wrong column names, (2) JBecker not wired in backfill, (3) token→condition mapping missing, (4) new markets not classified. Also backfilled tokens for 398 markets via CLOB API and ran classification on 259 new markets. Result: sample trader 0→515 eSports trades.
+
 ### worker/proxy-address-resolution — 2026-02-16
 - **Plan:** Proxy Address Resolution (WORKER_TASK_PROXY_RESOLUTION.md)
 - **Branch:** worker/proxy-address-resolution

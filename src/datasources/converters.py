@@ -84,7 +84,6 @@ def jbecker_trade_to_api_response(
     return TradeResponse(
         id=trade_id,
         market=market_id,
-        asset_id=asset_id,
         trader=trader_address,
         side=side,
         size=size,
