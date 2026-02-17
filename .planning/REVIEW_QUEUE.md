@@ -13,6 +13,16 @@ Read this section before starting work. These are patterns the reviewer has flag
 
 ## Pending Review
 
+### worker/fix-lsp-errors — 2026-02-17
+- **Issue:** Fix pre-existing LSP type errors in main
+- **Branch:** worker/fix-lsp-errors
+- **Commits:** c2c8867
+- **Files changed:**
+  - src/cli/commands.py (MODIFIED) — Fixed ExpertiseScore attribute names
+  - src/pipeline/queries.py (MODIFIED) — Filter None from outcomes
+  - tests/pipeline/test_ingest_jbecker.py (MODIFIED) — Updated test mock to use snake_case
+- **Worker notes:** Fixed 2 type errors: (1) ExpertiseScore.is_specialist → specialization_label, (2) ExpertiseScore.win_rate → win_rate_component. Also fixed query returning None values. Test updates required because JBecker data uses snake_case column names.
+
 ### worker/esports-backfill-fix — 2026-02-16
 - **Issue:** eSports trades not found during backfill (debug session)
 - **Branch:** worker/esports-backfill-fix
