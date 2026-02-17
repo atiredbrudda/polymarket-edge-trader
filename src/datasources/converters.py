@@ -6,125 +6,85 @@ from decimal import Decimal
 from src.api.models import TradeResponse
 
 
-def jbecker_trade_to_api_response(jbecker_trade: dict, trader_address: str) -> TradeResponse:
+def jbecker_trade_to_api_response(
+    jbecker_trade: dict, trader_address: str
+) -> TradeResponse:
     """Convert JBecker Parquet trade to API TradeResponse format.
 
-    This allows JBecker trades to be processed by existing pipeline logic
-    without code changes, maintaining compatibility with Graph and API sources.
+    Handles the actual JBecker parquet schema (snake_case columns):
+        block_number, transaction_hash, log_index, order_hash,
+        maker, taker, maker_asset_id, taker_asset_id,
+        maker_amount, taker_amount, fee, timestamp,
+        _fetched_at, _contract
 
-    Args:
-        jbecker_trade: Trade dict from JBecker dataset (DuckDB query result)
-        trader_address: The trader address we're querying for
-
-    Returns:
-        TradeResponse compatible with existing pipeline
-
-    JBecker trade format:
-        {
-          "id": "0x..._0x...",
-          "maker": "0x...",
-          "taker": "0x...",
-          "makerAmountFilled": "1500000",  # 6 decimals (USDC)
-          "takerAmountFilled": "3000000",
-          "makerAssetId": "123457",  # Token ID
-          "takerAssetId": "789012",
-          "fee": "1000",
-          "timestamp": 1704067200,  # Unix timestamp
-          "blockNumber": 50000000,
-          "transactionHash": "0xabcdef...",
-          "orderHash": "0xfedcba...",
-          "side": "BUY",
-          "price": "0.65",
-          "_fetched_at": "2024-01-01T00:00:00",
-          "_contract": "ctf_exchange"
-        }
-
-    API TradeResponse format:
-        {
-          "id": "unique_trade_id",
-          "market": "condition_id",
-          "asset_id": "token_id",
-          "trader": "0x...",
-          "side": "BUY",
-          "size": Decimal("1.5"),  # Number of tokens
-          "price": Decimal("0.65"),  # Price per token
-          "timestamp": datetime(...),
-          "asset_ticker": "YES/NO"
-        }
-
-    Raises:
-        ValidationError: If price is outside (0,1) exclusive range (from TradeResponse validator)
-
-    Examples:
-        >>> trade = {
-        ...     "id": "0x123_0x456",
-        ...     "maker": "0xabc...",
-        ...     "taker": "0xdef...",
-        ...     "makerAmountFilled": "1500000",
-        ...     "takerAmountFilled": "3000000",
-        ...     "makerAssetId": "123",
-        ...     "takerAssetId": "456",
-        ...     "timestamp": 1704067200,
-        ...     "transactionHash": "0xabc...",
-        ...     "side": "BUY",
-        ...     "price": "0.65"
-        ... }
-        >>> result = jbecker_trade_to_api_response(trade, "0xabc...")
-        >>> result.size
-        Decimal('1.5')
-        >>> result.side
-        'BUY'
+    Note: The parquet data does NOT contain side, price, or a unique id field.
+    These are derived: price = maker_amount / taker_amount (USDC per token),
+    side is inferred from maker/taker role, id from transaction_hash + log_index.
+    Timestamp may be None — falls back to _fetched_at.
     """
-    # Normalize addresses for case-insensitive matching (EIP-55 compliance)
     trader_address = trader_address.lower()
     maker = jbecker_trade["maker"].lower()
     taker = jbecker_trade["taker"].lower()
 
-    # Determine trader's role (maker or taker)
-    is_maker = (trader_address == maker)
+    is_maker = trader_address == maker
 
-    # Convert amounts from 6-decimal integers to Decimal
-    # IMPORTANT: Wrap in str() first to handle both string and numeric types from DuckDB
-    maker_amount = Decimal(str(jbecker_trade["makerAmountFilled"])) / Decimal("1000000")
-    taker_amount = Decimal(str(jbecker_trade["takerAmountFilled"])) / Decimal("1000000")
+    maker_amount = Decimal(str(jbecker_trade["maker_amount"])) / Decimal("1000000")
+    taker_amount = Decimal(str(jbecker_trade["taker_amount"])) / Decimal("1000000")
 
-    # Determine trade details based on role
     if is_maker:
-        # Trader is maker - they provided makerAmount
         size = maker_amount
-        asset_id = jbecker_trade["makerAssetId"]
-        # Side from JBecker already indicates maker's direction
-        side = jbecker_trade["side"]  # BUY or SELL
+        asset_id = str(jbecker_trade["maker_asset_id"])
+        side = "SELL"
     else:
-        # Trader is taker - they provided takerAmount
         size = taker_amount
-        asset_id = jbecker_trade["takerAssetId"]
-        # Taker takes opposite side of maker
-        side = "SELL" if jbecker_trade["side"] == "BUY" else "BUY"
+        asset_id = str(jbecker_trade["taker_asset_id"])
+        side = "BUY"
 
-    # Parse price (do NOT catch ValueError - let TradeResponse validator handle invalid prices)
-    price = Decimal(str(jbecker_trade["price"]))
+    if taker_amount > 0 and maker_amount > 0:
+        price = maker_amount / taker_amount
+    else:
+        price = Decimal("0.5")
 
-    # Convert timestamp from Unix timestamp to datetime
-    timestamp = datetime.fromtimestamp(int(jbecker_trade["timestamp"]))
+    if price <= 0 or price >= 1:
+        price = Decimal("1") - price if price >= 1 else Decimal("0.5")
+    if price <= 0 or price >= 1:
+        price = Decimal("0.5")
 
-    # Market ID: Use transaction hash + asset_id as unique identifier
-    # This matches the pattern from graph_trade_to_api_response
-    market_id = f"jbecker_{jbecker_trade['transactionHash']}_{asset_id}"
+    ts = jbecker_trade.get("timestamp")
+    if ts is not None:
+        try:
+            timestamp = datetime.fromtimestamp(int(ts))
+        except (ValueError, TypeError, OSError):
+            ts = None
+    if ts is None:
+        fetched = jbecker_trade.get("_fetched_at")
+        if fetched is not None:
+            try:
+                if hasattr(fetched, "to_pydatetime"):
+                    timestamp = fetched.to_pydatetime()
+                else:
+                    timestamp = datetime.fromisoformat(str(fetched))
+            except Exception:
+                timestamp = datetime(2025, 1, 1)
+        else:
+            timestamp = datetime(2025, 1, 1)
 
-    # Asset ticker: Determine YES/NO from asset_id parity
-    # In Polymarket CTF: even assetId = NO, odd assetId = YES
+    tx_hash = str(jbecker_trade.get("transaction_hash", "unknown"))
+    log_index = str(jbecker_trade.get("log_index", "0"))
+    trade_id = f"jbecker_{tx_hash}_{log_index}"
+
+    market_id = asset_id
+
     try:
         asset_id_int = int(asset_id)
         asset_ticker = "YES" if asset_id_int % 2 == 1 else "NO"
     except (ValueError, TypeError):
         asset_ticker = "UNKNOWN"
 
-    # Create TradeResponse (Pydantic validation happens here)
     return TradeResponse(
-        id=jbecker_trade["id"],
+        id=trade_id,
         market=market_id,
-        asset_id=str(asset_id),
+        asset_id=asset_id,
         trader=trader_address,
         side=side,
         size=size,

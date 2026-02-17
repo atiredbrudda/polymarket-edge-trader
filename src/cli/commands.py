@@ -1219,9 +1219,24 @@ def backfill(address, limit, verbose):
 
     from src.pipeline.ingest import IngestionPipeline
     from src.pipeline.queries import get_traders_by_backfill_status
+    from src.datasources.jbecker import JBeckerDataset
+
+    settings = get_settings()
+    jbecker_client = None
+    try:
+        jbecker = JBeckerDataset(settings.jbecker_data_path)
+        if jbecker.is_available():
+            jbecker_client = jbecker
+            logger.info("JBecker dataset available — will use as primary source")
+    except Exception as e:
+        logger.warning(f"JBecker dataset not available: {e}")
 
     pipeline = IngestionPipeline(
-        client, session_factory, category_filter, gamma_client=gamma_client
+        client,
+        session_factory,
+        category_filter,
+        gamma_client=gamma_client,
+        jbecker_client=jbecker_client,
     )
 
     if address:
