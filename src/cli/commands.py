@@ -316,7 +316,7 @@ def trader(address, verbose):
                     "game": s.game_slug,
                     "score": s.raw_score,
                     "percentile": s.percentile_rank or Decimal("0"),
-                    "specialization": "specialist" if s.is_specialist else "generalist",
+                    "specialization": s.specialization_label,
                 }
                 for s in scores
             ]
@@ -494,7 +494,7 @@ def leaderboard(slug, top_n, depth, verbose):
                     "rank": idx + 1,
                     "trader_address": entry.trader_address,
                     "score": entry.raw_score,
-                    "win_rate": entry.win_rate or Decimal("0"),
+                    "win_rate": entry.win_rate_component or Decimal("0"),
                 }
                 for idx, entry in enumerate(leaderboard_entries)
             ]
