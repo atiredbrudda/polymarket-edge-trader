@@ -261,18 +261,19 @@ def test_ingest_trader_history_blockchain_incremental(
     assert stats["detail_count"] == 0
 
 
-def test_ingest_trader_history_hybrid_prefers_blockchain(
+def test_ingest_trader_history_hybrid_uses_blockchain_last_resort(
     pipeline, mock_blockchain_client
 ):
-    """Test hybrid method prefers blockchain when available."""
+    """Test hybrid method uses blockchain as last resort when other sources fail."""
     trader_address = "0x1234567890abcdef1234567890abcdef12345678"
 
     # Mock blockchain client to return empty list
     mock_blockchain_client.get_trades_by_trader.return_value = []
 
-    # Execute hybrid ingestion
+    # Execute hybrid ingestion with blockchain as last resort
+    # (no jbecker_client configured, so it will fall through to blockchain)
     stats = pipeline.ingest_trader_history_hybrid(
-        trader_address, prefer_blockchain=True
+        trader_address, fallback_to_blockchain=True
     )
 
     # Verify blockchain method was called
@@ -295,9 +296,9 @@ def test_ingest_trader_history_hybrid_falls_back_to_api(
     # Mock API client
     mock_api_client.get_trader_trades.return_value = []
 
-    # Execute hybrid ingestion
+    # Execute hybrid ingestion (blockchain unavailable, so API is used)
     stats = pipeline.ingest_trader_history_hybrid(
-        trader_address, prefer_blockchain=True
+        trader_address, fallback_to_blockchain=False
     )
 
     # Verify API method was called
@@ -336,7 +337,7 @@ def test_run_full_sweep_with_blockchain(
     # This tests backward compatibility from Phase 8
     stats = pipeline.run_full_sweep(
         use_jbecker=False,  # Disable JBecker tier (pipeline.jbecker_client is already None)
-        use_blockchain_fallback=True
+        use_blockchain_fallback=True,
     )
 
     # Verify blockchain client was called for trader backfill

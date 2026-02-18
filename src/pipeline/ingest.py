@@ -1844,7 +1844,10 @@ class IngestionPipeline:
             and fallback_to_blockchain
             and self.blockchain_client
         ):
-            logger.info(f"Using blockchain for {trader_address[:8]}... (LAST RESORT)")
+            logger.warning(
+                f"Using BLOCKCHAIN for {trader_address[:8]}... "
+                f"(LAST RESORT - this may take 6-7 HOURS per trader)"
+            )
             blockchain_stats = self.ingest_trader_history_blockchain(trader_address)
             combined_stats.update(blockchain_stats)
             combined_stats["tiers_used"].append("blockchain")

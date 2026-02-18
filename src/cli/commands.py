@@ -1281,6 +1281,28 @@ def backfill(address, limit, verbose):
         success_count = 0
         error_count = 0
 
+        # Batch fetch JBecker trades for all traders (major speedup - scans parquet once)
+        prefetched_by_address: dict[str, list[dict]] = {}
+        if jbecker_client and jbecker_client.is_available() and trader_addresses:
+            console.print(
+                f"[dim]Batch fetching JBecker trades for {len(trader_addresses)} traders...[/dim]"
+            )
+            logger.info(
+                f"Batch fetching JBecker trades for {len(trader_addresses)} traders..."
+            )
+            try:
+                prefetched_by_address = jbecker_client.batch_query_traders_history(
+                    trader_addresses
+                )
+                console.print(
+                    f"[dim]Prefetched trades for {len(prefetched_by_address)} traders[/dim]"
+                )
+                logger.info(
+                    f"Prefetched trades for {len(prefetched_by_address)} traders"
+                )
+            except Exception as e:
+                logger.warning(f"Batch JBecker query failed: {e}")
+
         with console.status(
             "[bold green]Backfilling traders...", spinner="dots"
         ) as status:
@@ -1289,7 +1311,10 @@ def backfill(address, limit, verbose):
                     f"[bold green]Backfilling {idx}/{len(trader_addresses)}: {addr[:10]}..."
                 )
                 try:
-                    pipeline.ingest_trader_history_hybrid(addr)
+                    prefetched = prefetched_by_address.get(addr.lower())
+                    pipeline.ingest_trader_history_hybrid(
+                        addr, prefetched_jbecker_trades=prefetched
+                    )
                     success_count += 1
                 except Exception as e:
                     logger.warning(f"Backfill failed for {addr[:10]}...: {e}")
