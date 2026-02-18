@@ -1423,8 +1423,39 @@ class IngestionPipeline:
 
         return stats
 
+    def _build_token_cache(self, session) -> tuple[dict[str, str], dict[str, str]]:
+        """Build token-to-condition and condition-to-category mappings from DB.
+
+        This is cached at backfill start to avoid repeated DB queries per trader.
+
+        Returns:
+            Tuple of (token_to_condition, condition_to_category) dicts
+        """
+        token_to_condition: dict[str, str] = {}
+        condition_to_category: dict[str, str] = {}
+
+        markets_with_tokens = (
+            session.query(Market).filter(Market.tokens.isnot(None)).all()
+        )
+        for m in markets_with_tokens:
+            try:
+                tokens = json.loads(m.tokens)
+                for t in tokens:
+                    token_to_condition[str(t["token_id"])] = m.condition_id
+            except Exception:
+                continue
+            condition_to_category[m.condition_id] = m.category
+
+        for m in session.query(Market).filter(Market.tokens.is_(None)).all():
+            condition_to_category[m.condition_id] = m.category
+
+        return token_to_condition, condition_to_category
+
     def ingest_trader_history_jbecker(
-        self, trader_address: str, prefetched_trades: list[dict] | None = None
+        self,
+        trader_address: str,
+        prefetched_trades: list[dict] | None = None,
+        token_cache: tuple[dict[str, str], dict[str, str]] | None = None,
     ) -> dict:
         """Ingest trader history from JBecker Parquet dataset.
 
@@ -1437,6 +1468,7 @@ class IngestionPipeline:
         Args:
             trader_address: Trader wallet address
             prefetched_trades: Optional pre-fetched trades (for batch backfill optimization)
+            token_cache: Optional pre-built (token_to_condition, condition_to_category) dicts
 
         Returns:
             Stats dict with keys:
@@ -1488,22 +1520,12 @@ class IngestionPipeline:
                 session.commit()
                 return stats
 
-            token_to_condition: dict[str, str] = {}
-            condition_to_category: dict[str, str] = {}
-            markets_with_tokens = (
-                session.query(Market).filter(Market.tokens.isnot(None)).all()
-            )
-            for m in markets_with_tokens:
-                try:
-                    tokens = json.loads(m.tokens)
-                    for t in tokens:
-                        token_to_condition[str(t["token_id"])] = m.condition_id
-                except Exception:
-                    continue
-                condition_to_category[m.condition_id] = m.category
-
-            for m in session.query(Market).filter(Market.tokens.is_(None)).all():
-                condition_to_category[m.condition_id] = m.category
+            if token_cache:
+                token_to_condition, condition_to_category = token_cache
+            else:
+                token_to_condition, condition_to_category = self._build_token_cache(
+                    session
+                )
 
             esports_market_ids = self._get_esports_market_ids(session)
 
