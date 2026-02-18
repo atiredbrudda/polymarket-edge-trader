@@ -75,9 +75,26 @@ The diff for models.py should show only the 4 new columns (plus any ruff-applied
 
 ## Pending Review
 
-(empty — all items moved to Review Feedback above)
+(empty)
 
 ## Cleared
+
+### worker/fix-9-test-failures — 2026-02-18
+- **Branch:** worker/fix-9-test-failures
+- **Cleared by:** Opus 4.6
+- **Files in scope:**
+  - tests/test_ingest.py (Group B + C fixes)
+  - tests/test_api_client.py (Group A fixes)
+  - tests/pipeline/test_ingest_blockchain.py (Group D fixes)
+- **Notes:** Zero src/ changes. All 4 groups correct: httpx mocks for Data API, Market rows for discover, get_trader_trades for ingest, prefer_blockchain param removed. 587 tests pass, 0 failures.
+
+### worker/fix-lsp-errors — 2026-02-18
+- **Branch:** worker/fix-lsp-errors (stack: proxy-address-resolution, esports-backfill-fix, fix-lsp-errors)
+- **Cleared by:** Opus 4.6
+- **Reviewer fix:** Moved inline `import httpx` and `import time as _time` to module level in ingest.py
+- **Notes:** LSP attr fixes (specialization_label, win_rate_component, None filter in queries). Proxy resolution (4 new Trader columns, get_public_profile, resolve-profiles CLI). eSports backfill (snake_case parquet schema, taxonomy-based category routing). 585 tests pass, 9 pre-existing failures.
+
+## Previously Cleared
 
 ### worker/debugging — 2026-02-16
 - **Branch:** worker/debugging

@@ -271,11 +271,9 @@ def test_ingest_trader_history_hybrid_prefers_blockchain(
     mock_blockchain_client.get_trades_by_trader.return_value = []
 
     # Execute hybrid ingestion
-    stats = pipeline.ingest_trader_history_hybrid(
-        trader_address, prefer_blockchain=True
-    )
+    stats = pipeline.ingest_trader_history_hybrid(trader_address)
 
-    # Verify blockchain method was called
+    # Verify blockchain method was called (as fallback when no JBecker/API data)
     mock_blockchain_client.get_trades_by_trader.assert_called_once()
 
 
@@ -296,9 +294,7 @@ def test_ingest_trader_history_hybrid_falls_back_to_api(
     mock_api_client.get_trader_trades.return_value = []
 
     # Execute hybrid ingestion
-    stats = pipeline.ingest_trader_history_hybrid(
-        trader_address, prefer_blockchain=True
-    )
+    stats = pipeline.ingest_trader_history_hybrid(trader_address)
 
     # Verify API method was called
     mock_api_client.get_trader_trades.assert_called_once_with(trader_address)
@@ -336,7 +332,7 @@ def test_run_full_sweep_with_blockchain(
     # This tests backward compatibility from Phase 8
     stats = pipeline.run_full_sweep(
         use_jbecker=False,  # Disable JBecker tier (pipeline.jbecker_client is already None)
-        use_blockchain_fallback=True
+        use_blockchain_fallback=True,
     )
 
     # Verify blockchain client was called for trader backfill
