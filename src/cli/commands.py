@@ -1303,6 +1303,15 @@ def backfill(address, limit, verbose):
             except Exception as e:
                 logger.warning(f"Batch JBecker query failed: {e}")
 
+        # Build token cache once for all traders (avoids N per-trader DB scans)
+        token_cache = None
+        if jbecker_client and jbecker_client.is_available():
+            with get_session(session_factory) as session:
+                token_cache = pipeline._build_token_cache(session)
+            logger.info(
+                f"Built token cache: {len(token_cache[0])} tokens, {len(token_cache[1])} conditions"
+            )
+
         with console.status(
             "[bold green]Backfilling traders...", spinner="dots"
         ) as status:
@@ -1313,7 +1322,9 @@ def backfill(address, limit, verbose):
                 try:
                     prefetched = prefetched_by_address.get(addr.lower())
                     pipeline.ingest_trader_history_hybrid(
-                        addr, prefetched_jbecker_trades=prefetched
+                        addr,
+                        prefetched_jbecker_trades=prefetched,
+                        token_cache=token_cache,
                     )
                     success_count += 1
                 except Exception as e:
