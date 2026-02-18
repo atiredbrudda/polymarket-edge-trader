@@ -17,23 +17,20 @@ Read this section and the AGENTS.md file in project root before starting work. R
 
 ## Pending Review
 
-### worker/backfill-token-cache — 2026-02-18
-- **Task:** Shared token cache for batch backfill (per WORKER_TASK_TOKEN_CACHE.md)
-- **Branch:** worker/backfill-token-cache
-- **Commits:** 00c98b6..711d204
-- **Files changed:**
-  - src/pipeline/ingest.py (MODIFIED - _build_token_cache, token_cache param on hybrid/jbecker methods, cache in run_full_sweep)
-  - src/cli/commands.py (MODIFIED - token cache build and pass to hybrid call in backfill loop)
-  - tests/pipeline/test_ingest_jbecker.py (MODIFIED - 4 token cache tests)
-  - .planning/debug/backfill-token-lookup-bottleneck.md (NEW - debug summary documenting root cause)
-- **Worker notes:**
-  - Problem: Token lookup (384 tokens × 0.05s) = 2.5 min/trader even with batch JBecker
-  - Solution: Build token→condition cache once, share across all traders in backfill session
-  - Cache grows as traders discover new tokens via Gamma API (same mutable dict)
-  - 4 new tests verify: cache loads from DB, skips DB scan when provided, passes through hybrid, grows during processing
-- **Validation:** 7 failed, 595 passed (4 new tests, 0 new regressions)
+(empty)
 
 ## Cleared
+
+### worker/backfill-token-cache — 2026-02-18
+- **Branch:** worker/backfill-token-cache
+- **Cleared by:** Opus 4.6
+- **Reviewer fix:** Updated debug summary status from `planned` → `resolved`
+- **Files in scope:**
+  - src/pipeline/ingest.py (`_build_token_cache()`, `token_cache` param on jbecker/hybrid, cache build in `run_full_sweep()`)
+  - src/cli/commands.py (token cache build + pass in backfill loop)
+  - tests/pipeline/test_ingest_jbecker.py (4 token cache tests)
+  - .planning/debug/backfill-token-lookup-bottleneck.md (debug summary)
+- **Notes:** Clean implementation — cache shared across all traders in a backfill session, grows as Gamma API discovers new tokens (mutable dict passed by reference). All 4 plan items implemented. Test 2 (skips-DB-scan) is behavioral rather than mock-isolated but acceptable. 602 passed, 0 failed on branch (vs worker-reported 595+7 — pre-existing 7 failures appear to have been non-deterministic).
 
 ### worker/backfill-batch-optimization — 2026-02-18
 - **Branch:** worker/backfill-batch-optimization

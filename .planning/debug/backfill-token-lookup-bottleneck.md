@@ -1,8 +1,8 @@
 ---
-status: planned
+status: resolved
 trigger: "Backfill still slow after batch optimization. 1 trader takes ~2.5 minutes even with prefetched data."
 created: 2026-02-18T09:10:00Z
-updated: 2026-02-18T12:00:00Z
+updated: 2026-02-18T12:30:00Z
 ---
 
 ## Current Focus
