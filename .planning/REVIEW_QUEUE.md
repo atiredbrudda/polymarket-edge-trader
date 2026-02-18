@@ -17,7 +17,18 @@ Read this section and the AGENTS.md file in project root before starting work. R
 
 ## Pending Review
 
-(empty)
+### worker/backfill-performance-docs — 2026-02-18
+- **Task:** Document backfill performance results and recommendations
+- **Branch:** worker/backfill-performance-docs
+- **Commits:** 0092c72
+- **Files changed:**
+  - .planning/REVIEW_QUEUE.md (MODIFIED - added performance results to cleared entry)
+- **Worker notes:**
+  - No code changes — only documentation of observed performance
+  - Tested 3 traders after token cache optimization was merged
+  - Results show cache works (trader 3 benefited from trader 2's discoveries)
+  - Remaining bottleneck identified: `time.sleep(0.05)` in Gamma API loop
+- **Validation:** N/A (docs only)
 
 ## Cleared
 
@@ -31,6 +42,32 @@ Read this section and the AGENTS.md file in project root before starting work. R
   - tests/pipeline/test_ingest_jbecker.py (4 token cache tests)
   - .planning/debug/backfill-token-lookup-bottleneck.md (debug summary)
 - **Notes:** Clean implementation — cache shared across all traders in a backfill session, grows as Gamma API discovers new tokens (mutable dict passed by reference). All 4 plan items implemented. Test 2 (skips-DB-scan) is behavioral rather than mock-isolated but acceptable. 602 passed, 0 failed on branch (vs worker-reported 595+7 — pre-existing 7 failures appear to have been non-deterministic).
+
+#### Performance Results (observed post-merge, no code changes)
+
+**Test: 3 traders with varying unknown tokens:**
+
+| Trader | Unknown Tokens | Time | Cache Growth |
+|--------|---------------|------|--------------|
+| 1 | 15 | 8.6s | 2650 → 2670 |
+| 2 | 565 | 207.2s | 2670 → 3772 |
+| 3 | 164 | 59.4s | 3772 → 4080 |
+
+**Total: 275.2s for 3 traders (91.7s avg)**
+
+**Timing breakdown:**
+- Parquet batch scan: ~35s (shared across all traders)
+- Token cache build: <1s (from DB)
+- Per-trader token lookup: `N tokens × 0.05s delay` (remaining bottleneck)
+- Market discovery during gap fill: ~3s per trader
+
+**Remaining bottleneck:** `time.sleep(0.05)` in Gamma API token lookup loop (line ~1589 in ingest.py)
+
+**Recommendations for further optimization:**
+1. Reduce delay: `time.sleep(0.05)` → `time.sleep(0.01)` (~5x speedup)
+2. Batch token lookup: Query multiple tokens per Gamma API call
+3. Pre-seed cache: First run populates DB, subsequent runs are fast
+4. Parallel token lookup: Async/concurrent requests (adds complexity)
 
 ### worker/backfill-batch-optimization — 2026-02-18
 - **Branch:** worker/backfill-batch-optimization
