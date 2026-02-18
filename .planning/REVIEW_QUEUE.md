@@ -17,21 +17,21 @@ Read this section and the AGENTS.md file in project root before starting work. R
 
 ## Pending Review
 
-### worker/gamma-batch-token-lookup — 2026-02-18
-- **Plan:** WORKER_TASK_GAMMA_BATCH_TOKENS.md
-- **Branch:** worker/gamma-batch-token-lookup
-- **Commits:** 1fa643f
-- **Files changed:**
-  - src/pipeline/ingest.py (MODIFIED — batch token lookup)
-  - tests/pipeline/test_ingest_jbecker.py (MODIFIED — 2 batch tests added)
-  - .planning/debug/gamma-batch-token-lookup.md (NEW — debug summary)
-- **Worker notes:** 
-  - Probed Gamma API: comma-separated format works, repeated params don't.
-  - Implemented BATCH_SIZE=20 for ~20x speedup (565 tokens: 207s → ~10s).
-  - Preserves all existing logic for market insertion, deduplication, mapping.
-- **Decisions made:** Used comma-separated format `clob_token_ids=TOKEN1,TOKEN2,...` based on API probe results.
+(empty — no pending reviews)
 
 ## Cleared
+
+### worker/gamma-batch-token-lookup — 2026-02-18
+- **Branch:** worker/gamma-batch-token-lookup
+- **Cleared by:** Sonnet 4.6
+- **Reviewer fix:** Reverted 4 cosmetic reformatting edits to existing tests
+- **Files in scope:**
+  - src/pipeline/ingest.py (batch token lookup, BATCH_SIZE=20)
+  - tests/pipeline/test_ingest_jbecker.py (2 new batch tests)
+  - .planning/debug/gamma-batch-token-lookup.md (debug summary)
+- **Notes:** Clean implementation. Comma-separated format confirmed working via API probe. Per-batch sleep (not per-token) gives ~20x speedup. Logic correct: `for t in batch` inside `for md in markets_data` correctly maps each token to its owning condition. Token mapping also done inside `if not existing_market` block for new markets. `looked_up` counter may double-count if a token appears in multiple market responses (edge case, logging only). 604 passed, 0 failed.
+
+
 
 ### worker/backfill-performance-docs — 2026-02-18
 - **Branch:** worker/backfill-performance-docs
