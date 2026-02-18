@@ -78,7 +78,7 @@ The diff for models.py should show only the 4 new columns (plus any ruff-applied
 ### worker/backfill-batch-optimization — 2026-02-18
 - **Task:** Optimize backfill speed with batch JBecker parquet queries
 - **Branch:** worker/backfill-batch-optimization
-- **Commits:** a94c62d..f96a3f0
+- **Commits:** a94c62d..HEAD (functional: a94c62d, fda3f32, 705cfc3)
 - **Files changed:**
   - src/datasources/jbecker.py (NEW - batch_query_traders_history method)
   - src/pipeline/ingest.py (MODIFIED - prefetched_trades param, batch in backfill loop, blockchain warning)
