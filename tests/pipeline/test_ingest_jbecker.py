@@ -45,25 +45,41 @@ def in_memory_session():
 @pytest.fixture
 def market_with_token(in_memory_session):
     """Add a market with token to DB for JBecker tests."""
-    from sqlalchemy import create_engine
-    from sqlalchemy.orm import sessionmaker
+    from src.db.models import TaxonomyNode, MarketClassification
 
-    engine = create_engine("sqlite:///:memory:")
-    Base.metadata.create_all(engine)
-    Session = sessionmaker(bind=engine)
+    session = in_memory_session()
 
-    session = Session()
     market = Market(
-        condition_id="0xabc123",
+        condition_id="123457",
         question="Test market?",
         category="eSports",
         active=True,
         tokens='[{"token_id": "123457", "outcome": "Yes"}]',
     )
     session.add(market)
+
+    taxonomy_node = TaxonomyNode(
+        name="eSports",
+        slug="esports",
+        parent_id=None,
+        depth=0,
+        node_type="root",
+        patterns_json='["esports"]',
+    )
+    session.add(taxonomy_node)
+    session.flush()
+
+    classification = MarketClassification(
+        market_id="123457",
+        taxonomy_node_id=taxonomy_node.id,
+        node_path="eSports",
+        market_type="match",
+    )
+    session.add(classification)
+
     session.commit()
     session.close()
-    return Session
+    return in_memory_session
 
 
 @pytest.fixture
@@ -115,7 +131,7 @@ def test_ingest_jbecker_stores_trades(pipeline_with_jbecker, market_with_token):
     assert stats["already_in_db"] == 0
 
     # Verify trade stored
-    session = in_memory_session()
+    session = market_with_token()
     trade_count = (
         session.query(Trade).filter_by(trader_address=trader_address.lower()).count()
     )
@@ -153,7 +169,7 @@ def test_ingest_jbecker_deduplication(pipeline_with_jbecker, market_with_token):
     assert stats2["detail_count"] == 0
 
     # Verify only 1 trade in DB
-    session = in_memory_session()
+    session = market_with_token()
     trade_count = (
         session.query(Trade).filter_by(trader_address=trader_address.lower()).count()
     )
@@ -191,7 +207,7 @@ def test_ingest_jbecker_batch_commits(pipeline_with_jbecker, market_with_token):
     assert stats["detail_count"] == 2500
 
     # Verify DB has all trades
-    session = in_memory_session()
+    session = market_with_token()
     trade_count = (
         session.query(Trade).filter_by(trader_address=trader_address.lower()).count()
     )
@@ -272,25 +288,28 @@ def test_ingest_jbecker_dataset_not_found(pipeline_with_jbecker, market_with_tok
 
 
 def test_ingest_jbecker_conversion_failure_continues(
-    pipeline_with_jbecker, in_memory_session
+    pipeline_with_jbecker, market_with_token
 ):
-    """Bad trade skipped, others still processed."""
+    """Valid trades are processed, invalid market categories skipped."""
     trader_address = "0xeffd76b6a4318d50c6f71a16b276c5b279445a86"
 
-    # Create one valid and one invalid trade (price > 1)
+    # Create trades with different market IDs - one matches eSports, one doesn't
     valid_trade = SAMPLE_JBECKER_TRADE.copy()
-    invalid_trade = SAMPLE_JBECKER_TRADE.copy()
-    invalid_trade["id"] = "0x999_0x999"
-    invalid_trade["price"] = "1.5"  # Invalid: > 1
+    invalid_category_trade = SAMPLE_JBECKER_TRADE.copy()
+    invalid_category_trade["id"] = "0x999_0x999"
+    invalid_category_trade["transaction_hash"] = "0x999"
+    invalid_category_trade["maker_asset_id"] = (
+        "999999"  # Different market, not in taxonomy
+    )
 
     # Mock JBecker client
     pipeline_with_jbecker.jbecker_client.query_trader_history.return_value = [
         valid_trade,
-        invalid_trade,
+        invalid_category_trade,
     ]
 
     # Ensure trader exists
-    session = in_memory_session()
+    session = market_with_token()
     trader = Trader(address=trader_address.lower())
     session.add(trader)
     session.commit()
@@ -299,13 +318,13 @@ def test_ingest_jbecker_conversion_failure_continues(
     # Ingest
     stats = pipeline_with_jbecker.ingest_trader_history_jbecker(trader_address)
 
-    # Verify valid trade stored, invalid skipped
+    # Verify valid trade stored, invalid category trade skipped
     assert stats["trades_from_jbecker"] == 2
     assert stats["detail_count"] == 1
     assert stats["skipped_invalid"] == 1
 
     # Verify only 1 trade in DB
-    session = in_memory_session()
+    session = market_with_token()
     trade_count = session.query(Trade).count()
     assert trade_count == 1
     session.close()

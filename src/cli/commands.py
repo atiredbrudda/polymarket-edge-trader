@@ -1386,10 +1386,8 @@ def resolve_profiles(limit, verbose):
         console.print(
             f"[bold green]Profile resolution complete[/bold green] ({processing_time:.1f}s)"
         )
-        console.print(f"  Found profiles:   [green]{profiles_found}[/green]")
-        console.print(
-            f"  No profile:      [yellow]{pending_count - profiles_found}[/yellow]"
-        )
+        console.print(f"  Profiles found:    [green]{profiles_found}[/green]")
+        console.print(f"  Still unresolved: [yellow]{pending_count}[/yellow]")
 
     logger.info(
         f"RESOLVE-PROFILES completed: {profiles_found} profiles ({processing_time:.1f}s)"

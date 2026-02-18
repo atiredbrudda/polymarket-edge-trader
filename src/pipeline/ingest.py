@@ -316,6 +316,35 @@ class IngestionPipeline:
         self.jbecker_client = jbecker_client
         self.gamma_client = gamma_client
 
+    def _get_esports_market_ids(self, session) -> set[str]:
+        """Query market IDs classified as eSports in taxonomy.
+
+        Args:
+            session: SQLAlchemy session
+
+        Returns:
+            Set of market IDs that are classified as eSports in the taxonomy
+        """
+        esports_market_ids: set[str] = set()
+        try:
+            esports_classifications = (
+                session.query(MarketClassification.market_id)
+                .join(
+                    TaxonomyNode,
+                    MarketClassification.taxonomy_node_id == TaxonomyNode.id,
+                )
+                .filter(TaxonomyNode.slug.like("esports%"))
+                .all()
+            )
+            esports_market_ids = {row[0] for row in esports_classifications}
+            if esports_market_ids:
+                logger.debug(
+                    f"Found {len(esports_market_ids)} eSports markets in taxonomy"
+                )
+        except Exception as e:
+            logger.warning(f"Failed to query taxonomy classifications: {e}")
+        return esports_market_ids
+
     def ingest_active_markets(self) -> int:
         """Fetch and persist active markets from Polymarket API.
 
@@ -866,24 +895,7 @@ class IngestionPipeline:
 
             # Get taxonomy classifications for eSports detection
             # This allows routing trades to detail even when API doesn't return eSports category
-            esports_market_ids: set[str] = set()
-            try:
-                esports_classifications = (
-                    session.query(MarketClassification.market_id)
-                    .join(
-                        TaxonomyNode,
-                        MarketClassification.taxonomy_node_id == TaxonomyNode.id,
-                    )
-                    .filter(TaxonomyNode.slug.like("esports%"))
-                    .all()
-                )
-                esports_market_ids = {row[0] for row in esports_classifications}
-                if esports_market_ids:
-                    logger.debug(
-                        f"Found {len(esports_market_ids)} eSports markets in taxonomy"
-                    )
-            except Exception as e:
-                logger.warning(f"Failed to query taxonomy classifications: {e}")
+            esports_market_ids = self._get_esports_market_ids(session)
 
             # Associate trades with categories
             all_trades_with_category: list[TradeWithCategory] = []
@@ -1085,24 +1097,7 @@ class IngestionPipeline:
 
             # Get taxonomy classifications for eSports detection
             # This allows routing trades to detail even when API doesn't return eSports category
-            esports_market_ids: set[str] = set()
-            try:
-                esports_classifications = (
-                    session.query(MarketClassification.market_id)
-                    .join(
-                        TaxonomyNode,
-                        MarketClassification.taxonomy_node_id == TaxonomyNode.id,
-                    )
-                    .filter(TaxonomyNode.slug.like("esports%"))
-                    .all()
-                )
-                esports_market_ids = {row[0] for row in esports_classifications}
-                if esports_market_ids:
-                    logger.debug(
-                        f"Found {len(esports_market_ids)} eSports markets in taxonomy"
-                    )
-            except Exception as e:
-                logger.warning(f"Failed to query taxonomy classifications: {e}")
+            esports_market_ids = self._get_esports_market_ids(session)
 
             # Process trades: fetch market metadata and categorize
             market_metadata = {}
@@ -1500,24 +1495,7 @@ class IngestionPipeline:
             for m in session.query(Market).filter(Market.tokens.is_(None)).all():
                 condition_to_category[m.condition_id] = m.category
 
-            esports_market_ids: set[str] = set()
-            try:
-                esports_classifications = (
-                    session.query(MarketClassification.market_id)
-                    .join(
-                        TaxonomyNode,
-                        MarketClassification.taxonomy_node_id == TaxonomyNode.id,
-                    )
-                    .filter(TaxonomyNode.slug.like("esports%"))
-                    .all()
-                )
-                esports_market_ids = {row[0] for row in esports_classifications}
-                if esports_market_ids:
-                    logger.debug(
-                        f"Found {len(esports_market_ids)} eSports markets in taxonomy"
-                    )
-            except Exception as e:
-                logger.warning(f"Failed to query taxonomy classifications: {e}")
+            esports_market_ids = self._get_esports_market_ids(session)
 
             all_trades_with_category: list[TradeWithCategory] = []
             unknown_tokens: set[str] = set()
