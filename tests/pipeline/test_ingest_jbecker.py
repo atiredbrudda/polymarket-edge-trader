@@ -515,3 +515,189 @@ def test_hybrid_blockchain_last_resort(in_memory_session):
     # Verify blockchain was used as last resort
     assert "blockchain" in stats["tiers_used"] or "api" in stats["tiers_used"]
     # At minimum, API should be in fallback chain
+
+
+# ===== Token Cache Tests =====
+
+
+def test_build_token_cache_loads_from_db(in_memory_session):
+    """_build_token_cache loads token→condition and condition→category from DB."""
+    from src.pipeline.ingest import IngestionPipeline
+    from src.pipeline.filters import CategoryFilter
+
+    session = in_memory_session()
+
+    # Add market with tokens
+    market1 = Market(
+        condition_id="cond1",
+        question="Test market 1?",
+        category="Crypto",
+        active=True,
+        tokens='[{"token_id": "token123", "outcome": "Yes"}]',
+    )
+    session.add(market1)
+
+    # Add market without tokens
+    market2 = Market(
+        condition_id="cond2",
+        question="Test market 2?",
+        category="Sports",
+        active=True,
+        tokens=None,
+    )
+    session.add(market2)
+    session.commit()
+    session.close()
+
+    pipeline = IngestionPipeline(
+        client=Mock(),
+        session_factory=in_memory_session,
+        category_filter=CategoryFilter({}),
+    )
+
+    session = in_memory_session()
+    token_cache, condition_cache = pipeline._build_token_cache(session)
+    session.close()
+
+    assert "token123" in token_cache
+    assert token_cache["token123"] == "cond1"
+    assert "cond1" in condition_cache
+    assert condition_cache["cond1"] == "Crypto"
+    assert "cond2" in condition_cache
+    assert condition_cache["cond2"] == "Sports"
+
+
+def test_ingest_trader_history_jbecker_skips_db_scan_when_cache_provided(in_memory_session):
+    """When token_cache is provided, DB scan for Market should be skipped."""
+    from src.pipeline.ingest import IngestionPipeline
+    from src.pipeline.filters import CategoryFilter
+    from src.datasources.jbecker import JBeckerDataset
+
+    mock_jbecker = Mock(spec=JBeckerDataset)
+    mock_jbecker.query_trader_history.return_value = [SAMPLE_JBECKER_TRADE]
+
+    pipeline = IngestionPipeline(
+        client=Mock(),
+        session_factory=in_memory_session,
+        category_filter=CategoryFilter({}),
+        jbecker_client=mock_jbecker,
+    )
+
+    trader_address = "0xeffd76b6a4318d50c6f71a16b276c5b279445a86"
+
+    # Add trader to DB
+    session = in_memory_session()
+    trader = Trader(address=trader_address.lower())
+    session.add(trader)
+    session.commit()
+    session.close()
+
+    # Provide empty cache - should use it and not query DB for markets
+    empty_cache = ({}, {})
+    stats = pipeline.ingest_trader_history_jbecker(
+        trader_address, token_cache=empty_cache
+    )
+
+    # Should complete without error (cache was used)
+    assert stats["trades_from_jbecker"] == 1
+    # All trades skipped as invalid since cache is empty and no category mapping
+    assert stats["skipped_invalid"] == 1
+
+
+def test_ingest_trader_history_hybrid_passes_token_cache_through(in_memory_session):
+    """ingest_trader_history_hybrid passes token_cache to jbecker method."""
+    from src.pipeline.ingest import IngestionPipeline
+    from src.pipeline.filters import CategoryFilter
+    from src.datasources.jbecker import JBeckerDataset
+
+    mock_jbecker = Mock(spec=JBeckerDataset)
+    mock_jbecker.query_trader_history.return_value = []
+
+    pipeline = IngestionPipeline(
+        client=Mock(),
+        session_factory=in_memory_session,
+        category_filter=CategoryFilter({}),
+        jbecker_client=mock_jbecker,
+    )
+
+    trader_address = "0xeffd76b6a4318d50c6f71a16b276c5b279445a86"
+
+    # Add trader to DB
+    session = in_memory_session()
+    trader = Trader(address=trader_address.lower())
+    session.add(trader)
+    session.commit()
+    session.close()
+
+    test_cache = ({"tokenX": "condY"}, {"condY": "Sports"})
+
+    with patch.object(
+        pipeline, "ingest_trader_history_jbecker", wraps=pipeline.ingest_trader_history_jbecker
+    ) as mock_jbecker_method:
+        pipeline.ingest_trader_history_hybrid(
+            trader_address, token_cache=test_cache
+        )
+
+        # Verify token_cache was passed
+        mock_jbecker_method.assert_called_once()
+        call_kwargs = mock_jbecker_method.call_args[1]
+        assert call_kwargs.get("token_cache") == test_cache
+
+
+def test_token_cache_grows_during_processing(in_memory_session):
+    """Token cache dict is mutated when unknown tokens are discovered via Gamma API."""
+    from src.pipeline.ingest import IngestionPipeline
+    from src.pipeline.filters import CategoryFilter
+    from src.datasources.jbecker import JBeckerDataset
+
+    # Trade with unknown token
+    trade_with_unknown_token = {
+        **SAMPLE_JBECKER_TRADE,
+        "maker_asset_id": "new_unknown_token_123",
+    }
+
+    mock_jbecker = Mock(spec=JBeckerDataset)
+    mock_jbecker.query_trader_history.return_value = [trade_with_unknown_token]
+
+    pipeline = IngestionPipeline(
+        client=Mock(),
+        session_factory=in_memory_session,
+        category_filter=CategoryFilter({}),
+        jbecker_client=mock_jbecker,
+        gamma_client=Mock(),
+    )
+
+    trader_address = "0xeffd76b6a4318d50c6f71a16b276c5b279445a86"
+
+    # Add trader to DB
+    session = in_memory_session()
+    trader = Trader(address=trader_address.lower())
+    session.add(trader)
+    session.commit()
+    session.close()
+
+    # Start with empty mutable cache
+    token_cache = ({}, {})
+
+    with patch("httpx.get") as mock_httpx_get:
+        # Mock Gamma API response
+        mock_response = Mock()
+        mock_response.status_code = 200
+        mock_response.json.return_value = [
+            {
+                "conditionId": "new_condition_456",
+                "category": "Politics",
+                "question": "Test question?",
+                "active": True,
+                "clobTokenIds": ["new_unknown_token_123"],
+            }
+        ]
+        mock_httpx_get.return_value = mock_response
+
+        pipeline.ingest_trader_history_jbecker(
+            trader_address, token_cache=token_cache
+        )
+
+    # Cache should now contain the discovered token
+    assert "new_unknown_token_123" in token_cache[0]
+    assert token_cache[0]["new_unknown_token_123"] == "new_condition_456"
