@@ -17,7 +17,19 @@ Read this section and the AGENTS.md file in project root before starting work. R
 
 ## Pending Review
 
-(empty)
+### worker/gamma-batch-token-lookup — 2026-02-18
+- **Plan:** WORKER_TASK_GAMMA_BATCH_TOKENS.md
+- **Branch:** worker/gamma-batch-token-lookup
+- **Commits:** 1fa643f
+- **Files changed:**
+  - src/pipeline/ingest.py (MODIFIED — batch token lookup)
+  - tests/pipeline/test_ingest_jbecker.py (MODIFIED — 2 batch tests added)
+  - .planning/debug/gamma-batch-token-lookup.md (NEW — debug summary)
+- **Worker notes:** 
+  - Probed Gamma API: comma-separated format works, repeated params don't.
+  - Implemented BATCH_SIZE=20 for ~20x speedup (565 tokens: 207s → ~10s).
+  - Preserves all existing logic for market insertion, deduplication, mapping.
+- **Decisions made:** Used comma-separated format `clob_token_ids=TOKEN1,TOKEN2,...` based on API probe results.
 
 ## Cleared
 
