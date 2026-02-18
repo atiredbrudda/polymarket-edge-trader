@@ -17,20 +17,14 @@ Read this section and the AGENTS.md file in project root before starting work. R
 
 ## Pending Review
 
-### worker/backfill-performance-docs — 2026-02-18
-- **Task:** Document backfill performance results and recommendations
-- **Branch:** worker/backfill-performance-docs
-- **Commits:** 0092c72
-- **Files changed:**
-  - .planning/REVIEW_QUEUE.md (MODIFIED - added performance results to cleared entry)
-- **Worker notes:**
-  - No code changes — only documentation of observed performance
-  - Tested 3 traders after token cache optimization was merged
-  - Results show cache works (trader 3 benefited from trader 2's discoveries)
-  - Remaining bottleneck identified: `time.sleep(0.05)` in Gamma API loop
-- **Validation:** N/A (docs only)
+(empty)
 
 ## Cleared
+
+### worker/backfill-performance-docs — 2026-02-18
+- **Branch:** worker/backfill-performance-docs
+- **Cleared by:** Opus 4.6
+- **Notes:** Docs-only. Performance data is accurate and cache growth is confirmed working. Worker's "~5x speedup" estimate for reducing sleep is wrong — network latency (~0.31s/call) dominates, not the 0.05s sleep. Reducing sleep saves ~11%, not 5x. Real fix is batch Gamma API token lookup. Pre-seeding effect is real — second backfill run will be significantly cheaper. Follow-up task created: WORKER_TASK_GAMMA_BATCH_TOKENS.md.
 
 ### worker/backfill-token-cache — 2026-02-18
 - **Branch:** worker/backfill-token-cache
