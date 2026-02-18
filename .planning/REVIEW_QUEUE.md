@@ -21,6 +21,12 @@ Read this section and the AGENTS.md file in project root before starting work. R
 
 ## Cleared
 
+### worker/backfill-batch-optimization — 2026-02-18
+- **Branch:** worker/backfill-batch-optimization
+- **Cleared by:** Opus 4.6
+- **Reviewer fix:** Removed dead `limit_per_trader` parameter from `batch_query_traders_history`
+- **Notes:** Single parquet scan for N traders (vs N scans). prefetched_trades passthrough in jbecker/hybrid/run_full_sweep/CLI. Blockchain escalated to logger.warning with 6-7hr notice. 591 passed, 7 failed (2 fewer than baseline).
+
 ### worker/fix-9-test-failures — 2026-02-18
 - **Branch:** worker/fix-9-test-failures
 - **Cleared by:** Opus 4.6

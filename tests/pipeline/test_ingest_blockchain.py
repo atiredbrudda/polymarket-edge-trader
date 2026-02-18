@@ -261,17 +261,20 @@ def test_ingest_trader_history_blockchain_incremental(
     assert stats["detail_count"] == 0
 
 
-def test_ingest_trader_history_hybrid_prefers_blockchain(
+def test_ingest_trader_history_hybrid_uses_blockchain_last_resort(
     pipeline, mock_blockchain_client
 ):
-    """Test hybrid method prefers blockchain when available."""
+    """Test hybrid method uses blockchain as last resort when other sources fail."""
     trader_address = "0x1234567890abcdef1234567890abcdef12345678"
 
     # Mock blockchain client to return empty list
     mock_blockchain_client.get_trades_by_trader.return_value = []
 
-    # Execute hybrid ingestion
-    stats = pipeline.ingest_trader_history_hybrid(trader_address)
+    # Execute hybrid ingestion with blockchain as last resort
+    # (no jbecker_client configured, so it will fall through to blockchain)
+    stats = pipeline.ingest_trader_history_hybrid(
+        trader_address, fallback_to_blockchain=True
+    )
 
     # Verify blockchain method was called (as fallback when no JBecker/API data)
     mock_blockchain_client.get_trades_by_trader.assert_called_once()
@@ -293,8 +296,10 @@ def test_ingest_trader_history_hybrid_falls_back_to_api(
     # Mock API client
     mock_api_client.get_trader_trades.return_value = []
 
-    # Execute hybrid ingestion
-    stats = pipeline.ingest_trader_history_hybrid(trader_address)
+    # Execute hybrid ingestion (blockchain unavailable, so API is used)
+    stats = pipeline.ingest_trader_history_hybrid(
+        trader_address, fallback_to_blockchain=False
+    )
 
     # Verify API method was called
     mock_api_client.get_trader_trades.assert_called_once_with(trader_address)

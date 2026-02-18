@@ -194,6 +194,66 @@ class JBeckerDataset:
         )
         return count
 
+    def batch_query_traders_history(
+        self, trader_addresses: list[str]
+    ) -> dict[str, list[dict]]:
+        """Query trades for multiple traders in a single query.
+
+        This is significantly faster than querying each trader individually
+        because it scans the parquet files once instead of once per trader.
+
+        Args:
+            trader_addresses: List of Ethereum addresses
+
+        Returns:
+            Dict mapping normalized address (lowercase with 0x) -> list of trades
+        """
+        if not self.is_available():
+            raise FileNotFoundError(
+                f"JBecker dataset not found. Download from: {self.DOWNLOAD_URL}\n"
+                f"Extract to: {self.data_path}"
+            )
+        if not trader_addresses:
+            return {}
+
+        normalized = []
+        for addr in trader_addresses:
+            addr_lower = addr.lower()
+            if not addr_lower.startswith("0x"):
+                addr_lower = f"0x{addr_lower}"
+            normalized.append(addr_lower)
+
+        pattern = str(self.trades_path / "trades_*.parquet")
+
+        placeholders = ", ".join([f"'{addr}'" for addr in normalized])
+        query = f"""
+            SELECT *
+            FROM read_parquet('{pattern}')
+            WHERE LOWER(maker) IN ({placeholders}) OR LOWER(taker) IN ({placeholders})
+            ORDER BY timestamp DESC
+        """
+
+        logger.debug(f"Batch querying {len(normalized)} traders from JBecker dataset")
+        start = time.time()
+        result = duckdb.execute(query)
+        all_trades = result.fetchdf().to_dict("records")
+        elapsed = time.time() - start
+        logger.info(
+            f"Found {len(all_trades)} total trades for {len(normalized)} traders "
+            f"in {elapsed:.2f}s"
+        )
+
+        trades_by_address: dict[str, list[dict]] = {addr: [] for addr in normalized}
+        for trade in all_trades:
+            maker_lower = trade["maker"].lower()
+            taker_lower = trade["taker"].lower()
+            if maker_lower in trades_by_address:
+                trades_by_address[maker_lower].append(trade)
+            if taker_lower in trades_by_address and taker_lower != maker_lower:
+                trades_by_address[taker_lower].append(trade)
+
+        return trades_by_address
+
     def get_date_range(self, trader_address: str) -> tuple[int, int] | None:
         """Get earliest and latest timestamp for a trader.
 
