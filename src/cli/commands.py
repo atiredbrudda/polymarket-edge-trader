@@ -316,7 +316,7 @@ def trader(address, verbose):
                     "game": s.game_slug,
                     "score": s.raw_score,
                     "percentile": s.percentile_rank or Decimal("0"),
-                    "specialization": "specialist" if s.is_specialist else "generalist",
+                    "specialization": s.specialization_label,
                 }
                 for s in scores
             ]
@@ -494,7 +494,7 @@ def leaderboard(slug, top_n, depth, verbose):
                     "rank": idx + 1,
                     "trader_address": entry.trader_address,
                     "score": entry.raw_score,
-                    "win_rate": entry.win_rate or Decimal("0"),
+                    "win_rate": entry.win_rate_component or Decimal("0"),
                 }
                 for idx, entry in enumerate(leaderboard_entries)
             ]
@@ -1219,9 +1219,24 @@ def backfill(address, limit, verbose):
 
     from src.pipeline.ingest import IngestionPipeline
     from src.pipeline.queries import get_traders_by_backfill_status
+    from src.datasources.jbecker import JBeckerDataset
+
+    settings = get_settings()
+    jbecker_client = None
+    try:
+        jbecker = JBeckerDataset(settings.jbecker_data_path)
+        if jbecker.is_available():
+            jbecker_client = jbecker
+            logger.info("JBecker dataset available — will use as primary source")
+    except Exception as e:
+        logger.warning(f"JBecker dataset not available: {e}")
 
     pipeline = IngestionPipeline(
-        client, session_factory, category_filter, gamma_client=gamma_client
+        client,
+        session_factory,
+        category_filter,
+        gamma_client=gamma_client,
+        jbecker_client=jbecker_client,
     )
 
     if address:
@@ -1292,6 +1307,91 @@ def backfill(address, limit, verbose):
         logger.info(
             f"BACKFILL completed: {success_count} ok, {error_count} failed ({processing_time:.1f}s)"
         )
+
+
+@cli.command("resolve-profiles")
+@click.option(
+    "--limit",
+    "-l",
+    default=None,
+    type=int,
+    help="Maximum number of traders to resolve (default: all pending)",
+)
+@click.option("--verbose", "-v", is_flag=True, help="Enable debug logging")
+def resolve_profiles(limit, verbose):
+    """Resolve Polymarket profiles for discovered traders.
+
+    Queries the Polymarket public profile API to resolve proxy wallet
+    addresses to real user profiles. This helps identify:
+    - Traders with actual Polymarket profiles (not just proxy contracts)
+    - Display names for verified traders
+    - Filter out bots/contracts without profiles
+
+    \b
+    Examples:
+        polymarket resolve-profiles
+        polymarket resolve-profiles --limit 50
+    """
+    logger.info(f"RESOLVE-PROFILES command started (limit={limit})")
+
+    if verbose:
+        logger.remove()
+        logger.add(sys.stderr, level="DEBUG")
+
+    console = Console()
+
+    session_factory, client, category_filter, _, gamma_client = _get_dependencies()
+
+    if gamma_client is None:
+        console.print("[red]Error: Gamma client not configured.[/red]")
+        logger.error("Gamma client not available")
+        return
+
+    from src.pipeline.ingest import IngestionPipeline
+    from src.db.models import Trader
+    from src.db.session import get_session
+
+    pipeline = IngestionPipeline(
+        client, session_factory, category_filter, gamma_client=gamma_client
+    )
+
+    console.print("[bold blue]Running database migration...[/bold blue]")
+
+    import time
+
+    start_time = time.time()
+
+    with console.status("[bold green]Resolving profiles...", spinner="dots"):
+        try:
+            profiles_found = pipeline.resolve_trader_profiles(limit=limit)
+        except Exception as e:
+            console.print(f"[red]Profile resolution failed: {e}[/red]")
+            logger.error(f"Profile resolution failed: {e}")
+            return
+
+    processing_time = time.time() - start_time
+
+    try:
+        with get_session(session_factory) as session:
+            pending_count = (
+                session.query(Trader).filter_by(profile_resolved=False).count()
+            )
+    except Exception:
+        pending_count = 0
+
+    if pending_count == 0:
+        console.print("[green]All traders have been resolved already.[/green]")
+        logger.info("All traders already resolved")
+    else:
+        console.print(
+            f"[bold green]Profile resolution complete[/bold green] ({processing_time:.1f}s)"
+        )
+        console.print(f"  Profiles found:    [green]{profiles_found}[/green]")
+        console.print(f"  Still unresolved: [yellow]{pending_count}[/yellow]")
+
+    logger.info(
+        f"RESOLVE-PROFILES completed: {profiles_found} profiles ({processing_time:.1f}s)"
+    )
 
 
 @cli.command()

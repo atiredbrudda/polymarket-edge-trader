@@ -332,7 +332,7 @@ def get_trader_outcomes_chronological(session: Session, trader_address: str) -> 
     )
 
     result = session.execute(query)
-    return [outcome for outcome in result.scalars().all()]
+    return [outcome for outcome in result.scalars().all() if outcome is not None]
 
 
 def get_game_leaderboard(

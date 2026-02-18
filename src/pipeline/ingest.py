@@ -9,8 +9,10 @@ IngestionPipeline orchestrates:
 This is the integration layer that fulfills DATA-01 through DATA-06.
 """
 
+import httpx
 import json
 import os
+import time
 from datetime import datetime, UTC
 from typing import Any, Optional
 
@@ -24,6 +26,8 @@ from src.pipeline.time_utils import parse_closing_within
 from src.db.models import (
     BlockchainSyncState,
     Market,
+    MarketClassification,
+    TaxonomyNode,
     Trader,
     Trade,
     TraderCategorySummary,
@@ -313,6 +317,35 @@ class IngestionPipeline:
         self.graph_client = graph_client
         self.jbecker_client = jbecker_client
         self.gamma_client = gamma_client
+
+    def _get_esports_market_ids(self, session) -> set[str]:
+        """Query market IDs classified as eSports in taxonomy.
+
+        Args:
+            session: SQLAlchemy session
+
+        Returns:
+            Set of market IDs that are classified as eSports in the taxonomy
+        """
+        esports_market_ids: set[str] = set()
+        try:
+            esports_classifications = (
+                session.query(MarketClassification.market_id)
+                .join(
+                    TaxonomyNode,
+                    MarketClassification.taxonomy_node_id == TaxonomyNode.id,
+                )
+                .filter(TaxonomyNode.slug.like("esports%"))
+                .all()
+            )
+            esports_market_ids = {row[0] for row in esports_classifications}
+            if esports_market_ids:
+                logger.debug(
+                    f"Found {len(esports_market_ids)} eSports markets in taxonomy"
+                )
+        except Exception as e:
+            logger.warning(f"Failed to query taxonomy classifications: {e}")
+        return esports_market_ids
 
     def ingest_active_markets(self) -> int:
         """Fetch and persist active markets from Polymarket API.
@@ -690,6 +723,26 @@ class IngestionPipeline:
 
             market_category = market.category
 
+            # Check taxonomy classification for eSports detection
+            # This allows routing trades to detail even when API doesn't return eSports category
+            try:
+                classification = (
+                    session.query(MarketClassification)
+                    .join(
+                        TaxonomyNode,
+                        MarketClassification.taxonomy_node_id == TaxonomyNode.id,
+                    )
+                    .filter(
+                        MarketClassification.market_id == condition_id,
+                        TaxonomyNode.slug.like("esports%"),
+                    )
+                    .first()
+                )
+                if classification:
+                    market_category = "eSports"
+            except Exception as e:
+                logger.warning(f"Failed to query taxonomy classification: {e}")
+
             # Process each trader
             for address in trader_addresses:
                 existing = session.query(Trader).filter_by(address=address).first()
@@ -842,10 +895,17 @@ class IngestionPipeline:
                         # Skip this market if we can't fetch metadata
                         continue
 
+            # Get taxonomy classifications for eSports detection
+            # This allows routing trades to detail even when API doesn't return eSports category
+            esports_market_ids = self._get_esports_market_ids(session)
+
             # Associate trades with categories
             all_trades_with_category: list[TradeWithCategory] = []
             for trade in all_trader_trades:
                 category = market_metadata.get(trade.market)
+                # Override category if market is classified as eSports in taxonomy
+                if trade.market in esports_market_ids:
+                    category = "eSports"
                 if category:
                     all_trades_with_category.append(
                         TradeWithCategory(trade=trade, category=category)
@@ -1037,6 +1097,10 @@ class IngestionPipeline:
             # Get latest block from trades
             latest_block = max(t.block_number for t in blockchain_trades)
 
+            # Get taxonomy classifications for eSports detection
+            # This allows routing trades to detail even when API doesn't return eSports category
+            esports_market_ids = self._get_esports_market_ids(session)
+
             # Process trades: fetch market metadata and categorize
             market_metadata = {}
             all_trades_with_category: list[TradeWithCategory] = []
@@ -1095,6 +1159,9 @@ class IngestionPipeline:
                             market_metadata[condition_id] = None
 
                 category = market_metadata.get(condition_id)
+                # Override category if market is classified as eSports in taxonomy
+                if condition_id in esports_market_ids:
+                    category = "eSports"
                 if category:
                     # Convert BlockchainTrade to TradeWithCategory
                     # We use the to_api_response() method to get TradeResponse-compatible dict
@@ -1397,13 +1464,11 @@ class IngestionPipeline:
         }
 
         try:
-            # Query all trades from JBecker dataset
             jbecker_trades = self.jbecker_client.query_trader_history(trader_address)
             stats["trades_from_jbecker"] = len(jbecker_trades)
 
             if not jbecker_trades:
                 logger.info(f"No JBecker trades found for {trader_address[:8]}...")
-                # Mark backfill complete even if no trades
                 trader = (
                     session.query(Trader)
                     .filter_by(address=trader_address.lower())
@@ -1415,29 +1480,161 @@ class IngestionPipeline:
                 session.commit()
                 return stats
 
-            # Convert and store trades with batch deduplication
-            batch_size = 1000
-            batch = []
+            token_to_condition: dict[str, str] = {}
+            condition_to_category: dict[str, str] = {}
+            markets_with_tokens = (
+                session.query(Market).filter(Market.tokens.isnot(None)).all()
+            )
+            for m in markets_with_tokens:
+                try:
+                    tokens = json.loads(m.tokens)
+                    for t in tokens:
+                        token_to_condition[str(t["token_id"])] = m.condition_id
+                except Exception:
+                    continue
+                condition_to_category[m.condition_id] = m.category
+
+            for m in session.query(Market).filter(Market.tokens.is_(None)).all():
+                condition_to_category[m.condition_id] = m.category
+
+            esports_market_ids = self._get_esports_market_ids(session)
+
+            all_trades_with_category: list[TradeWithCategory] = []
+            unknown_tokens: set[str] = set()
+
+            for jbecker_trade in jbecker_trades:
+                trader_addr_lower = trader_address.lower()
+                maker = jbecker_trade["maker"].lower()
+                is_maker = trader_addr_lower == maker
+                if is_maker:
+                    token_id = str(jbecker_trade["maker_asset_id"])
+                else:
+                    token_id = str(jbecker_trade["taker_asset_id"])
+                if token_id != "0" and token_id not in token_to_condition:
+                    unknown_tokens.add(token_id)
+
+            if unknown_tokens and self.gamma_client:
+                logger.info(
+                    f"Looking up {len(unknown_tokens)} unknown tokens via Gamma API"
+                )
+                looked_up = 0
+                seen_conditions: set[str] = set()
+                for token_id in unknown_tokens:
+                    try:
+                        resp = httpx.get(
+                            f"https://gamma-api.polymarket.com/markets",
+                            params={"clob_token_ids": token_id},
+                            timeout=10,
+                        )
+                        if resp.status_code == 200:
+                            markets_data = resp.json()
+                            if markets_data and isinstance(markets_data, list):
+                                md = markets_data[0]
+                                cid = md.get("conditionId")
+                                cat = (
+                                    md.get("category") or md.get("tags", [None])[0]
+                                    if md.get("tags")
+                                    else None
+                                )
+                                question = md.get("question", "")
+                                if cid:
+                                    token_to_condition[token_id] = cid
+                                    condition_to_category[cid] = cat or "Unknown"
+                                    if cid not in seen_conditions:
+                                        seen_conditions.add(cid)
+                                        existing_market = (
+                                            session.query(Market)
+                                            .filter_by(condition_id=cid)
+                                            .first()
+                                        )
+                                        if not existing_market:
+                                            new_market = Market(
+                                                condition_id=cid,
+                                                question=question,
+                                                category=cat or "Unknown",
+                                                active=md.get("active", False),
+                                            )
+                                            clob_tokens = md.get("clobTokenIds")
+                                            if clob_tokens:
+                                                token_list = (
+                                                    json.loads(clob_tokens)
+                                                    if isinstance(clob_tokens, str)
+                                                    else clob_tokens
+                                                )
+                                                new_market.tokens = json.dumps(
+                                                    [
+                                                        {"token_id": tid, "outcome": ""}
+                                                        for tid in token_list
+                                                    ]
+                                                )
+                                                for tid in token_list:
+                                                    token_to_condition[str(tid)] = cid
+                                            session.add(new_market)
+                                            session.flush()
+                                    looked_up += 1
+                    except Exception as e:
+                        logger.debug(f"Failed to look up token {token_id[:20]}...: {e}")
+                        try:
+                            session.rollback()
+                        except Exception:
+                            pass
+                    time.sleep(0.05)
+                try:
+                    session.commit()
+                except Exception:
+                    session.rollback()
+                logger.info(
+                    f"Looked up {looked_up}/{len(unknown_tokens)} tokens via Gamma"
+                )
 
             for jbecker_trade in jbecker_trades:
                 try:
-                    # Convert to API format
                     trade_response = jbecker_trade_to_api_response(
                         jbecker_trade, trader_address
                     )
 
-                    # Check if trade already exists (deduplication by trade ID)
+                    token_id = trade_response.market
+                    condition_id = token_to_condition.get(token_id)
+
+                    if condition_id:
+                        trade_response.market = condition_id
+
+                    category = (
+                        condition_to_category.get(condition_id)
+                        if condition_id
+                        else None
+                    )
+                    if condition_id and condition_id in esports_market_ids:
+                        category = "eSports"
+
+                    if category:
+                        all_trades_with_category.append(
+                            TradeWithCategory(trade=trade_response, category=category)
+                        )
+                    else:
+                        stats["skipped_invalid"] += 1
+
+                except Exception as e:
+                    logger.warning(f"Failed to process JBecker trade: {e}")
+                    stats["skipped_invalid"] += 1
+                    continue
+
+            if all_trades_with_category:
+                detail_trades, summary_trades = self.category_filter.route_trades(
+                    all_trades_with_category
+                )
+
+                for trade_with_cat in detail_trades:
+                    trade_response = trade_with_cat.trade
                     existing = (
                         session.query(Trade)
                         .filter_by(trade_id=trade_response.id)
                         .first()
                     )
-
                     if existing:
                         stats["already_in_db"] += 1
                         continue
 
-                    # Add to batch
                     trade = Trade(
                         market_id=trade_response.market,
                         trader_address=trade_response.trader,
@@ -1448,29 +1645,49 @@ class IngestionPipeline:
                         asset_ticker=trade_response.asset_ticker,
                         trade_id=trade_response.id,
                     )
-                    batch.append(trade)
+                    session.add(trade)
                     stats["detail_count"] += 1
 
-                    # Commit batch if full
-                    if len(batch) >= batch_size:
-                        for trade in batch:
-                            session.add(trade)
-                        session.commit()
-                        batch = []
+                if summary_trades:
+                    summaries = group_and_aggregate(
+                        summary_trades, trader_address.lower()
+                    )
+                    for summary_dict in summaries:
+                        existing_summary = (
+                            session.query(TraderCategorySummary)
+                            .filter_by(
+                                trader_address=summary_dict["trader_address"],
+                                category=summary_dict["category"],
+                            )
+                            .first()
+                        )
+                        if existing_summary:
+                            existing_summary.total_volume += summary_dict[
+                                "total_volume"
+                            ]
+                            existing_summary.trade_count += summary_dict["trade_count"]
+                            if (
+                                summary_dict["first_trade"]
+                                < existing_summary.first_trade
+                            ):
+                                existing_summary.first_trade = summary_dict[
+                                    "first_trade"
+                                ]
+                            if summary_dict["last_trade"] > existing_summary.last_trade:
+                                existing_summary.last_trade = summary_dict["last_trade"]
+                            existing_summary.updated_at = datetime.utcnow()
+                        else:
+                            summary = TraderCategorySummary(
+                                trader_address=summary_dict["trader_address"],
+                                category=summary_dict["category"],
+                                total_volume=summary_dict["total_volume"],
+                                trade_count=summary_dict["trade_count"],
+                                first_trade=summary_dict["first_trade"],
+                                last_trade=summary_dict["last_trade"],
+                            )
+                            session.add(summary)
+                        stats["summary_count"] = stats.get("summary_count", 0) + 1
 
-                except Exception as e:
-                    # Skip invalid trades (e.g., price validation failures)
-                    logger.warning(f"Failed to process JBecker trade: {e}")
-                    stats["skipped_invalid"] += 1
-                    continue
-
-            # Commit remaining batch
-            if batch:
-                for trade in batch:
-                    session.add(trade)
-                session.commit()
-
-            # Mark trader as backfill complete
             trader = (
                 session.query(Trader).filter_by(address=trader_address.lower()).first()
             )
@@ -1483,6 +1700,7 @@ class IngestionPipeline:
             logger.info(
                 f"JBecker ingestion for {trader_address[:8]}...: "
                 f"{stats['detail_count']} detail trades, "
+                f"{stats.get('summary_count', 0)} summary categories, "
                 f"{stats['already_in_db']} duplicates skipped, "
                 f"{stats['skipped_invalid']} invalid skipped"
             )
@@ -1628,6 +1846,122 @@ class IngestionPipeline:
             combined_stats["tiers_used"].append("api")
 
         return combined_stats
+
+    def resolve_trader_profiles(self, limit: int | None = None) -> int:
+        """Resolve Polymarket profiles for traders with profile_resolved=False.
+
+        For each unresolved trader:
+        1. Call gamma API get_public_profile(address)
+        2. If profile found: set has_profile=True, store display_name, proxy_wallet
+        3. If 404: set has_profile=False
+        4. Always set profile_resolved=True
+
+        Args:
+            limit: Maximum number of traders to resolve (default: all)
+
+        Returns:
+            Count of profiles found
+        """
+        if self.gamma_client is None:
+            logger.warning("Gamma client not available, cannot resolve profiles")
+            return 0
+
+        logger.info("Starting trader profile resolution")
+
+        session = self.session_factory()
+        profiles_found = 0
+
+        try:
+            from sqlalchemy import inspect, text
+            from sqlalchemy.engine import Engine
+
+            engine = self.session_factory.kw.get("bind")
+            if engine is None:
+                from src.config.settings import get_settings
+                from sqlalchemy import create_engine
+
+                settings = get_settings()
+                engine = create_engine(settings.database_url)
+
+            inspector = inspect(engine)
+            existing_cols = [c["name"] for c in inspector.get_columns("traders")]
+
+            with engine.begin() as conn:
+                if "profile_resolved" not in existing_cols:
+                    conn.execute(
+                        text(
+                            "ALTER TABLE traders ADD COLUMN profile_resolved BOOLEAN DEFAULT 0 NOT NULL"
+                        )
+                    )
+                if "has_profile" not in existing_cols:
+                    conn.execute(
+                        text(
+                            "ALTER TABLE traders ADD COLUMN has_profile BOOLEAN DEFAULT 0 NOT NULL"
+                        )
+                    )
+                if "proxy_wallet" not in existing_cols:
+                    conn.execute(
+                        text("ALTER TABLE traders ADD COLUMN proxy_wallet VARCHAR(42)")
+                    )
+                if "display_name" not in existing_cols:
+                    conn.execute(
+                        text("ALTER TABLE traders ADD COLUMN display_name VARCHAR(100)")
+                    )
+
+            query = session.query(Trader).filter_by(profile_resolved=False)
+
+            if limit:
+                traders = query.limit(limit).all()
+            else:
+                traders = query.all()
+
+            total_pending = len(traders)
+            logger.info(f"Resolving profiles for {total_pending} traders")
+
+            for trader in traders:
+                try:
+                    profile = self.gamma_client.get_public_profile(trader.address)
+
+                    if profile:
+                        trader.has_profile = True
+                        trader.profile_resolved = True
+
+                        if profile.get("proxyWallet"):
+                            trader.proxy_wallet = profile["proxyWallet"]
+                        if profile.get("name"):
+                            trader.display_name = profile["name"]
+                        elif profile.get("pseudonym"):
+                            trader.display_name = profile["pseudonym"]
+
+                        profiles_found += 1
+                        logger.debug(
+                            f"Profile found for {trader.address[:10]}...: {trader.display_name}"
+                        )
+                    else:
+                        trader.has_profile = False
+                        trader.profile_resolved = True
+                        logger.debug(f"No profile for {trader.address[:10]}...")
+
+                    session.commit()
+
+                except Exception as e:
+                    logger.warning(
+                        f"Failed to resolve profile for {trader.address[:10]}...: {e}"
+                    )
+                    session.rollback()
+                    continue
+
+            logger.info(
+                f"Profile resolution complete: {profiles_found} profiles found, {total_pending - profiles_found} no profile"
+            )
+
+        except Exception as e:
+            logger.error(f"Failed to resolve trader profiles: {e}")
+            raise
+        finally:
+            session.close()
+
+        return profiles_found
 
     def run_full_sweep(
         self,

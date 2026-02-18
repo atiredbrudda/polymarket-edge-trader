@@ -61,6 +61,10 @@ class Trader(Base):
 
     id: Mapped[int] = mapped_column(primary_key=True, autoincrement=True)
     address: Mapped[str] = mapped_column(String(42), unique=True, nullable=False, index=True)
+    proxy_wallet: Mapped[str | None] = mapped_column(String(42), nullable=True)
+    display_name: Mapped[str | None] = mapped_column(String(100), nullable=True)
+    profile_resolved: Mapped[bool] = mapped_column(default=False, nullable=False)
+    has_profile: Mapped[bool] = mapped_column(default=False, nullable=False)
     first_seen: Mapped[datetime] = mapped_column(default=datetime.utcnow, nullable=False)
     last_active: Mapped[datetime] = mapped_column(default=datetime.utcnow, nullable=False)
     backfill_complete: Mapped[bool] = mapped_column(default=False, nullable=False)

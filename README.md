@@ -68,6 +68,10 @@ polymarket sweep
 
 # Start automated hourly polling
 polymarket poll --interval 60      # Poll every 60 minutes
+
+# Resolve trader profiles (proxy wallet → real Polymarket profiles)
+polymarket resolve-profiles                    # Resolve all pending
+polymarket resolve-profiles --limit 50         # Limit to 50 traders
 ```
 
 ### Intelligence Features
@@ -83,6 +87,7 @@ polymarket poll --interval 60      # Poll every 60 minutes
 - **Consistency Detection**: Cross-timeframe stability analysis (30d, 90d, all-time)
 - **Multi-Source Data**: 4-tier cost-optimized ingestion (JBecker → API → Graph → Blockchain)
 - **Offline Research**: Query complete trader histories from 33.5GB historical dataset
+- **Profile Resolution**: Map proxy wallets to real Polymarket user profiles
 
 ### Data Sources
 
@@ -367,6 +372,76 @@ polymarket specialists esports.cs2
 polymarket specialists esports.cs2 --game-threshold 50 --deep-threshold 80
 ```
 
+## Profile Resolution (v1.2)
+
+Many trader addresses in the database are proxy wallets (smart contracts deployed by Polymarket), not actual user accounts. When you search these on polymarket.com, they show no profile. Profile resolution maps proxy addresses to real Polymarket profiles.
+
+### What It Does
+
+1. **Resolves proxy wallets** — Maps trading addresses to real user profiles
+2. **Identifies real traders** — Filters out bots/contracts without profiles
+3. **Stores profile metadata** — Captures display names, avatars, bio
+
+### How It Works
+
+The system queries the Polymarket public profile API:
+
+```
+GET https://gamma-api.polymarket.com/public-profile?address={address}
+```
+
+Returns:
+- `proxyWallet` — The proxy contract address (on-chain trading address)
+- `name` — Display name
+- `pseudonym` — Auto-generated pseudonym
+- `bio` — User bio
+- `profileImage` — Avatar URL
+- `createdAt` — Profile creation timestamp
+
+### Commands
+
+```bash
+# Resolve profiles for all pending traders
+polymarket resolve-profiles
+
+# Limit to 50 traders
+polymarket resolve-profiles --limit 50
+
+# Show progress and summary
+# Output:
+# Resolving profiles... 200 traders pending
+# [################] 200/200
+# Found 45 profiles, 155 no profile
+```
+
+### Database Columns
+
+The `traders` table gets new columns:
+
+| Column | Type | Description |
+|--------|------|-------------|
+| `proxy_wallet` | VARCHAR(42) | Proxy contract address from API |
+| `display_name` | VARCHAR(100) | Human-readable name or pseudonym |
+| `profile_resolved` | BOOLEAN | Whether we've attempted resolution |
+| `has_profile` | BOOLEAN | Whether profile exists on Polymarket |
+
+The system automatically migrates existing databases by adding these columns.
+
+### Integration
+
+Profile resolution runs after trader discovery to enrich trader data:
+
+```bash
+# Discover new traders
+polymarket discover
+
+# Resolve their profiles
+polymarket resolve-profiles
+
+# Then backfill history
+polymarket backfill
+```
+
 ## Architecture
 
 ### Data Flow
@@ -408,6 +483,7 @@ Telegram
 10. **Targeted Market Scanning** (Phase 10): Niche filters, time-to-close filters
 11. **Pipeline Decoupling** (Phase 11): Independent discover/backfill commands
 12. **Deep Niche Scoring** (Phase 12): Tournament/team-level expertise, hidden specialists
+13. **Profile Resolution** (Phase 13): Proxy wallet → real Polymarket profile mapping
 
 ### Key Design Decisions
 
@@ -570,7 +646,15 @@ This project was built using the GSD (Get Shit Done) workflow. See `.planning/` 
 
 ## Roadmap
 
-**v1.1 (Current)**: Targeted Scanning & Deep Niche Scoring
+**v1.2 (Current)**: Profile Resolution
+- ✅ Phase 13: Proxy wallet → real Polymarket profile mapping
+- ✅ Profile resolution CLI command
+- ✅ Automatic database migration for existing databases
+- ✅ Production-ready
+
+---
+
+**v1.1 (Previous)**: Targeted Scanning & Deep Niche Scoring
 - ✅ Phase 10: Targeted Market Scanning (niche + time filters)
 - ✅ Phase 11: Pipeline Decoupling (independent discover/backfill)
 - ✅ Phase 12: Deep Niche Scoring (tournament/team levels, hidden specialists)
