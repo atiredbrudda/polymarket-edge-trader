@@ -1423,7 +1423,9 @@ class IngestionPipeline:
 
         return stats
 
-    def ingest_trader_history_jbecker(self, trader_address: str) -> dict:
+    def ingest_trader_history_jbecker(
+        self, trader_address: str, prefetched_trades: list[dict] | None = None
+    ) -> dict:
         """Ingest trader history from JBecker Parquet dataset.
 
         Uses DuckDB for instant queries against 33.5GB Parquet dataset.
@@ -1434,6 +1436,7 @@ class IngestionPipeline:
 
         Args:
             trader_address: Trader wallet address
+            prefetched_trades: Optional pre-fetched trades (for batch backfill optimization)
 
         Returns:
             Stats dict with keys:
@@ -1444,7 +1447,7 @@ class IngestionPipeline:
 
         Raises:
             ValueError: If jbecker_client not configured
-            FileNotFoundError: If JBecker dataset not available
+            FileNotFoundError: JBecker dataset not available and no prefetched_trades
         """
         if not self.jbecker_client:
             raise ValueError(
@@ -1464,7 +1467,12 @@ class IngestionPipeline:
         }
 
         try:
-            jbecker_trades = self.jbecker_client.query_trader_history(trader_address)
+            if prefetched_trades is not None:
+                jbecker_trades = prefetched_trades
+            else:
+                jbecker_trades = self.jbecker_client.query_trader_history(
+                    trader_address
+                )
             stats["trades_from_jbecker"] = len(jbecker_trades)
 
             if not jbecker_trades:
@@ -1745,6 +1753,7 @@ class IngestionPipeline:
         fill_gap_with_api: bool = True,
         fallback_to_graph: bool = True,
         fallback_to_blockchain: bool = True,
+        prefetched_jbecker_trades: list[dict] | None = None,
     ) -> dict:
         """Ingest trader history using cost-optimized source hierarchy.
 
@@ -1763,6 +1772,7 @@ class IngestionPipeline:
             fill_gap_with_api: Whether to fill gap between JBecker and current with API (default: True)
             fallback_to_graph: Whether to use Graph if API insufficient (default: True)
             fallback_to_blockchain: Whether to use blockchain as last resort (default: True)
+            prefetched_jbecker_trades: Optional pre-fetched JBecker trades (for batch optimization)
 
         Returns:
             Combined stats dict with keys:
@@ -1780,7 +1790,9 @@ class IngestionPipeline:
                 logger.info(
                     f"Using JBecker dataset for {trader_address[:8]}... (PRIMARY - free)"
                 )
-                stats = self.ingest_trader_history_jbecker(trader_address)
+                stats = self.ingest_trader_history_jbecker(
+                    trader_address, prefetched_trades=prefetched_jbecker_trades
+                )
                 combined_stats.update(stats)
                 combined_stats["tiers_used"].append("jbecker")
                 jbecker_trades_found = stats.get("trades_from_jbecker", 0) > 0
@@ -2098,13 +2110,39 @@ class IngestionPipeline:
 
             logger.info(f"Backfilling {len(traders_to_backfill)} traders")
 
+            # Batch fetch JBecker trades for all traders (major speedup)
+            prefetched_by_address: dict[str, list[dict]] = {}
+            if (
+                use_jbecker
+                and self.jbecker_client
+                and self.jbecker_client.is_available()
+                and traders_to_backfill
+            ):
+                addresses = [t.address for t in traders_to_backfill]
+                logger.info(
+                    f"Batch fetching JBecker trades for {len(addresses)} traders..."
+                )
+                try:
+                    prefetched_by_address = (
+                        self.jbecker_client.batch_query_traders_history(addresses)
+                    )
+                    logger.info(
+                        f"Prefetched trades for {len(prefetched_by_address)} traders"
+                    )
+                except Exception as e:
+                    logger.warning(
+                        f"Batch JBecker query failed, falling back to individual queries: {e}"
+                    )
+
             for trader in traders_to_backfill:
                 try:
+                    prefetched = prefetched_by_address.get(trader.address.lower())
                     # Use hybrid method (JBecker -> API -> Graph -> Blockchain)
                     stats = self.ingest_trader_history_hybrid(
                         trader.address,
                         prefer_jbecker=use_jbecker,
                         fallback_to_blockchain=use_blockchain_fallback,
+                        prefetched_jbecker_trades=prefetched,
                     )
 
                     overall_stats["trades_stored"] += stats.get("detail_count", 0)

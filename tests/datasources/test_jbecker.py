@@ -23,6 +23,7 @@ def jbecker_dataset(tmp_path):
 
     # Copy file contents
     import shutil
+
     shutil.copy(sample_path, target_path)
 
     return JBeckerDataset(str(tmp_path))
@@ -279,3 +280,50 @@ def test_fetchmany_for_large_results(jbecker_dataset):
     # Should successfully return all trades
     assert len(trades) == 50
     assert all(isinstance(t, dict) for t in trades)
+
+
+# ===== Batch query tests (4 tests) =====
+
+
+def test_batch_query_traders_history(jbecker_dataset):
+    """Test batch_query_traders_history returns trades for multiple traders."""
+    known_trader = "0xeffd76b6a4318d50c6f71a16b276c5b279445a86"
+    unknown_trader = "0x0000000000000000000000000000000000000001"
+
+    result = jbecker_dataset.batch_query_traders_history([known_trader, unknown_trader])
+
+    assert isinstance(result, dict)
+    assert known_trader.lower() in result
+    assert unknown_trader.lower() in result
+    assert len(result[known_trader.lower()]) == 50
+    assert result[unknown_trader.lower()] == []
+
+
+def test_batch_query_empty_list(jbecker_dataset):
+    """Test batch_query_traders_history handles empty list."""
+    result = jbecker_dataset.batch_query_traders_history([])
+    assert result == {}
+
+
+def test_batch_query_case_insensitive(jbecker_dataset):
+    """Test batch_query handles case variations."""
+    trader_lower = "0xeffd76b6a4318d50c6f71a16b276c5b279445a86"
+    trader_upper = "0XEFFD76B6A4318D50C6F71A16B276C5B279445A86"
+
+    result = jbecker_dataset.batch_query_traders_history([trader_lower, trader_upper])
+
+    # Both should map to the same normalized key
+    assert trader_lower.lower() in result
+    assert trader_upper.lower() in result
+    assert len(result[trader_lower.lower()]) == 50
+    assert len(result[trader_upper.lower()]) == 50
+
+
+def test_batch_query_dataset_not_available(tmp_path):
+    """Test batch_query_traders_history raises FileNotFoundError when dataset missing."""
+    dataset = JBeckerDataset(str(tmp_path / "nonexistent"))
+
+    with pytest.raises(FileNotFoundError) as exc_info:
+        dataset.batch_query_traders_history(["0x123"])
+
+    assert "s3.jbecker.dev" in str(exc_info.value)
