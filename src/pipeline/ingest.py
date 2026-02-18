@@ -1423,8 +1423,39 @@ class IngestionPipeline:
 
         return stats
 
+    def _build_token_cache(self, session) -> tuple[dict[str, str], dict[str, str]]:
+        """Build token-to-condition and condition-to-category mappings from DB.
+
+        This is cached at backfill start to avoid repeated DB queries per trader.
+
+        Returns:
+            Tuple of (token_to_condition, condition_to_category) dicts
+        """
+        token_to_condition: dict[str, str] = {}
+        condition_to_category: dict[str, str] = {}
+
+        markets_with_tokens = (
+            session.query(Market).filter(Market.tokens.isnot(None)).all()
+        )
+        for m in markets_with_tokens:
+            try:
+                tokens = json.loads(m.tokens)
+                for t in tokens:
+                    token_to_condition[str(t["token_id"])] = m.condition_id
+            except Exception:
+                continue
+            condition_to_category[m.condition_id] = m.category
+
+        for m in session.query(Market).filter(Market.tokens.is_(None)).all():
+            condition_to_category[m.condition_id] = m.category
+
+        return token_to_condition, condition_to_category
+
     def ingest_trader_history_jbecker(
-        self, trader_address: str, prefetched_trades: list[dict] | None = None
+        self,
+        trader_address: str,
+        prefetched_trades: list[dict] | None = None,
+        token_cache: tuple[dict[str, str], dict[str, str]] | None = None,
     ) -> dict:
         """Ingest trader history from JBecker Parquet dataset.
 
@@ -1437,6 +1468,7 @@ class IngestionPipeline:
         Args:
             trader_address: Trader wallet address
             prefetched_trades: Optional pre-fetched trades (for batch backfill optimization)
+            token_cache: Optional pre-built (token_to_condition, condition_to_category) dicts
 
         Returns:
             Stats dict with keys:
@@ -1488,22 +1520,12 @@ class IngestionPipeline:
                 session.commit()
                 return stats
 
-            token_to_condition: dict[str, str] = {}
-            condition_to_category: dict[str, str] = {}
-            markets_with_tokens = (
-                session.query(Market).filter(Market.tokens.isnot(None)).all()
-            )
-            for m in markets_with_tokens:
-                try:
-                    tokens = json.loads(m.tokens)
-                    for t in tokens:
-                        token_to_condition[str(t["token_id"])] = m.condition_id
-                except Exception:
-                    continue
-                condition_to_category[m.condition_id] = m.category
-
-            for m in session.query(Market).filter(Market.tokens.is_(None)).all():
-                condition_to_category[m.condition_id] = m.category
+            if token_cache:
+                token_to_condition, condition_to_category = token_cache
+            else:
+                token_to_condition, condition_to_category = self._build_token_cache(
+                    session
+                )
 
             esports_market_ids = self._get_esports_market_ids(session)
 
@@ -1754,6 +1776,7 @@ class IngestionPipeline:
         fallback_to_graph: bool = True,
         fallback_to_blockchain: bool = True,
         prefetched_jbecker_trades: list[dict] | None = None,
+        token_cache: tuple[dict[str, str], dict[str, str]] | None = None,
     ) -> dict:
         """Ingest trader history using cost-optimized source hierarchy.
 
@@ -1773,6 +1796,7 @@ class IngestionPipeline:
             fallback_to_graph: Whether to use Graph if API insufficient (default: True)
             fallback_to_blockchain: Whether to use blockchain as last resort (default: True)
             prefetched_jbecker_trades: Optional pre-fetched JBecker trades (for batch optimization)
+            token_cache: Optional pre-built (token_to_condition, condition_to_category) dicts
 
         Returns:
             Combined stats dict with keys:
@@ -1791,7 +1815,9 @@ class IngestionPipeline:
                     f"Using JBecker dataset for {trader_address[:8]}... (PRIMARY - free)"
                 )
                 stats = self.ingest_trader_history_jbecker(
-                    trader_address, prefetched_trades=prefetched_jbecker_trades
+                    trader_address,
+                    prefetched_trades=prefetched_jbecker_trades,
+                    token_cache=token_cache,
                 )
                 combined_stats.update(stats)
                 combined_stats["tiers_used"].append("jbecker")
@@ -2137,6 +2163,18 @@ class IngestionPipeline:
                         f"Batch JBecker query failed, falling back to individual queries: {e}"
                     )
 
+            # Build token cache once for all traders (avoids N per-trader DB scans)
+            token_cache = None
+            if (
+                use_jbecker
+                and self.jbecker_client
+                and self.jbecker_client.is_available()
+            ):
+                token_cache = self._build_token_cache(session)
+                logger.info(
+                    f"Built token cache: {len(token_cache[0])} tokens, {len(token_cache[1])} conditions"
+                )
+
             for trader in traders_to_backfill:
                 try:
                     prefetched = prefetched_by_address.get(trader.address.lower())
@@ -2146,6 +2184,7 @@ class IngestionPipeline:
                         prefer_jbecker=use_jbecker,
                         fallback_to_blockchain=use_blockchain_fallback,
                         prefetched_jbecker_trades=prefetched,
+                        token_cache=token_cache,
                     )
 
                     overall_stats["trades_stored"] += stats.get("detail_count", 0)

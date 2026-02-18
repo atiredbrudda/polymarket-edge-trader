@@ -21,6 +21,17 @@ Read this section and the AGENTS.md file in project root before starting work. R
 
 ## Cleared
 
+### worker/backfill-token-cache — 2026-02-18
+- **Branch:** worker/backfill-token-cache
+- **Cleared by:** Opus 4.6
+- **Reviewer fix:** Updated debug summary status from `planned` → `resolved`
+- **Files in scope:**
+  - src/pipeline/ingest.py (`_build_token_cache()`, `token_cache` param on jbecker/hybrid, cache build in `run_full_sweep()`)
+  - src/cli/commands.py (token cache build + pass in backfill loop)
+  - tests/pipeline/test_ingest_jbecker.py (4 token cache tests)
+  - .planning/debug/backfill-token-lookup-bottleneck.md (debug summary)
+- **Notes:** Clean implementation — cache shared across all traders in a backfill session, grows as Gamma API discovers new tokens (mutable dict passed by reference). All 4 plan items implemented. Test 2 (skips-DB-scan) is behavioral rather than mock-isolated but acceptable. 602 passed, 0 failed on branch (vs worker-reported 595+7 — pre-existing 7 failures appear to have been non-deterministic).
+
 ### worker/backfill-batch-optimization — 2026-02-18
 - **Branch:** worker/backfill-batch-optimization
 - **Cleared by:** Opus 4.6
