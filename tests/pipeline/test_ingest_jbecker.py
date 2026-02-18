@@ -758,13 +758,12 @@ def test_batch_token_lookup_groups_tokens_correctly(in_memory_session):
     # Should be called 3 times (ceil(45/20) = 3), NOT 45 times
     assert mock_httpx_get.call_count == 3
 
-    # Verify comma-separated format was used
+    # Verify repeated params format was used (list of tuples)
     first_call = mock_httpx_get.call_args_list[0]
-    params = first_call[1].get("params", {})
-    assert "clob_token_ids" in params
-    token_ids = params["clob_token_ids"]
-    assert "," in token_ids  # Should be comma-separated
-    assert len(token_ids.split(",")) == 20  # First batch should have 20 tokens
+    params = first_call[1].get("params", [])
+    assert isinstance(params, list)
+    assert len(params) == 20  # First batch should have 20 tokens
+    assert params[0][0] == "clob_token_ids"  # Each tuple is (key, value)
 
 
 def test_batch_token_lookup_processes_all_responses(in_memory_session):

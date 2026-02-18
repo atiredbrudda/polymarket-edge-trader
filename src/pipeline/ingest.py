@@ -1556,7 +1556,7 @@ class IngestionPipeline:
                     try:
                         resp = httpx.get(
                             "https://gamma-api.polymarket.com/markets",
-                            params={"clob_token_ids": ",".join(batch)},
+                            params=[("clob_token_ids", t) for t in batch],
                             timeout=10,
                         )
                         if resp.status_code == 200:

@@ -7,13 +7,15 @@
 | Variant | Format | Result |
 |---------|--------|--------|
 | Single token | `clob_token_ids=TOKEN1` | 1 market (baseline works) |
-| Repeated params | `clob_token_ids=TOKEN1&clob_token_ids=TOKEN2` | 1 market (BROKEN - only returns one) |
-| Comma-separated | `clob_token_ids=TOKEN1,TOKEN2` | 2 markets (WORKS!) |
-| Comma-separated (3 tokens) | `clob_token_ids=TOKEN1,TOKEN2,TOKEN3` | 2 markets (correct - 2 tokens share a market) |
+| Repeated params (curl) | `clob_token_ids=TOKEN1&clob_token_ids=TOKEN2` | misreported 1 market |
+| Comma-separated | `clob_token_ids=TOKEN1,TOKEN2` | 422 error (REJECTED) |
+| Repeated params (httpx) | `params=[("clob_token_ids", t) for t in batch]` | N markets (WORKS) |
 
 ### Decision
 
-**Batch works with comma-separated format.**
+**Batch works with repeated params format via httpx.**
+
+Implementation uses: `params=[("clob_token_ids", t) for t in batch]`
 
 Implementing Step 2A: Batch lookup with `BATCH_SIZE=20`.
 
@@ -31,7 +33,7 @@ Calculation: `tokens / 20 batches * 0.36s per batch`
 
 Modified `src/pipeline/ingest.py` around line 1546-1611:
 - Replaced per-token loop with batched approach
-- Uses comma-separated format: `clob_token_ids=TOKEN1,TOKEN2,...`
+- Uses repeated params format: `params=[("clob_token_ids", t) for t in batch]`
 - Preserves all existing logic for market insertion, deduplication, etc.
 - One sleep per batch instead of per token
 
