@@ -701,3 +701,144 @@ def test_token_cache_grows_during_processing(in_memory_session):
     # Cache should now contain the discovered token
     assert "new_unknown_token_123" in token_cache[0]
     assert token_cache[0]["new_unknown_token_123"] == "new_condition_456"
+
+
+# ===== Batch Token Lookup Tests =====
+
+
+def test_batch_token_lookup_groups_tokens_correctly(in_memory_session):
+    """Batch lookup groups 45 tokens into 3 API calls (ceil(45/20) = 3), not 45 calls."""
+    from src.pipeline.ingest import IngestionPipeline
+    from src.pipeline.filters import CategoryFilter
+    from src.datasources.jbecker import JBeckerDataset
+
+    # Create 45 trades with unique unknown tokens
+    trades = []
+    for i in range(45):
+        trade = SAMPLE_JBECKER_TRADE.copy()
+        trade["id"] = f"0x{i:064x}"
+        trade["transaction_hash"] = f"0x{i:064x}"
+        trade["maker_asset_id"] = f"unknown_token_{i}"
+        trades.append(trade)
+
+    mock_jbecker = Mock(spec=JBeckerDataset)
+    mock_jbecker.query_trader_history.return_value = trades
+
+    pipeline = IngestionPipeline(
+        client=Mock(),
+        session_factory=in_memory_session,
+        category_filter=CategoryFilter({}),
+        jbecker_client=mock_jbecker,
+        gamma_client=Mock(),
+    )
+
+    trader_address = "0xeffd76b6a4318d50c6f71a16b276c5b279445a86"
+
+    session = in_memory_session()
+    trader = Trader(address=trader_address.lower())
+    session.add(trader)
+    session.commit()
+    session.close()
+
+    token_cache = ({}, {})
+
+    with patch("httpx.get") as mock_httpx_get:
+        mock_response = Mock()
+        mock_response.status_code = 200
+        mock_response.json.return_value = []
+
+        def side_effect_response(*args, **kwargs):
+            mock_response.json.return_value = []
+            return mock_response
+
+        mock_httpx_get.side_effect = side_effect_response
+
+        pipeline.ingest_trader_history_jbecker(trader_address, token_cache=token_cache)
+
+    # Should be called 3 times (ceil(45/20) = 3), NOT 45 times
+    assert mock_httpx_get.call_count == 3
+
+    # Verify comma-separated format was used
+    first_call = mock_httpx_get.call_args_list[0]
+    params = first_call[1].get("params", {})
+    assert "clob_token_ids" in params
+    token_ids = params["clob_token_ids"]
+    assert "," in token_ids  # Should be comma-separated
+    assert len(token_ids.split(",")) == 20  # First batch should have 20 tokens
+
+
+def test_batch_token_lookup_processes_all_responses(in_memory_session):
+    """Batch processes all responses - condition IDs end up in token_to_condition."""
+    from src.pipeline.ingest import IngestionPipeline
+    from src.pipeline.filters import CategoryFilter
+    from src.datasources.jbecker import JBeckerDataset
+
+    # Create 25 trades (2 batches: 20 + 5)
+    trades = []
+    for i in range(25):
+        trade = SAMPLE_JBECKER_TRADE.copy()
+        trade["id"] = f"0x{i:064x}"
+        trade["transaction_hash"] = f"0x{i:064x}"
+        trade["maker_asset_id"] = f"batch_token_{i}"
+        trades.append(trade)
+
+    mock_jbecker = Mock(spec=JBeckerDataset)
+    mock_jbecker.query_trader_history.return_value = trades
+
+    pipeline = IngestionPipeline(
+        client=Mock(),
+        session_factory=in_memory_session,
+        category_filter=CategoryFilter({}),
+        jbecker_client=mock_jbecker,
+        gamma_client=Mock(),
+    )
+
+    trader_address = "0xeffd76b6a4318d50c6f71a16b276c5b279445a86"
+
+    session = in_memory_session()
+    trader = Trader(address=trader_address.lower())
+    session.add(trader)
+    session.commit()
+    session.close()
+
+    token_cache = ({}, {})
+
+    call_count = [0]
+
+    def side_effect_response(*args, **kwargs):
+        call_count[0] += 1
+        mock_response = Mock()
+        mock_response.status_code = 200
+        # Return 2 markets per batch with different conditions
+        mock_response.json.return_value = [
+            {
+                "conditionId": f"condition_{call_count[0]}_a",
+                "category": "Politics",
+                "question": f"Test question {call_count[0]}a?",
+                "active": True,
+                "clobTokenIds": [
+                    f"batch_token_{(call_count[0] - 1) * 20 + j}" for j in range(10)
+                ],
+            },
+            {
+                "conditionId": f"condition_{call_count[0]}_b",
+                "category": "Sports",
+                "question": f"Test question {call_count[0]}b?",
+                "active": True,
+                "clobTokenIds": [
+                    f"batch_token_{(call_count[0] - 1) * 20 + 10 + j}"
+                    for j in range(10)
+                ],
+            },
+        ]
+        return mock_response
+
+    with patch("httpx.get") as mock_httpx_get:
+        mock_httpx_get.side_effect = side_effect_response
+
+        pipeline.ingest_trader_history_jbecker(trader_address, token_cache=token_cache)
+
+    # Verify condition mappings exist for the tokens
+    assert len(token_cache[0]) > 0  # Some tokens should be mapped
+    assert "condition_1_a" in token_cache[1]  # Categories should be populated
+    assert "condition_1_b" in token_cache[1]

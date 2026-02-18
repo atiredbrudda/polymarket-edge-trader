@@ -17,9 +17,21 @@ Read this section and the AGENTS.md file in project root before starting work. R
 
 ## Pending Review
 
-(empty)
+(empty — no pending reviews)
 
 ## Cleared
+
+### worker/gamma-batch-token-lookup — 2026-02-18
+- **Branch:** worker/gamma-batch-token-lookup
+- **Cleared by:** Sonnet 4.6
+- **Reviewer fix:** Reverted 4 cosmetic reformatting edits to existing tests
+- **Files in scope:**
+  - src/pipeline/ingest.py (batch token lookup, BATCH_SIZE=20)
+  - tests/pipeline/test_ingest_jbecker.py (2 new batch tests)
+  - .planning/debug/gamma-batch-token-lookup.md (debug summary)
+- **Notes:** Clean implementation. Comma-separated format confirmed working via API probe. Per-batch sleep (not per-token) gives ~20x speedup. Logic correct: `for t in batch` inside `for md in markets_data` correctly maps each token to its owning condition. Token mapping also done inside `if not existing_market` block for new markets. `looked_up` counter may double-count if a token appears in multiple market responses (edge case, logging only). 604 passed, 0 failed.
+
+
 
 ### worker/backfill-performance-docs — 2026-02-18
 - **Branch:** worker/backfill-performance-docs

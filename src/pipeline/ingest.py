@@ -1549,61 +1549,78 @@ class IngestionPipeline:
                 )
                 looked_up = 0
                 seen_conditions: set[str] = set()
-                for token_id in unknown_tokens:
+                BATCH_SIZE = 20
+                token_list = list(unknown_tokens)
+                for i in range(0, len(token_list), BATCH_SIZE):
+                    batch = token_list[i : i + BATCH_SIZE]
                     try:
                         resp = httpx.get(
-                            f"https://gamma-api.polymarket.com/markets",
-                            params={"clob_token_ids": token_id},
+                            "https://gamma-api.polymarket.com/markets",
+                            params={"clob_token_ids": ",".join(batch)},
                             timeout=10,
                         )
                         if resp.status_code == 200:
                             markets_data = resp.json()
                             if markets_data and isinstance(markets_data, list):
-                                md = markets_data[0]
-                                cid = md.get("conditionId")
-                                cat = (
-                                    md.get("category") or md.get("tags", [None])[0]
-                                    if md.get("tags")
-                                    else None
-                                )
-                                question = md.get("question", "")
-                                if cid:
-                                    token_to_condition[token_id] = cid
-                                    condition_to_category[cid] = cat or "Unknown"
-                                    if cid not in seen_conditions:
-                                        seen_conditions.add(cid)
-                                        existing_market = (
-                                            session.query(Market)
-                                            .filter_by(condition_id=cid)
-                                            .first()
-                                        )
-                                        if not existing_market:
-                                            new_market = Market(
-                                                condition_id=cid,
-                                                question=question,
-                                                category=cat or "Unknown",
-                                                active=md.get("active", False),
+                                for md in markets_data:
+                                    cid = md.get("conditionId")
+                                    cat = (
+                                        md.get("category") or md.get("tags", [None])[0]
+                                        if md.get("tags")
+                                        else None
+                                    )
+                                    question = md.get("question", "")
+                                    if cid:
+                                        condition_to_category[cid] = cat or "Unknown"
+                                        if cid not in seen_conditions:
+                                            seen_conditions.add(cid)
+                                            existing_market = (
+                                                session.query(Market)
+                                                .filter_by(condition_id=cid)
+                                                .first()
                                             )
+                                            if not existing_market:
+                                                new_market = Market(
+                                                    condition_id=cid,
+                                                    question=question,
+                                                    category=cat or "Unknown",
+                                                    active=md.get("active", False),
+                                                )
+                                                clob_tokens = md.get("clobTokenIds")
+                                                if clob_tokens:
+                                                    token_list_inner = (
+                                                        json.loads(clob_tokens)
+                                                        if isinstance(clob_tokens, str)
+                                                        else clob_tokens
+                                                    )
+                                                    new_market.tokens = json.dumps(
+                                                        [
+                                                            {
+                                                                "token_id": tid,
+                                                                "outcome": "",
+                                                            }
+                                                            for tid in token_list_inner
+                                                        ]
+                                                    )
+                                                    for tid in token_list_inner:
+                                                        token_to_condition[str(tid)] = (
+                                                            cid
+                                                        )
+                                                session.add(new_market)
+                                                session.flush()
+                                        for t in batch:
                                             clob_tokens = md.get("clobTokenIds")
                                             if clob_tokens:
-                                                token_list = (
+                                                token_ids = (
                                                     json.loads(clob_tokens)
                                                     if isinstance(clob_tokens, str)
                                                     else clob_tokens
                                                 )
-                                                new_market.tokens = json.dumps(
-                                                    [
-                                                        {"token_id": tid, "outcome": ""}
-                                                        for tid in token_list
-                                                    ]
-                                                )
-                                                for tid in token_list:
-                                                    token_to_condition[str(tid)] = cid
-                                            session.add(new_market)
-                                            session.flush()
-                                    looked_up += 1
+                                                if t in [str(tid) for tid in token_ids]:
+                                                    token_to_condition[t] = cid
+                                                    looked_up += 1
                     except Exception as e:
-                        logger.debug(f"Failed to look up token {token_id[:20]}...: {e}")
+                        logger.debug(f"Batch token lookup failed: {e}")
                         try:
                             session.rollback()
                         except Exception:
