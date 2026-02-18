@@ -13,7 +13,20 @@ Read this section before starting work. These are patterns the reviewer has flag
 
 ## Pending Review
 
-(none)
+### worker/fix-9-test-failures — 2026-02-18
+- **Task:** Fix 9 pre-existing test failures (per FIX_9_PREEXISTING_TEST_FAILURES.md)
+- **Branch:** worker/fix-9-test-failures
+- **Commits:** 5164677
+- **Files changed:**
+  - tests/test_ingest.py (MODIFIED - Group B + C fixes)
+  - tests/test_api_client.py (MODIFIED - Group A fixes)
+  - tests/pipeline/test_ingest_blockchain.py (MODIFIED - Group D fixes)
+- **Worker notes:**
+  - Group B: Added Market rows to DB before calling discover_traders_from_market (2 tests)
+  - Group C: Changed mock from get_market_trades to get_trader_trades (3 tests)
+  - Group A: Updated mocks from ClobClient to httpx.get for Data API (2 tests)
+  - Group D: Removed deprecated prefer_blockchain parameter (2 tests)
+- **Validation:** 0 lines changed in src/, 587 tests pass (0 failures)
 
 ## Cleared
 
