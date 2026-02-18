@@ -23,7 +23,6 @@ def jbecker_dataset(tmp_path):
 
     # Copy file contents
     import shutil
-
     shutil.copy(sample_path, target_path)
 
     return JBeckerDataset(str(tmp_path))

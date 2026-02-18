@@ -337,7 +337,7 @@ def test_run_full_sweep_with_blockchain(
     # This tests backward compatibility from Phase 8
     stats = pipeline.run_full_sweep(
         use_jbecker=False,  # Disable JBecker tier (pipeline.jbecker_client is already None)
-        use_blockchain_fallback=True,
+        use_blockchain_fallback=True
     )
 
     # Verify blockchain client was called for trader backfill

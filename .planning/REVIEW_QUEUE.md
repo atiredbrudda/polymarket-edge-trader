@@ -24,8 +24,15 @@ Read this section and the AGENTS.md file in project root before starting work. R
 ### worker/backfill-batch-optimization — 2026-02-18
 - **Branch:** worker/backfill-batch-optimization
 - **Cleared by:** Opus 4.6
-- **Reviewer fix:** Removed dead `limit_per_trader` parameter from `batch_query_traders_history`
-- **Notes:** Single parquet scan for N traders (vs N scans). prefetched_trades passthrough in jbecker/hybrid/run_full_sweep/CLI. Blockchain escalated to logger.warning with 6-7hr notice. 591 passed, 7 failed (2 fewer than baseline).
+- **Reviewer fixes:** Removed dead `limit_per_trader` param; removed cosmetic blank line in test_jbecker.py fixture and trailing comma in test_ingest_blockchain.py
+- **Files in scope:**
+  - src/datasources/jbecker.py (batch_query_traders_history method)
+  - src/pipeline/ingest.py (prefetched_trades param, batch in backfill loop, blockchain warning)
+  - src/cli/commands.py (batch prefetch in CLI backfill command)
+  - tests/datasources/test_jbecker.py (4 batch query tests)
+  - tests/pipeline/test_ingest_blockchain.py (prefer_blockchain → fallback_to_blockchain)
+  - .planning/debug/resolved/backfill-frozen-on-trader.md (debug summary)
+- **Notes:** Clean batch optimization — N parquet scans → 1. Applied in both pipeline and CLI. Blockchain now warns "6-7 HOURS". Uncommitted `_build_token_cache()` work in ingest.py left as-is (follow-on task). Non-issue: address interpolation in DuckDB SQL is technically unsafe but acceptable for internal tool — simple fix for another time. 7 failed, 591 passed, 0 new regressions.
 
 ### worker/fix-9-test-failures — 2026-02-18
 - **Branch:** worker/fix-9-test-failures
