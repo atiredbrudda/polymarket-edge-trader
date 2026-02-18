@@ -195,7 +195,7 @@ class JBeckerDataset:
         return count
 
     def batch_query_traders_history(
-        self, trader_addresses: list[str], limit_per_trader: Optional[int] = None
+        self, trader_addresses: list[str]
     ) -> dict[str, list[dict]]:
         """Query trades for multiple traders in a single query.
 
@@ -204,7 +204,6 @@ class JBeckerDataset:
 
         Args:
             trader_addresses: List of Ethereum addresses
-            limit_per_trader: Optional limit per trader (not recommended, slow)
 
         Returns:
             Dict mapping normalized address (lowercase with 0x) -> list of trades
