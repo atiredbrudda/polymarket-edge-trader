@@ -69,10 +69,3 @@ root_cause: CLI backfill command didn't use batch JBecker query optimization, ca
 fix: Added batch prefetching to CLI backfill command (similar to run_full_sweep) and improved blockchain fallback warning
 verification: Tests pass (7 failures vs baseline 9 = 2 tests fixed, no new failures)
 files_changed: [src/cli/commands.py, src/pipeline/ingest.py, tests/pipeline/test_ingest_blockchain.py]
-
-## Resolution
-
-root_cause: 
-fix: 
-verification: 
-files_changed: []

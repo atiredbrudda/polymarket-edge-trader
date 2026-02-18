@@ -75,18 +75,22 @@ The diff for models.py should show only the 4 new columns (plus any ruff-applied
 
 ## Pending Review
 
-### worker/backfill-batch-optimization (Round 2) — 2026-02-18
-- **Task:** Fix batch optimization not applied to CLI backfill command
+### worker/backfill-batch-optimization — 2026-02-18
+- **Task:** Optimize backfill speed with batch JBecker parquet queries
 - **Branch:** worker/backfill-batch-optimization
-- **Commits:** (pending commit)
+- **Commits:** a94c62d..b0146d8
 - **Files changed:**
-  - src/cli/commands.py (FIXED - added batch prefetch to CLI backfill)
-  - src/pipeline/ingest.py (IMPROVED - better blockchain fallback warning)
-  - tests/pipeline/test_ingest_blockchain.py (FIXED - updated tests to use correct API)
-- **Issue found:** CLI `backfill` command was NOT using batch prefetch - it called `ingest_trader_history_hybrid()` individually for each trader, causing N parquet scans instead of 1.
-- **Fix applied:** Added same batch prefetch logic to CLI backfill that `run_full_sweep()` uses
-- **Bonus fix:** Improved blockchain fallback logging (logger.info → logger.warning with "6-7 HOURS" message)
-- **Test fix:** Fixed 2 pre-existing tests using removed `prefer_blockchain` parameter
+  - src/datasources/jbecker.py (NEW - batch_query_traders_history method)
+  - src/pipeline/ingest.py (MODIFIED - prefetched_trades param, batch in backfill loop, blockchain warning)
+  - src/cli/commands.py (MODIFIED - batch prefetch in CLI backfill command)
+  - tests/datasources/test_jbecker.py (MODIFIED - 4 batch query tests)
+  - tests/pipeline/test_ingest_blockchain.py (FIXED - updated tests using removed prefer_blockchain)
+  - .planning/debug/resolved/backfill-frozen-on-trader.md (NEW - debug summary)
+- **Worker notes:**
+  - Original problem: N parquet scans for N traders (slow)
+  - Solution: batch_query_traders_history() fetches all in one scan
+  - Debug finding: CLI backfill wasn't using batch optimization (fixed)
+  - Bonus: Blockchain fallback now warns "6-7 HOURS" instead of silent freeze
 - **Validation:** 7 failed, 591 passed (2 tests fixed vs baseline 9 failures, 0 new regressions)
 
 ## Cleared
