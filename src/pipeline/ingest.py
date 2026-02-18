@@ -9,8 +9,10 @@ IngestionPipeline orchestrates:
 This is the integration layer that fulfills DATA-01 through DATA-06.
 """
 
+import httpx
 import json
 import os
+import time
 from datetime import datetime, UTC
 from typing import Any, Optional
 
@@ -1515,8 +1517,6 @@ class IngestionPipeline:
                 logger.info(
                     f"Looking up {len(unknown_tokens)} unknown tokens via Gamma API"
                 )
-                import httpx
-
                 looked_up = 0
                 seen_conditions: set[str] = set()
                 for token_id in unknown_tokens:
@@ -1578,9 +1578,7 @@ class IngestionPipeline:
                             session.rollback()
                         except Exception:
                             pass
-                    import time as _time
-
-                    _time.sleep(0.05)
+                    time.sleep(0.05)
                 try:
                     session.commit()
                 except Exception:
