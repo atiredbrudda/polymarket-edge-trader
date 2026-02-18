@@ -567,9 +567,7 @@ def test_build_token_cache_loads_from_db(in_memory_session):
     assert condition_cache["cond2"] == "Sports"
 
 
-def test_ingest_trader_history_jbecker_skips_db_scan_when_cache_provided(
-    in_memory_session,
-):
+def test_ingest_trader_history_jbecker_skips_db_scan_when_cache_provided(in_memory_session):
     """When token_cache is provided, DB scan for Market should be skipped."""
     from src.pipeline.ingest import IngestionPipeline
     from src.pipeline.filters import CategoryFilter
@@ -634,11 +632,11 @@ def test_ingest_trader_history_hybrid_passes_token_cache_through(in_memory_sessi
     test_cache = ({"tokenX": "condY"}, {"condY": "Sports"})
 
     with patch.object(
-        pipeline,
-        "ingest_trader_history_jbecker",
-        wraps=pipeline.ingest_trader_history_jbecker,
+        pipeline, "ingest_trader_history_jbecker", wraps=pipeline.ingest_trader_history_jbecker
     ) as mock_jbecker_method:
-        pipeline.ingest_trader_history_hybrid(trader_address, token_cache=test_cache)
+        pipeline.ingest_trader_history_hybrid(
+            trader_address, token_cache=test_cache
+        )
 
         # Verify token_cache was passed
         mock_jbecker_method.assert_called_once()
@@ -696,7 +694,9 @@ def test_token_cache_grows_during_processing(in_memory_session):
         ]
         mock_httpx_get.return_value = mock_response
 
-        pipeline.ingest_trader_history_jbecker(trader_address, token_cache=token_cache)
+        pipeline.ingest_trader_history_jbecker(
+            trader_address, token_cache=token_cache
+        )
 
     # Cache should now contain the discovered token
     assert "new_unknown_token_123" in token_cache[0]
