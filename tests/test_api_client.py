@@ -23,8 +23,7 @@ class TestPolymarketClient:
 
         # Verify ClobClient was initialized with correct host
         mock_clob_client.assert_called_once_with(
-            settings.polymarket_api_host,
-            key=settings.polymarket_api_key
+            settings.polymarket_api_host, key=settings.polymarket_api_key
         )
 
         # Verify rate limiter was created with correct rate
@@ -54,7 +53,7 @@ class TestPolymarketClient:
                 "question": "Will FaZe qualify?",
                 "category": "eSports",
                 "active": True,
-            }
+            },
         ]
 
         mock_instance = mock_clob_client.return_value
@@ -82,7 +81,7 @@ class TestPolymarketClient:
                     "active": True,
                 }
             ],
-            "next_cursor": "cursor_page2"
+            "next_cursor": "cursor_page2",
         }
         page2 = {
             "data": [
@@ -93,7 +92,7 @@ class TestPolymarketClient:
                     "active": True,
                 }
             ],
-            "next_cursor": "LTE"  # End of pagination
+            "next_cursor": "LTE",  # End of pagination
         }
 
         mock_instance = mock_clob_client.return_value
@@ -110,33 +109,36 @@ class TestPolymarketClient:
         # Verify pagination calls
         assert mock_instance.get_simplified_markets.call_count == 2
 
-    @patch("src.api.client.ClobClient")
-    def test_get_market_trades_returns_trades(self, mock_clob_client):
+    @patch("httpx.get")
+    def test_get_market_trades_returns_trades(self, mock_httpx_get):
         """Test that get_market_trades returns list of TradeResponse models."""
-        # Mock API response
+        # Mock API response (Data API format)
         mock_api_response = [
             {
-                "id": "trade-1",
-                "market": "0xabc",
-                "maker": "0x742d35Cc6634C0532925a3b844Bc9e7595f0bEb",
+                "transactionHash": "trade-1",
+                "conditionId": "0xabc",
+                "proxyWallet": "0x742d35Cc6634C0532925a3b844Bc9e7595f0bEb",
                 "side": "BUY",
-                "size": "100.5",
-                "price": "0.65",
+                "size": 100.5,
+                "price": 0.65,
                 "timestamp": 1707220800,
+                "outcome": "Yes",
             },
             {
-                "id": "trade-2",
-                "market": "0xabc",
-                "maker": "0x1234567890abcdef1234567890abcdef12345678",
+                "transactionHash": "trade-2",
+                "conditionId": "0xabc",
+                "proxyWallet": "0x1234567890abcdef1234567890abcdef12345678",
                 "side": "SELL",
-                "size": "50.25",
-                "price": "0.70",
+                "size": 50.25,
+                "price": 0.70,
                 "timestamp": 1707221000,
-            }
+                "outcome": "No",
+            },
         ]
 
-        mock_instance = mock_clob_client.return_value
-        mock_instance.get_trades.return_value = mock_api_response
+        mock_response = mock_httpx_get.return_value
+        mock_response.json.return_value = mock_api_response
+        mock_response.status_code = 200
 
         client = PolymarketClient()
         trades = client.get_market_trades(condition_id="0xabc", limit=500)
@@ -162,7 +164,7 @@ class TestPolymarketClient:
                     "category": "eSports",
                     "active": True,
                 }
-            ]
+            ],
         ]
 
         client = PolymarketClient()
@@ -180,7 +182,9 @@ class TestPolymarketClient:
         """Test that retry exhaustion raises RetryError."""
         # Mock: always fail
         mock_instance = mock_clob_client.return_value
-        mock_instance.get_simplified_markets.side_effect = ConnectionError("Persistent failure")
+        mock_instance.get_simplified_markets.side_effect = ConnectionError(
+            "Persistent failure"
+        )
 
         # Override settings to limit retries for faster test
         settings = Settings(retry_max_attempts=3)
@@ -199,47 +203,48 @@ class TestPolymarketClient:
         client = PolymarketClient()
 
         # Spy on rate limiter
-        with patch.object(client.rate_limiter, "acquire", wraps=client.rate_limiter.acquire) as mock_acquire:
+        with patch.object(
+            client.rate_limiter, "acquire", wraps=client.rate_limiter.acquire
+        ) as mock_acquire:
             client.get_markets(active=True)
 
             # Verify rate limiter was called
             mock_acquire.assert_called()
 
-    @patch("src.api.client.ClobClient")
-    def test_get_market_trades_pagination(self, mock_clob_client):
+    @patch("httpx.get")
+    def test_get_market_trades_pagination(self, mock_httpx_get):
         """Test that get_market_trades handles pagination correctly."""
-        # Mock paginated responses
-        page1 = {
-            "data": [
-                {
-                    "id": "trade-1",
-                    "market": "0xabc",
-                    "maker": "0x111",
-                    "side": "BUY",
-                    "size": "100",
-                    "price": "0.5",
-                    "timestamp": 1707220800,
-                }
-            ],
-            "next_cursor": "cursor_page2"
-        }
-        page2 = {
-            "data": [
-                {
-                    "id": "trade-2",
-                    "market": "0xabc",
-                    "maker": "0x222",
-                    "side": "SELL",
-                    "size": "50",
-                    "price": "0.6",
-                    "timestamp": 1707221000,
-                }
-            ],
-            "next_cursor": "LTE"  # End marker
-        }
+        # Mock paginated responses (Data API format)
+        page1 = [
+            {
+                "transactionHash": "trade-1",
+                "conditionId": "0xabc",
+                "proxyWallet": "0x111",
+                "side": "BUY",
+                "size": 100,
+                "price": 0.5,
+                "timestamp": 1707220800,
+                "outcome": "Yes",
+            }
+        ]
+        page2 = [
+            {
+                "transactionHash": "trade-2",
+                "conditionId": "0xabc",
+                "proxyWallet": "0x222",
+                "side": "SELL",
+                "size": 50,
+                "price": 0.6,
+                "timestamp": 1707221000,
+                "outcome": "No",
+            }
+        ]
 
-        mock_instance = mock_clob_client.return_value
-        mock_instance.get_trades.side_effect = [page1, page2]
+        # Data API returns all trades in one response, not paginated
+        # But we simulate fetching trades by mocking the response
+        mock_response = mock_httpx_get.return_value
+        mock_response.json.return_value = page1 + page2
+        mock_response.status_code = 200
 
         client = PolymarketClient()
         trades = client.get_market_trades(condition_id="0xabc", limit=500)

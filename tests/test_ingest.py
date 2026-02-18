@@ -183,6 +183,18 @@ def test_discover_traders_finds_addresses(pipeline, mock_client, in_memory_db):
         ),
     ]
 
+    # Add market to DB (required by discover_traders_from_market)
+    session = session_factory()
+    market = Market(
+        condition_id="market1",
+        question="Test market",
+        category="eSports",
+        active=True,
+    )
+    session.add(market)
+    session.commit()
+    session.close()
+
     # Run discovery
     new_traders = pipeline.discover_traders_from_market("market1")
 
@@ -207,7 +219,7 @@ def test_discover_traders_skips_existing(pipeline, mock_client, in_memory_db):
     """Test that discovery skips already-known traders."""
     _, session_factory = in_memory_db
 
-    # Pre-populate with existing trader
+    # Pre-populate with existing trader and market
     session = session_factory()
     existing_trader = Trader(
         address="0xTrader1",
@@ -216,6 +228,13 @@ def test_discover_traders_skips_existing(pipeline, mock_client, in_memory_db):
         backfill_complete=True,
     )
     session.add(existing_trader)
+    market = Market(
+        condition_id="market1",
+        question="Test market",
+        category="eSports",
+        active=True,
+    )
+    session.add(market)
     session.commit()
     session.close()
 
@@ -287,37 +306,27 @@ def test_ingest_trader_history_routes_correctly(pipeline, mock_client, in_memory
     session.commit()
     session.close()
 
-    # Mock trades for both markets
-    def mock_get_market_trades(condition_id):
-        if condition_id == "market1":
-            # eSports trades
-            return [
-                TradeResponse(
-                    id="trade1",
-                    market="market1",
-                    trader="0xTrader1",
-                    side="BUY",
-                    size=Decimal("100.0"),
-                    price=Decimal("0.6"),
-                    timestamp=datetime(2025, 1, 1, 12, 0, 0),
-                )
-            ]
-        elif condition_id == "market2":
-            # Politics trades
-            return [
-                TradeResponse(
-                    id="trade2",
-                    market="market2",
-                    trader="0xTrader1",
-                    side="SELL",
-                    size=Decimal("50.0"),
-                    price=Decimal("0.4"),
-                    timestamp=datetime(2025, 1, 2, 12, 0, 0),
-                )
-            ]
-        return []
-
-    mock_client.get_market_trades.side_effect = mock_get_market_trades
+    # Mock trades for the trader (get_trader_trades returns all trades for this trader)
+    mock_client.get_trader_trades.return_value = [
+        TradeResponse(
+            id="trade1",
+            market="market1",
+            trader="0xTrader1",
+            side="BUY",
+            size=Decimal("100.0"),
+            price=Decimal("0.6"),
+            timestamp=datetime(2025, 1, 1, 12, 0, 0),
+        ),
+        TradeResponse(
+            id="trade2",
+            market="market2",
+            trader="0xTrader1",
+            side="SELL",
+            size=Decimal("50.0"),
+            price=Decimal("0.4"),
+            timestamp=datetime(2025, 1, 2, 12, 0, 0),
+        ),
+    ]
 
     # Run ingestion
     stats = pipeline.ingest_trader_history("0xTrader1")
@@ -384,7 +393,7 @@ def test_duplicate_trade_skipped(pipeline, mock_client, in_memory_db):
     session.close()
 
     # Mock API returning same trade again
-    mock_client.get_market_trades.return_value = [
+    mock_client.get_trader_trades.return_value = [
         TradeResponse(
             id="trade1",  # Same ID as existing
             market="market1",
@@ -501,7 +510,7 @@ def test_ingest_trader_history_handles_no_trades(pipeline, mock_client, in_memor
     session.close()
 
     # Mock no trades for this trader
-    mock_client.get_market_trades.return_value = []
+    mock_client.get_trader_trades.return_value = []
 
     # Run ingestion
     stats = pipeline.ingest_trader_history("0xTrader1")
