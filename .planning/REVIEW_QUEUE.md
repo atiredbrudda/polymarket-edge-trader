@@ -75,7 +75,19 @@ The diff for models.py should show only the 4 new columns (plus any ruff-applied
 
 ## Pending Review
 
-(empty — all items moved to Review Feedback above)
+### worker/backfill-batch-optimization (Round 2) — 2026-02-18
+- **Task:** Fix batch optimization not applied to CLI backfill command
+- **Branch:** worker/backfill-batch-optimization
+- **Commits:** (pending commit)
+- **Files changed:**
+  - src/cli/commands.py (FIXED - added batch prefetch to CLI backfill)
+  - src/pipeline/ingest.py (IMPROVED - better blockchain fallback warning)
+  - tests/pipeline/test_ingest_blockchain.py (FIXED - updated tests to use correct API)
+- **Issue found:** CLI `backfill` command was NOT using batch prefetch - it called `ingest_trader_history_hybrid()` individually for each trader, causing N parquet scans instead of 1.
+- **Fix applied:** Added same batch prefetch logic to CLI backfill that `run_full_sweep()` uses
+- **Bonus fix:** Improved blockchain fallback logging (logger.info → logger.warning with "6-7 HOURS" message)
+- **Test fix:** Fixed 2 pre-existing tests using removed `prefer_blockchain` parameter
+- **Validation:** 7 failed, 591 passed (2 tests fixed vs baseline 9 failures, 0 new regressions)
 
 ## Cleared
 
