@@ -72,6 +72,10 @@ polymarket poll --interval 60      # Poll every 60 minutes
 # Resolve trader profiles (proxy wallet → real Polymarket profiles)
 polymarket resolve-profiles                    # Resolve all pending
 polymarket resolve-profiles --limit 50         # Limit to 50 traders
+
+# Token catalog inspection (eSports token coverage from JBecker dataset)
+polymarket catalog-stats                       # Summary + per-game breakdown
+polymarket catalog-stats --verbose             # Include debug logging
 ```
 
 ### Intelligence Features
@@ -88,6 +92,7 @@ polymarket resolve-profiles --limit 50         # Limit to 50 traders
 - **Multi-Source Data**: 4-tier cost-optimized ingestion (JBecker → API → Graph → Blockchain)
 - **Offline Research**: Query complete trader histories from 33.5GB historical dataset
 - **Profile Resolution**: Map proxy wallets to real Polymarket user profiles
+- **Token Catalog**: Pre-built mapping of JBecker token IDs → eSports taxonomy (auto-built on first backfill, ~25s)
 
 ### Data Sources
 
@@ -151,6 +156,9 @@ The system uses a **4-tier cost-optimized hierarchy** for trader history:
 
    # Optional: The Graph API for fast historical queries
    export THE_GRAPH_API_KEY="your_graph_api_key"
+
+   # Optional: JBecker dataset root (extracted archive, see below)
+   export JBECKER_DATA_PATH="./data"
 
    # Optional: Custom settings
    export POLYMARKET_API_HOST="https://clob.polymarket.com"
@@ -271,10 +279,12 @@ For offline research and bulk trader analysis, download Jon Becker's complete Po
    tar -I zstd -xvf data.tar.zst
    ```
 
-3. **Configure path**:
+3. **Configure path** (point to the extracted root, not a subdirectory):
    ```bash
-   export JBECKER_DATA_PATH="./data/polymarket/trades"
+   export JBECKER_DATA_PATH="./data"
    ```
+   The system expects `$JBECKER_DATA_PATH/polymarket/trades/` for trade data and
+   `$JBECKER_DATA_PATH/polymarket/markets/` for the token catalog build.
 
 4. **Verify**:
    ```bash
@@ -285,6 +295,7 @@ The dataset enables:
 - Complete trader history (no 100-trade API limit)
 - Offline research (no API keys needed)
 - Cost-free bulk analysis (minimal Graph API consumption)
+- Auto-built token catalog for eSports classification (first backfill, ~25s)
 
 ## Targeted Market Scanning (v1.1)
 
@@ -372,7 +383,7 @@ polymarket specialists esports.cs2
 polymarket specialists esports.cs2 --game-threshold 50 --deep-threshold 80
 ```
 
-## Profile Resolution (v1.2)
+## Profile Resolution
 
 Many trader addresses in the database are proxy wallets (smart contracts deployed by Polymarket), not actual user accounts. When you search these on polymarket.com, they show no profile. Profile resolution maps proxy addresses to real Polymarket profiles.
 
@@ -442,6 +453,52 @@ polymarket resolve-profiles
 polymarket backfill
 ```
 
+## Token Catalog (v1.2)
+
+The token catalog bridges the JBecker dataset to the eSports scoring pipeline. JBecker trades reference numeric token IDs (e.g., `12345678`), but the classifier works on market question text. The catalog pre-maps each token ID to its eSports taxonomy node so JBecker trades can flow through scoring without per-trade API calls.
+
+### How It Works
+
+1. **Auto-build on first backfill** — When `polymarket backfill` runs for the first time, the system scans the JBecker markets parquet files (~41 files), classifies each market against the eSports taxonomy, and persists the `token_id → taxonomy` mapping in SQLite. This takes ~25 seconds and is only done once.
+2. **Cached thereafter** — Subsequent backfill runs skip the build step (checked via `_catalog_built` flag).
+3. **Esports trades get Market + MarketClassification records** — Catalog hits create the DB rows needed for the scoring pipeline without any Gamma API calls. Catalog misses fall through to the existing Gamma API lookup.
+
+### Schema
+
+The `token_catalog` table stores:
+
+| Column | Type | Description |
+|--------|------|-------------|
+| `token_id` | VARCHAR | JBecker numeric token ID (primary key) |
+| `condition_id` | VARCHAR | Polymarket condition ID |
+| `question` | TEXT | Market question text |
+| `niche_slug` | VARCHAR | e.g. `esports` (NULL if unclassified) |
+| `node_path` | VARCHAR | e.g. `eSports.CS2.IEM Katowice` |
+| `depth` | INTEGER | Taxonomy depth (1=game, 2=tournament, 3=team) |
+| `market_type` | VARCHAR | e.g. `match`, `tournament` |
+
+### Commands
+
+```bash
+# Check catalog coverage (auto-builds if empty)
+polymarket catalog-stats
+
+# Example output:
+# Token Catalog Statistics
+#   Total rows:        142,350
+#   Esports rows:      38,210
+#   Unclassified rows: 104,140
+#
+# Esports Coverage by Game
+#  Game                 Token Rows
+#  CS2                  18,450
+#  League of Legends     9,820
+#  Dota 2                5,210
+#  ...
+```
+
+The catalog is automatically populated on the first `polymarket backfill` run — no manual step required. Run `polymarket catalog-stats` afterward to verify coverage.
+
 ## Architecture
 
 ### Data Flow
@@ -483,7 +540,7 @@ Telegram
 10. **Targeted Market Scanning** (Phase 10): Niche filters, time-to-close filters
 11. **Pipeline Decoupling** (Phase 11): Independent discover/backfill commands
 12. **Deep Niche Scoring** (Phase 12): Tournament/team-level expertise, hidden specialists
-13. **Profile Resolution** (Phase 13): Proxy wallet → real Polymarket profile mapping
+13. **Token Catalog** (Phase 13): JBecker token ID → eSports taxonomy mapping, catalog-backed backfill classification
 
 ### Key Design Decisions
 
@@ -495,7 +552,7 @@ Telegram
 - **Local-first storage**: SQLite with WAL mode (no external database required)
 - **Token bucket rate limiting**: 50 req/s (80% of 60/s sustained limit)
 - **Numeric precision**: Decimal types for all financial calculations (no float errors)
-- **TDD approach**: 576 tests (100% passing) across all components
+- **TDD approach**: 613 tests (100% passing) across all components
 
 ## Testing
 
@@ -515,17 +572,18 @@ pytest --cov=src --cov-report=term-missing
 ```
 
 **Test Stats:**
-- Total: 576 tests (100% passing)
+- Total: 613 tests (100% passing)
 - Foundation: 62
 - Classification: 51
 - Evaluation: 121
 - Scoring: 73
 - Signals: 55
 - Alerts: 39
-- CLI: 46
+- CLI: 49
 - Blockchain: 35
 - JBecker Dataset: 53
 - Deep Scoring: 29
+- Token Catalog: 11 (builder: 6, integration: 5)
 
 ## Project Structure
 
@@ -542,7 +600,8 @@ GSD_Polymarket/
 │   ├── cli/           # Click commands and formatters
 │   ├── blockchain/    # Polygon RPC client
 │   ├── graph/         # The Graph subgraph client
-│   └── datasources/   # JBecker dataset & converters
+│   ├── datasources/   # JBecker dataset & converters
+│   └── catalog/       # Token catalog builder (JBecker token → taxonomy)
 ├── tests/             # Comprehensive test suite (509 tests)
 ├── taxonomy/          # eSports game taxonomy (YAML)
 ├── data/              # JBecker dataset (optional, 140GB)
@@ -646,10 +705,11 @@ This project was built using the GSD (Get Shit Done) workflow. See `.planning/` 
 
 ## Roadmap
 
-**v1.2 (Current)**: Profile Resolution
-- ✅ Phase 13: Proxy wallet → real Polymarket profile mapping
-- ✅ Profile resolution CLI command
-- ✅ Automatic database migration for existing databases
+**v1.2 (Current)**: Token Catalog & JBecker Classification
+- ✅ Phase 13: eSports token catalog (JBecker token ID → taxonomy mapping)
+- ✅ Catalog-backed JBecker backfill (no Gamma API calls for known eSports tokens)
+- ✅ `catalog-stats` CLI command with per-game breakdown
+- ✅ 613 tests passing (100%)
 - ✅ Production-ready
 
 ---
@@ -658,7 +718,7 @@ This project was built using the GSD (Get Shit Done) workflow. See `.planning/` 
 - ✅ Phase 10: Targeted Market Scanning (niche + time filters)
 - ✅ Phase 11: Pipeline Decoupling (independent discover/backfill)
 - ✅ Phase 12: Deep Niche Scoring (tournament/team levels, hidden specialists)
-- ✅ 576 tests passing (100%)
+- ✅ Profile resolution (proxy wallet → real Polymarket profile mapping)
 - ✅ Production-ready
 
 ---

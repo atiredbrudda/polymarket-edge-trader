@@ -25,6 +25,15 @@ Read this section and the AGENTS.md file in project root before starting work. R
 
 ## Cleared
 
+### worker/13-03 — 2026-02-19
+- **Branch:** worker/13-03
+- **Cleared by:** Sonnet 4.6
+- **Reviewer fix:** Reverted cosmetic blank line after `from sqlalchemy import or_` in `discover` command (outside plan scope)
+- **Files in scope:**
+  - src/cli/commands.py (TokenCatalog import + `catalog-stats` command, +104 lines)
+  - tests/test_cli_catalog.py (NEW - 3 CLI tests)
+- **Notes:** Clean implementation. `catalog-stats` shows total/esports/unclassified counts + per-game Rich Table breakdown. Game extracted from node_path segment 1. Empty catalog handled gracefully. Import reformatting (one-liner → multi-line) acceptable — necessary consequence of adding TokenCatalog. All 3 tests pass, 613 total pass, 0 regressions.
+
 ### worker/13-02 — 2026-02-19
 - **Branch:** worker/13-02
 - **Cleared by:** Sonnet 4.6
