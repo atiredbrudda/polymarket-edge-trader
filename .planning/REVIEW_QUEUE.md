@@ -25,6 +25,15 @@ Read this section and the AGENTS.md file in project root before starting work. R
 
 ## Cleared
 
+### worker/13-02 — 2026-02-19
+- **Branch:** worker/13-02
+- **Cleared by:** Sonnet 4.6
+- **Reviewer fix:** Reverted cosmetic blank line + filter reformatting in `ingest_active_markets` (outside plan scope, ~line 2224)
+- **Files in scope:**
+  - src/pipeline/ingest.py (catalog integration: `_catalog_built`, `_ensure_catalog_built()`, catalog lookup in `ingest_trader_history_jbecker`, +120 lines functional)
+  - tests/test_catalog_integration.py (NEW - 5 integration tests)
+- **Notes:** Clean functional implementation following plan spec. Auto-build trigger on first call, esports-only catalog cache, check-first Market + MarketClassification creation, Gamma API fallback for catalog misses. All 11 catalog tests pass, 0 regressions (8 test_ingest.py pass).
+
 ### worker/13-01 — 2026-02-19
 - **Branch:** worker/13-01
 - **Cleared by:** Sonnet 4.6
