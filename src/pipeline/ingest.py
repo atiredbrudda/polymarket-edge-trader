@@ -31,6 +31,7 @@ from src.db.models import (
     Trader,
     Trade,
     TraderCategorySummary,
+    TokenCatalog,
 )
 from src.pipeline.aggregators import group_and_aggregate
 from src.pipeline.filters import CategoryFilter, TradeWithCategory
@@ -317,6 +318,7 @@ class IngestionPipeline:
         self.graph_client = graph_client
         self.jbecker_client = jbecker_client
         self.gamma_client = gamma_client
+        self._catalog_built: bool = False
 
     def _get_esports_market_ids(self, session) -> set[str]:
         """Query market IDs classified as eSports in taxonomy.
@@ -1451,6 +1453,37 @@ class IngestionPipeline:
 
         return token_to_condition, condition_to_category
 
+    def _ensure_catalog_built(self, session) -> None:
+        """Auto-build token catalog if not already built (one-time, ~25s).
+
+        Caches result in self._catalog_built to avoid repeated DB checks
+        across multiple ingest_trader_history_jbecker() calls in the same session.
+        Uses settings to locate markets_path and taxonomy_path.
+        """
+        if self._catalog_built:
+            return
+
+        from src.catalog.builder import TokenCatalogBuilder
+        from src.config.settings import get_settings
+        from pathlib import Path
+
+        settings = get_settings()
+        markets_path = getattr(settings, "jbecker_data_path", "data")
+        markets_dir = Path(markets_path) / "polymarket" / "markets"
+
+        taxonomy_path = getattr(settings, "taxonomy_path", "config/taxonomy.yaml")
+
+        builder = TokenCatalogBuilder(markets_dir, taxonomy_path)
+
+        if not builder.is_built(session):
+            logger.info(
+                "Token catalog empty — building from JBecker markets parquet (~25s)..."
+            )
+            builder.build(session)
+            logger.info("Token catalog build complete")
+
+        self._catalog_built = True
+
     def ingest_trader_history_jbecker(
         self,
         trader_address: str,
@@ -1527,6 +1560,35 @@ class IngestionPipeline:
                     session
                 )
 
+            # Step 1: Ensure catalog is built (one-time, ~25s, cached on instance)
+            self._ensure_catalog_built(session)
+
+            # Step 2: Build esports-only catalog cache for this backfill run
+            # dict[token_id -> (condition_id, question, node_path, market_type)]
+            catalog_esports_entries = (
+                session.query(
+                    TokenCatalog.token_id,
+                    TokenCatalog.condition_id,
+                    TokenCatalog.question,
+                    TokenCatalog.node_path,
+                    TokenCatalog.market_type,
+                )
+                .filter(TokenCatalog.niche_slug == "esports")
+                .all()
+            )
+            catalog_token_cache: dict[str, tuple] = {
+                row.token_id: (
+                    row.condition_id,
+                    row.question,
+                    row.node_path,
+                    row.market_type,
+                )
+                for row in catalog_esports_entries
+            }
+            logger.info(
+                f"Catalog cache loaded: {len(catalog_token_cache)} esports tokens"
+            )
+
             esports_market_ids = self._get_esports_market_ids(session)
 
             all_trades_with_category: list[TradeWithCategory] = []
@@ -1540,7 +1602,62 @@ class IngestionPipeline:
                     token_id = str(jbecker_trade["maker_asset_id"])
                 else:
                     token_id = str(jbecker_trade["taker_asset_id"])
-                if token_id != "0" and token_id not in token_to_condition:
+
+                # CATALOG PATH: esports token in catalog
+                if token_id in catalog_token_cache:
+                    condition_id, question, node_path, market_type = (
+                        catalog_token_cache[token_id]
+                    )
+
+                    # Check-first Market creation
+                    existing_market = (
+                        session.query(Market)
+                        .filter_by(condition_id=condition_id)
+                        .first()
+                    )
+                    if not existing_market:
+                        new_market = Market(
+                            condition_id=condition_id,
+                            question=question,
+                            category="eSports",
+                            active=False,
+                        )
+                        session.add(new_market)
+                        session.flush()
+                        logger.debug(
+                            f"Created Market for catalog hit: {condition_id[:8]}..."
+                        )
+
+                    # Check-first MarketClassification creation
+                    existing_cls = (
+                        session.query(MarketClassification)
+                        .filter_by(market_id=condition_id)
+                        .first()
+                    )
+                    if not existing_cls:
+                        taxonomy_node_id = None
+                        if node_path:
+                            slug_parts = node_path.replace(" ", "-").lower()
+                            slug = ".".join(p.strip("-") for p in slug_parts.split("."))
+                            node = (
+                                session.query(TaxonomyNode).filter_by(slug=slug).first()
+                            )
+                            if node:
+                                taxonomy_node_id = node.id
+
+                        cls = MarketClassification(
+                            market_id=condition_id,
+                            taxonomy_node_id=taxonomy_node_id,
+                            node_path=node_path,
+                            market_type=market_type,
+                        )
+                        session.add(cls)
+
+                    token_to_condition[token_id] = condition_id
+                    condition_to_category[condition_id] = "eSports"
+
+                elif token_id != "0" and token_id not in token_to_condition:
+                    # FALLBACK PATH: unknown token — queue for Gamma API lookup
                     unknown_tokens.add(token_id)
 
             if unknown_tokens and self.gamma_client:
@@ -2105,12 +2222,11 @@ class IngestionPipeline:
             if niches:
                 # Query markets that match any of the niche filters
                 from sqlalchemy import or_
+
                 markets = (
                     session.query(Market)
                     .filter(Market.active == True)
-                    .filter(
-                        or_(*[Market.category.ilike(f"%{n}%") for n in niches])
-                    )
+                    .filter(or_(*[Market.category.ilike(f"%{n}%") for n in niches]))
                     .all()
                 )
             else:
