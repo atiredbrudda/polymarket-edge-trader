@@ -13,23 +13,21 @@ Read this section and the AGENTS.md file in project root before starting work. R
 
 ## Review Feedback
 
-### worker/13-01 — REJECTED 2026-02-19
-
-**Reason:** `src/db/models.py` contains cosmetic reformatting of ~15 existing classes (breaking long `mapped_column()` calls, `__table_args__` tuples, and inline comments into multi-line format). Per reviewer rule #2: cosmetic reformatting = automatic rejection.
-
-**Fix required:**
-- Revert `src/db/models.py` to main
-- Re-apply ONLY the `TokenCatalog` class addition at the bottom of the file
-- No other changes to models.py are needed
-
-**Clean files (no changes needed):**
-- `src/catalog/__init__.py` — OK
-- `src/catalog/builder.py` — OK
-- `tests/test_catalog_builder.py` — OK
-
-**Re-submit as worker/13-01 (same branch, new commit) after fix.**
+(empty — no active feedback)
 
 ## Pending Review
+
+### worker/13-01 — 2026-02-19 (FIXED)
+- **Plan:** 13-01 (TokenCatalog ORM + Builder)
+- **Branch:** worker/13-01
+- **Commits:** b0d47d4..(pending)
+- **Files changed:**
+  - src/db/models.py (MODIFIED - TokenCatalog ORM model added, no cosmetic reformatting)
+  - src/catalog/__init__.py (NEW - package marker)
+  - src/catalog/builder.py (NEW - TokenCatalogBuilder class)
+  - tests/test_catalog_builder.py (NEW - 6 unit tests)
+- **Worker notes:** Fixed cosmetic reformatting issue. models.py now has only TokenCatalog class addition (+24 lines). All 6 tests pass.
+- **Previous rejection:** Cosmetic reformatting of ~15 existing classes in models.py.
 
 ### worker/phase-13-context — 2026-02-19 (docs only, auto-clear)
 - **Plan:** Phase 13 Planning/Context (docs only, no code changes)
