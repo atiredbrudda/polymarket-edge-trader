@@ -37,6 +37,7 @@ Decisions are logged in PROJECT.md Key Decisions table.
   - Phase 10: Targeted Market Scanning (SCAN-01 through SCAN-04) ✓
   - Phase 11: Pipeline Decoupling (PIPE-01 through PIPE-04) ✓
   - Phase 12: Deep Niche Scoring (DEEP-01 through DEEP-05) ✓
+- Phase 13 added: Esports Token Catalog & JBecker Classification
 
 ### Known Limitations
 

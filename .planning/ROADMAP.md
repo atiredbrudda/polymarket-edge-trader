@@ -95,3 +95,12 @@ Plans:
 | 10. Targeted Market Scanning | v1.1 | 0/2 | Planned | - |
 | 11. Pipeline Decoupling | v1.1 | 0/2 | Planned | - |
 | 12. Deep Niche Scoring | v1.1 | 0/3 | Planned | - |
+
+### Phase 13: Esports Token Catalog & JBecker Classification
+
+**Goal:** [To be planned]
+**Depends on:** Phase 12
+**Plans:** 0 plans
+
+Plans:
+- [ ] TBD (run /gsd:plan-phase 13 to break down)
