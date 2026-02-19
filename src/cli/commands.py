@@ -1149,7 +1149,15 @@ def discover(niche, closing_within, verbose):
 
         traders_discovered = 0
         with get_session(session_factory) as session:
-            markets_orm = session.query(Market).filter_by(active=True).all()
+            query = session.query(Market).filter_by(active=True)
+            if niche:
+                from sqlalchemy import or_
+                query = query.filter(
+                    or_(*[Market.category.ilike(f"%{n}%") for n in niche])
+                )
+            if end_date_max:
+                query = query.filter(Market.end_date <= end_date_max)
+            markets_orm = query.all()
             detail_markets = [
                 m for m in markets_orm if category_filter.requires_detail(m.category)
             ]
