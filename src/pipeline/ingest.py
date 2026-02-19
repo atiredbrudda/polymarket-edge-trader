@@ -2222,11 +2222,12 @@ class IngestionPipeline:
             if niches:
                 # Query markets that match any of the niche filters
                 from sqlalchemy import or_
-
                 markets = (
                     session.query(Market)
                     .filter(Market.active == True)
-                    .filter(or_(*[Market.category.ilike(f"%{n}%") for n in niches]))
+                    .filter(
+                        or_(*[Market.category.ilike(f"%{n}%") for n in niches])
+                    )
                     .all()
                 )
             else:
