@@ -32,7 +32,14 @@ from src.cli.formatters import (
     format_batch_summary,
     format_pipeline_status,
 )
-from src.db.models import Base, Trader, TaxonomyNode, Market, MarketClassification
+from src.db.models import (
+    Base,
+    Trader,
+    TaxonomyNode,
+    Market,
+    MarketClassification,
+    TokenCatalog,
+)
 from src.db.session import get_session, get_session_factory
 from src.config.settings import get_settings
 from src.api.client import PolymarketClient
@@ -1152,6 +1159,7 @@ def discover(niche, closing_within, verbose):
             query = session.query(Market).filter_by(active=True)
             if niche:
                 from sqlalchemy import or_
+
                 query = query.filter(
                     or_(*[Market.category.ilike(f"%{n}%") for n in niche])
                 )
@@ -1484,6 +1492,100 @@ def status(verbose):
     console.print(output)
     logger.info(
         f"STATUS completed: {counts['total']} total, {counts['discovered']} pending, {counts['backfilled']} backfilled"
+    )
+
+
+@cli.command("catalog-stats")
+@click.option("--verbose", "-v", is_flag=True, help="Enable debug logging")
+def catalog_stats(verbose):
+    """Show token catalog statistics.
+
+    Displays total rows, esports coverage, per-game breakdown,
+    and unclassified market count from the token_catalog table.
+
+    \b
+    Example:
+        polymarket catalog-stats
+    """
+    logger.info("CATALOG-STATS command started")
+
+    if verbose:
+        logger.remove()
+        logger.add(sys.stderr, level="DEBUG")
+
+    console = Console()
+
+    with console.status("[bold green]Querying token catalog...", spinner="dots"):
+        session_factory, _, _, _, _ = _get_dependencies()
+
+        with get_session(session_factory) as session:
+            from sqlalchemy import func
+
+            # Total rows
+            total = session.query(func.count(TokenCatalog.token_id)).scalar() or 0
+
+            # Esports rows
+            esports_total = (
+                session.query(func.count(TokenCatalog.token_id))
+                .filter(TokenCatalog.niche_slug == "esports")
+                .scalar()
+                or 0
+            )
+
+            # Unclassified rows (niche_slug IS NULL)
+            unclassified = (
+                session.query(func.count(TokenCatalog.token_id))
+                .filter(TokenCatalog.niche_slug.is_(None))
+                .scalar()
+                or 0
+            )
+
+            # Per-game breakdown from node_path (extract game segment: "eSports.CS2" -> "CS2")
+            game_rows = (
+                session.query(TokenCatalog.node_path, func.count(TokenCatalog.token_id))
+                .filter(TokenCatalog.niche_slug == "esports")
+                .filter(TokenCatalog.node_path.isnot(None))
+                .group_by(TokenCatalog.node_path)
+                .all()
+            )
+
+            # Aggregate by game (first non-root path segment)
+            game_counts: dict[str, int] = {}
+            for node_path, count in game_rows:
+                if node_path:
+                    parts = node_path.split(".")
+                    game = parts[1] if len(parts) >= 2 else node_path
+                    game_counts[game] = game_counts.get(game, 0) + count
+
+    # Display summary stats
+    from rich.table import Table
+
+    console.print(f"\n[bold]Token Catalog Statistics[/bold]")
+    console.print(f"  Total rows:        [cyan]{total:,}[/cyan]")
+    console.print(f"  Esports rows:      [green]{esports_total:,}[/green]")
+    console.print(f"  Unclassified rows: [yellow]{unclassified:,}[/yellow]")
+
+    if total == 0:
+        console.print(
+            "\n[dim]Catalog is empty. Run 'polymarket backfill' to auto-build it.[/dim]"
+        )
+        logger.info("CATALOG-STATS completed: catalog empty")
+        return
+
+    if game_counts:
+        console.print("\n[bold]Esports Coverage by Game[/bold]")
+        table = Table(show_header=True, header_style="bold magenta")
+        table.add_column("Game", style="cyan", min_width=20)
+        table.add_column("Token Rows", justify="right")
+
+        for game, count in sorted(game_counts.items(), key=lambda x: -x[1]):
+            table.add_row(game, f"{count:,}")
+
+        console.print(table)
+
+    logger.info(
+        f"CATALOG-STATS completed: {total} total, {esports_total} esports, "
+        f"{unclassified} unclassified, {len(game_counts)} games"
     )
 
 
