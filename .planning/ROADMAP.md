@@ -98,9 +98,11 @@ Plans:
 
 ### Phase 13: Esports Token Catalog & JBecker Classification
 
-**Goal:** [To be planned]
+**Goal:** Build a token catalog (token_id → taxonomy) from JBecker markets parquet and use it to classify JBecker trades for known traders during backfill, enabling esports trades to flow through the existing scoring pipeline.
 **Depends on:** Phase 12
-**Plans:** 0 plans
+**Plans:** 3 plans
 
 Plans:
-- [ ] TBD (run /gsd:plan-phase 13 to break down)
+- [ ] 13-01-PLAN.md — TokenCatalog ORM model + TokenCatalogBuilder (DuckDB scan + PatternMatcher classification)
+- [ ] 13-02-PLAN.md — Backfill integration: catalog auto-build trigger + catalog lookup in ingest_trader_history_jbecker
+- [ ] 13-03-PLAN.md — catalog-stats CLI command showing total rows, esports coverage, and per-game breakdown
