@@ -1159,7 +1159,6 @@ def discover(niche, closing_within, verbose):
             query = session.query(Market).filter_by(active=True)
             if niche:
                 from sqlalchemy import or_
-
                 query = query.filter(
                     or_(*[Market.category.ilike(f"%{n}%") for n in niche])
                 )
