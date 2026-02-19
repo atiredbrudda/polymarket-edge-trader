@@ -17,7 +17,24 @@ Read this section and the AGENTS.md file in project root before starting work. R
 
 ## Pending Review
 
-(empty — no pending reviews)
+### worker/phase-13-context — 2026-02-19
+- **Plan:** Phase 13 Planning/Context (docs only, no code changes)
+- **Branch:** worker/phase-13-context
+- **Commits:** b3a5afe..5eaeb28
+- **Files changed:**
+  - .planning/ROADMAP.md (MODIFIED - phase 13 section)
+  - .planning/phases/13-esports-token-catalog-jbecker-classification/.gitkeep (NEW)
+  - .planning/phases/13-esports-token-catalog-jbecker-classification/13-01-PLAN.md (NEW)
+  - .planning/phases/13-esports-token-catalog-jbecker-classification/13-02-PLAN.md (NEW)
+  - .planning/phases/13-esports-token-catalog-jbecker-classification/13-03-PLAN.md (NEW)
+  - .planning/phases/13-esports-token-catalog-jbecker-classification/13-CONTEXT.md (NEW)
+  - .planning/phases/13-esports-token-catalog-jbecker-classification/13-RESEARCH.md (NEW)
+- **Worker notes:** Docs-only branch containing Phase 13 planning artifacts. No code changes. Ready for execution after merge.
+- **Decisions made:** 3 plans (13-01, 13-02, 13-03) in 2 waves. Wave 1: catalog model + builder. Wave 2: backfill integration + CLI stats command.
+
+## Re-Review
+
+(empty — no re-reviews)
 
 ## Cleared
 
