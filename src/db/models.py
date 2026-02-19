@@ -342,3 +342,27 @@ class BlockchainSyncState(Base):
     total_trades_found: Mapped[int] = mapped_column(default=0, nullable=False)
 
     __table_args__ = (Index("ix_sync_state_trader", "trader_address", unique=True),)
+
+
+class TokenCatalog(Base):
+    """Token-to-taxonomy mapping built from JBecker markets parquet.
+
+    Maps each JBecker clob_token_id to its market taxonomy classification.
+    Used during JBecker backfill to classify trades without API calls.
+    All markets are stored (not just esports) for future niche expansion.
+    """
+
+    __tablename__ = "token_catalog"
+
+    token_id: Mapped[str] = mapped_column(String(100), primary_key=True)
+    condition_id: Mapped[str] = mapped_column(String(100), nullable=False)
+    question: Mapped[str] = mapped_column(String(500), nullable=False)
+    niche_slug: Mapped[str | None] = mapped_column(String(50), nullable=True)
+    node_path: Mapped[str | None] = mapped_column(String(300), nullable=True)
+    depth: Mapped[int | None] = mapped_column(nullable=True)
+    market_type: Mapped[str | None] = mapped_column(String(10), nullable=True)
+
+    __table_args__ = (
+        Index("ix_catalog_condition", "condition_id"),
+        Index("ix_catalog_niche", "niche_slug"),
+    )

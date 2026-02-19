@@ -17,7 +17,19 @@ Read this section and the AGENTS.md file in project root before starting work. R
 
 ## Pending Review
 
-### worker/phase-13-context — 2026-02-19
+### worker/13-01 — 2026-02-19 (FIXED)
+- **Plan:** 13-01 (TokenCatalog ORM + Builder)
+- **Branch:** worker/13-01
+- **Commits:** b0d47d4..(pending)
+- **Files changed:**
+  - src/db/models.py (MODIFIED - TokenCatalog ORM model added, no cosmetic reformatting)
+  - src/catalog/__init__.py (NEW - package marker)
+  - src/catalog/builder.py (NEW - TokenCatalogBuilder class)
+  - tests/test_catalog_builder.py (NEW - 6 unit tests)
+- **Worker notes:** Fixed cosmetic reformatting issue. models.py now has only TokenCatalog class addition (+24 lines). All 6 tests pass.
+- **Previous rejection:** Cosmetic reformatting of ~15 existing classes in models.py.
+
+### worker/phase-13-context — 2026-02-19 (docs only, auto-clear)
 - **Plan:** Phase 13 Planning/Context (docs only, no code changes)
 - **Branch:** worker/phase-13-context
 - **Commits:** b3a5afe..5eaeb28
