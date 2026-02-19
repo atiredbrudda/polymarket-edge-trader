@@ -17,38 +17,29 @@ Read this section and the AGENTS.md file in project root before starting work. R
 
 ## Pending Review
 
-### worker/13-01 — 2026-02-19 (FIXED)
-- **Plan:** 13-01 (TokenCatalog ORM + Builder)
-- **Branch:** worker/13-01
-- **Commits:** b0d47d4..(pending)
-- **Files changed:**
-  - src/db/models.py (MODIFIED - TokenCatalog ORM model added, no cosmetic reformatting)
-  - src/catalog/__init__.py (NEW - package marker)
-  - src/catalog/builder.py (NEW - TokenCatalogBuilder class)
-  - tests/test_catalog_builder.py (NEW - 6 unit tests)
-- **Worker notes:** Fixed cosmetic reformatting issue. models.py now has only TokenCatalog class addition (+24 lines). All 6 tests pass.
-- **Previous rejection:** Cosmetic reformatting of ~15 existing classes in models.py.
-
-### worker/phase-13-context — 2026-02-19 (docs only, auto-clear)
-- **Plan:** Phase 13 Planning/Context (docs only, no code changes)
-- **Branch:** worker/phase-13-context
-- **Commits:** b3a5afe..5eaeb28
-- **Files changed:**
-  - .planning/ROADMAP.md (MODIFIED - phase 13 section)
-  - .planning/phases/13-esports-token-catalog-jbecker-classification/.gitkeep (NEW)
-  - .planning/phases/13-esports-token-catalog-jbecker-classification/13-01-PLAN.md (NEW)
-  - .planning/phases/13-esports-token-catalog-jbecker-classification/13-02-PLAN.md (NEW)
-  - .planning/phases/13-esports-token-catalog-jbecker-classification/13-03-PLAN.md (NEW)
-  - .planning/phases/13-esports-token-catalog-jbecker-classification/13-CONTEXT.md (NEW)
-  - .planning/phases/13-esports-token-catalog-jbecker-classification/13-RESEARCH.md (NEW)
-- **Worker notes:** Docs-only branch containing Phase 13 planning artifacts. No code changes. Ready for execution after merge.
-- **Decisions made:** 3 plans (13-01, 13-02, 13-03) in 2 waves. Wave 1: catalog model + builder. Wave 2: backfill integration + CLI stats command.
+(empty — no pending reviews)
 
 ## Re-Review
 
 (empty — no re-reviews)
 
 ## Cleared
+
+### worker/13-01 — 2026-02-19
+- **Branch:** worker/13-01
+- **Cleared by:** Sonnet 4.6
+- **Reviewer fix:** Rejected first submission for cosmetic reformatting of models.py. Worker resubmitted with clean fix.
+- **Files in scope:**
+  - src/db/models.py (TokenCatalog class addition only, +24 lines)
+  - src/catalog/__init__.py (NEW)
+  - src/catalog/builder.py (NEW - TokenCatalogBuilder)
+  - tests/test_catalog_builder.py (NEW - 6 unit tests)
+- **Notes:** Clean second submission. TokenCatalog schema matches CONTEXT.md spec exactly (7 columns, 2 indexes). Builder uses DuckDB for parquet scan, PatternMatcher for classification, single-transaction INSERT OR IGNORE for idempotency. Zero token IDs skipped correctly. 610 passed, 0 failed.
+
+### worker/phase-13-context — 2026-02-19
+- **Branch:** worker/phase-13-context
+- **Cleared by:** Sonnet 4.6
+- **Notes:** Docs-only. Phase 13 context, research, and 3 plans (2 waves). No issues.
 
 ### worker/gamma-batch-token-lookup — 2026-02-18
 - **Branch:** worker/gamma-batch-token-lookup
