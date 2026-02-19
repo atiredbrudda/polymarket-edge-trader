@@ -13,23 +13,25 @@ Read this section and the AGENTS.md file in project root before starting work. R
 
 ## Review Feedback
 
-(empty — no active feedback)
+### worker/13-01 — REJECTED 2026-02-19
+
+**Reason:** `src/db/models.py` contains cosmetic reformatting of ~15 existing classes (breaking long `mapped_column()` calls, `__table_args__` tuples, and inline comments into multi-line format). Per reviewer rule #2: cosmetic reformatting = automatic rejection.
+
+**Fix required:**
+- Revert `src/db/models.py` to main
+- Re-apply ONLY the `TokenCatalog` class addition at the bottom of the file
+- No other changes to models.py are needed
+
+**Clean files (no changes needed):**
+- `src/catalog/__init__.py` — OK
+- `src/catalog/builder.py` — OK
+- `tests/test_catalog_builder.py` — OK
+
+**Re-submit as worker/13-01 (same branch, new commit) after fix.**
 
 ## Pending Review
 
-### worker/13-01 — 2026-02-19
-- **Plan:** 13-01 (TokenCatalog ORM + Builder)
-- **Branch:** worker/13-01
-- **Commits:** e8df572
-- **Files changed:**
-  - src/db/models.py (MODIFIED - TokenCatalog ORM model added)
-  - src/catalog/__init__.py (NEW - package marker)
-  - src/catalog/builder.py (NEW - TokenCatalogBuilder class)
-  - tests/test_catalog_builder.py (NEW - 6 unit tests)
-- **Worker notes:** Clean implementation following plan spec. TokenCatalog has 7 columns + 2 indexes. Builder uses DuckDB for parquet scan, PatternMatcher for classification, INSERT OR IGNORE for idempotency. All 6 tests pass. No test regressions (610 passed total).
-- **Decisions made:** Extracted _scan_parquet() method for testability as suggested in plan.
-
-### worker/phase-13-context — 2026-02-19
+### worker/phase-13-context — 2026-02-19 (docs only, auto-clear)
 - **Plan:** Phase 13 Planning/Context (docs only, no code changes)
 - **Branch:** worker/phase-13-context
 - **Commits:** b3a5afe..5eaeb28
