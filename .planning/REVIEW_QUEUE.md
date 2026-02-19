@@ -17,7 +17,15 @@ Read this section and the AGENTS.md file in project root before starting work. R
 
 ## Pending Review
 
-(empty — no pending reviews)
+### worker/13-02 — 2026-02-19
+- **Plan:** 13-02 (Backfill Integration - Catalog Auto-Build + Lookup)
+- **Branch:** worker/13-02
+- **Commits:** 1ba57fc
+- **Files changed:**
+  - src/pipeline/ingest.py (MODIFIED - catalog integration, +120 lines functional)
+  - tests/test_catalog_integration.py (NEW - 5 integration tests)
+- **Worker notes:** Clean implementation following plan spec. Added `_catalog_built` flag, `_ensure_catalog_built()` method, catalog_token_cache in jbecker backfill. Catalog hits create Market + MarketClassification with check-first pattern. Non-catalog tokens fall through to existing Gamma API path. All 11 catalog tests pass.
+- **Decisions made:** Used `jbecker_data_path` and `taxonomy_path` from existing settings. Placed `_ensure_catalog_built()` after `_build_token_cache()` for logical grouping.
 
 ## Re-Review
 
