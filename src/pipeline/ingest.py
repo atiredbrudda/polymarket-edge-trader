@@ -2103,12 +2103,14 @@ class IngestionPipeline:
             # Get markets that match the niche filter (not all active markets)
             # This ensures we only discover traders from filtered markets
             if niches:
-                # Query markets that match the niche filter
-                niche_filter = niches[0].lower()
+                # Query markets that match any of the niche filters
+                from sqlalchemy import or_
                 markets = (
                     session.query(Market)
                     .filter(Market.active == True)
-                    .filter(Market.category.ilike(f"%{niche_filter}%"))
+                    .filter(
+                        or_(*[Market.category.ilike(f"%{n}%") for n in niches])
+                    )
                     .all()
                 )
             else:
