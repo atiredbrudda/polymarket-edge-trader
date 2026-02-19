@@ -17,7 +17,15 @@ Read this section and the AGENTS.md file in project root before starting work. R
 
 ## Pending Review
 
-(empty — no pending reviews)
+### worker/13-03 — 2026-02-19
+- **Plan:** 13-03 (catalog-stats CLI Command)
+- **Branch:** worker/13-03
+- **Commits:** 51bf6e5
+- **Files changed:**
+  - src/cli/commands.py (MODIFIED - TokenCatalog import + catalog-stats command, +104 lines)
+  - tests/test_cli_catalog.py (NEW - 3 CLI tests)
+- **Worker notes:** Clean implementation following plan spec. catalog-stats shows total/esports/unclassified counts, per-game breakdown, handles empty catalog gracefully. All 3 tests pass + 14 total CLI tests pass.
+- **Decisions made:** Used Rich Table for game breakdown display. Game extracted from node_path segment 1 (e.g., "eSports.CS2.Tournament" -> "CS2").
 
 ## Re-Review
 
