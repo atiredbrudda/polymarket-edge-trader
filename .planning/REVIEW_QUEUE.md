@@ -17,6 +17,18 @@ Read this section and the AGENTS.md file in project root before starting work. R
 
 ## Pending Review
 
+### worker/13-01 — 2026-02-19
+- **Plan:** 13-01 (TokenCatalog ORM + Builder)
+- **Branch:** worker/13-01
+- **Commits:** e8df572
+- **Files changed:**
+  - src/db/models.py (MODIFIED - TokenCatalog ORM model added)
+  - src/catalog/__init__.py (NEW - package marker)
+  - src/catalog/builder.py (NEW - TokenCatalogBuilder class)
+  - tests/test_catalog_builder.py (NEW - 6 unit tests)
+- **Worker notes:** Clean implementation following plan spec. TokenCatalog has 7 columns + 2 indexes. Builder uses DuckDB for parquet scan, PatternMatcher for classification, INSERT OR IGNORE for idempotency. All 6 tests pass. No test regressions (610 passed total).
+- **Decisions made:** Extracted _scan_parquet() method for testability as suggested in plan.
+
 ### worker/phase-13-context — 2026-02-19
 - **Plan:** Phase 13 Planning/Context (docs only, no code changes)
 - **Branch:** worker/phase-13-context
