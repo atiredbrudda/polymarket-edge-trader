@@ -25,19 +25,25 @@ Surface where smart money is moving in niche prediction markets so the user can 
 - 4-tier cost-optimized data ingestion (JBecker/API/Graph/Blockchain) — v1.0
 - Offline trader research via JBecker dataset CLI — v1.0
 - Architecture extensible to new categories via taxonomy definitions — v1.0
+- ✓ Configurable niche scanning with `--niche` and `--closing-within` CLI filters (SCAN-01–04) — v1.1
+- ✓ Decoupled `discover` / `backfill` / `status` commands with per-trader state tracking (PIPE-01–04) — v1.1
+- ✓ Multi-depth expertise scoring at game, tournament, and team levels (DEEP-01–05) — v1.1
+- ✓ Hidden specialist detection (high sub-niche concentration despite average game score) — v1.1
+- ✓ JBecker token catalog (817k rows, token_id → taxonomy without Gamma API) — v1.1
+- ✓ Pipeline decomposed into `score`, `detect`, `alert` + block_number timestamp resolution — v1.1
 
 ### Active
 
-See `.planning/REQUIREMENTS.md` for v1.1 requirements.
+See v1.2 requirements (to be defined by `/gsd:new-milestone`).
 
-## Current Milestone: v1.1 Targeted Scanning & Deep Niche Scoring
+**Known gaps carried into v1.2:**
+- Market outcome resolution missing — `markets.outcome=NULL` prevents position PnL scoring
+- Token catalog classification only reaches eSports root (node_path=NULL); deep classification via Events API needed
+- Scoring produces no leaderboard results end-to-end until resolution is wired
 
-**Goal:** Make the pipeline practical for daily use by narrowing market scanning to relevant niches with time filters, decoupling fast discovery from slow backfill, and extending scoring to tournament/team depth for the "Chelsea trader" use case.
+## Current Milestone: v1.2 (Planning)
 
-**Target features:**
-- Configurable niche scanning with category + time-to-close filters as CLI inputs
-- Decoupled discovery/backfill pipeline (separate address harvesting from history ingestion)
-- Deep niche scoring at tournament and team level (below game-level)
+**Goal:** TBD — likely: market outcome resolution via Events API, deep classification beyond eSports root, working end-to-end scoring on JBecker data.
 
 ### Out of Scope
 
@@ -50,13 +56,14 @@ See `.planning/REQUIREMENTS.md` for v1.1 requirements.
 ## Context
 
 - **Platform:** Polymarket — prediction market on Polygon blockchain. Uses a CLOB (Central Limit Order Book) API for trading data. Traders identified by wallet addresses.
-- **Current state:** v1.0 shipped. 26,306 LOC Python, 509+ tests. Full pipeline operational: ingestion → classification → evaluation → scoring → signal detection → alerting → CLI.
-- **Tech stack:** Python 3.12, SQLAlchemy 2.0, Click, Rich, DuckDB, web3.py, py-clob-client, loguru, tenacity.
+- **Current state:** v1.1 shipped. ~32,065 LOC Python (15,400 src + 16,665 tests). Full pipeline operational with targeted scanning, decoupled backfill, and multi-depth scoring. JBecker token catalog bridges 817k trade tokens to taxonomy.
+- **Tech stack:** Python 3.12, SQLAlchemy 2.0, Click, Rich, DuckDB, web3.py, py-clob-client, loguru, tenacity, httpx.
 - **Discovery approach:** Event-first: start from active events, find who's trading them, then evaluate those traders' histories. Naturally focuses on active participants.
 - **Niche hypothesis:** Traders who specialize deeply in a narrow category likely have domain knowledge that generalists don't. Their convergence on a position is a stronger signal than broad-market consensus.
 - **Signal philosophy:** The output is intelligence, not instruction. Alerts are awareness triggers, not trade recommendations.
-- **Known limitation:** Market scanning currently fetches ALL markets then filters. Needs niche + time-to-close filtering for practical use.
-- **Known limitation:** Scoring operates at game level only. Deeper niche detection (tournament/team level) needed for the "Chelsea trader" use case.
+- **Known limitation:** Market outcome resolution missing — `markets.outcome=NULL` for all 117k markets. Positions cannot be resolved for PnL scoring until resolution data is loaded.
+- **Known limitation:** Token catalog classification only reaches eSports root (node_path=NULL). Deep classification via Gamma Events API event tags needed.
+- **Data source insight:** Gamma Events API (`gamma-api.polymarket.com/events`) returns ~8,500 closed esports events with nested markets, `outcomePrices`, `clobTokenIds`, and multi-level `tags` (game/tournament/team slugs). One-time ~30s download, ~10MB. This is the authoritative resolution + deep-classification source for v1.2.
 
 ## Constraints
 
@@ -78,6 +85,10 @@ See `.planning/REQUIREMENTS.md` for v1.1 requirements.
 | 4-tier data ingestion hierarchy | JBecker (free) → API (free) → Graph (paid) → Blockchain (slow) | Good — minimizes costs |
 | Bonus-only consistency multiplier | Never penalize, only reward consistent traders | Good — conservative scoring |
 | Append-only score history | INSERT-only for ExpertiseScore and SignalSnapshot | Good — enables trend analysis |
+| Token catalog via Gamma Events API | Originally planned as DuckDB scan of JBecker parquet; rewritten to Gamma API tag-filter (tag_id=64) | ⚠️ Revisit — produces niche_slug='esports' only, no game/tournament/team depth |
+| Savepoint idempotent inserts | JBecker backfill uses SAVEPOINT per insert to handle duplicates cleanly | Good — no IntegrityError crashes |
+| Sweep decomposed into score/detect/alert | Monolithic sweep split into three composable commands | Good — enables partial runs |
+| Events API for market resolution | Gamma `/events` endpoint returns outcomePrices + clobTokenIds — authoritative resolution source | Pending (v1.2) |
 
 ---
-*Last updated: 2026-02-13 after v1.1 milestone started*
+*Last updated: 2026-02-21 after v1.1 milestone*
