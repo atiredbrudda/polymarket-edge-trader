@@ -48,20 +48,20 @@ Which phases cover which requirements. Updated during roadmap creation.
 
 | Requirement | Phase | Status |
 |-------------|-------|--------|
-| GAMMA-01 | — | Pending |
-| GAMMA-02 | — | Pending |
-| RESOL-01 | — | Pending |
-| RESOL-02 | — | Pending |
-| CLASS-01 | — | Pending |
-| CLASS-02 | — | Pending |
-| E2E-01 | — | Pending |
-| E2E-02 | — | Pending |
+| GAMMA-01 | Phase 15 | Pending |
+| GAMMA-02 | Phase 15 | Pending |
+| RESOL-01 | Phase 16 | Pending |
+| RESOL-02 | Phase 16 | Pending |
+| CLASS-01 | Phase 17 | Pending |
+| CLASS-02 | Phase 17 | Pending |
+| E2E-01 | Phase 18 | Pending |
+| E2E-02 | Phase 18 | Pending |
 
 **Coverage:**
 - v1.2 requirements: 8 total
-- Mapped to phases: 0
-- Unmapped: 8 ⚠️ (roadmap pending)
+- Mapped to phases: 8
+- Unmapped: 0 ✓
 
 ---
 *Requirements defined: 2026-02-21*
-*Last updated: 2026-02-21 after initial definition*
+*Last updated: 2026-02-21 — traceability filled after roadmap creation*
