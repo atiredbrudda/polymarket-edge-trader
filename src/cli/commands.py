@@ -1197,6 +1197,68 @@ def discover(niche, closing_within, verbose):
     )
 
 
+def _build_dynamic_batches(
+    trader_addresses: list[str],
+    files_per_trader: dict[str, list[str]],
+    max_files: int,
+    max_traders: int,
+) -> list[list[str]]:
+    """Group traders into variable-size batches bounded by total unique parquet file count.
+
+    Ensures each batch's DuckDB query opens at most max_files files simultaneously,
+    keeping memory usage bounded regardless of individual trader trade volume.
+
+    Whale traders (file count > max_files) get solo batches — their files are
+    then sub-batched inside query_trader_history_subbatched().
+
+    Args:
+        trader_addresses: Ordered list of addresses to batch.
+        files_per_trader: {normalized_address: [file_paths]} from lookup_per_trader().
+        max_files: Max unique parquet files per batch.
+        max_traders: Secondary cap on batch size (for traders with few/no files).
+
+    Returns:
+        List of batches, each batch being a list of trader addresses.
+    """
+
+    def _norm(addr: str) -> str:
+        a = addr.lower()
+        return a if a.startswith("0x") else f"0x{a}"
+
+    batches: list[list[str]] = []
+    current_batch: list[str] = []
+    current_files: set[str] = set()
+
+    for addr in trader_addresses:
+        trader_files = set(files_per_trader.get(_norm(addr), []))
+
+        if len(trader_files) > max_files:
+            # Whale: flush current batch first, then give whale its own solo batch
+            if current_batch:
+                batches.append(current_batch)
+                current_batch = []
+                current_files = set()
+            batches.append([addr])
+            continue
+
+        combined = current_files | trader_files
+        at_file_limit = len(combined) > max_files and current_batch
+        at_trader_limit = len(current_batch) >= max_traders
+
+        if (at_file_limit or at_trader_limit) and current_batch:
+            batches.append(current_batch)
+            current_batch = [addr]
+            current_files = trader_files
+        else:
+            current_batch.append(addr)
+            current_files = combined
+
+    if current_batch:
+        batches.append(current_batch)
+
+    return batches
+
+
 @cli.command()
 @click.argument("address", required=False, default=None)
 @click.option(
@@ -1296,28 +1358,6 @@ def backfill(address, limit, verbose):
         success_count = 0
         error_count = 0
 
-        # Batch fetch JBecker trades for all traders (major speedup - scans parquet once)
-        prefetched_by_address: dict[str, list[dict]] = {}
-        if jbecker_client and jbecker_client.is_available() and trader_addresses:
-            console.print(
-                f"[dim]Batch fetching JBecker trades for {len(trader_addresses)} traders...[/dim]"
-            )
-            logger.info(
-                f"Batch fetching JBecker trades for {len(trader_addresses)} traders..."
-            )
-            try:
-                prefetched_by_address = jbecker_client.batch_query_traders_history(
-                    trader_addresses
-                )
-                console.print(
-                    f"[dim]Prefetched trades for {len(prefetched_by_address)} traders[/dim]"
-                )
-                logger.info(
-                    f"Prefetched trades for {len(prefetched_by_address)} traders"
-                )
-            except Exception as e:
-                logger.warning(f"Batch JBecker query failed: {e}")
-
         # Build token cache once for all traders (avoids N per-trader DB scans)
         token_cache = None
         if jbecker_client and jbecker_client.is_available():
@@ -1327,25 +1367,113 @@ def backfill(address, limit, verbose):
                 f"Built token cache: {len(token_cache[0])} tokens, {len(token_cache[1])} conditions"
             )
 
+        use_jbecker_batch = jbecker_client and jbecker_client.is_available()
+
+        # Build memory-aware batches bounded by parquet file count.
+        # Each batch opens at most MAX_FILES_PER_BATCH files in DuckDB simultaneously.
+        # Whale traders (file count > limit) get solo batches with internal sub-batching.
+        MAX_FILES_PER_BATCH = 1500
+        MAX_TRADERS_PER_BATCH = 100
+
+        def _norm(addr: str) -> str:
+            a = addr.lower()
+            return a if a.startswith("0x") else f"0x{a}"
+
+        if use_jbecker_batch and jbecker_client._index.is_built:
+            console.print(
+                f"[dim]Scanning file index for {len(trader_addresses)} traders...[/dim]"
+            )
+            files_per_trader = jbecker_client._index.lookup_per_trader(trader_addresses)
+            batches = _build_dynamic_batches(
+                trader_addresses, files_per_trader, MAX_FILES_PER_BATCH, MAX_TRADERS_PER_BATCH
+            )
+            whale_count = sum(
+                1 for addr in trader_addresses
+                if len(files_per_trader.get(_norm(addr), [])) > MAX_FILES_PER_BATCH
+            )
+            console.print(
+                f"[dim]{len(batches)} batches built "
+                f"({whale_count} whale traders will be sub-batched)[/dim]"
+            )
+            logger.info(
+                f"Dynamic batching: {len(batches)} batches, {whale_count} whales, "
+                f"max {MAX_FILES_PER_BATCH} files/batch"
+            )
+        else:
+            files_per_trader = {}
+            batches = [
+                trader_addresses[i : i + MAX_TRADERS_PER_BATCH]
+                for i in range(0, len(trader_addresses), MAX_TRADERS_PER_BATCH)
+            ]
+            whale_count = 0
+            console.print(f"[dim]{len(batches)} fixed batches (no file index)[/dim]")
+
+        num_batches = len(batches)
+
         with console.status(
             "[bold green]Backfilling traders...", spinner="dots"
         ) as status:
-            for idx, addr in enumerate(trader_addresses, 1):
-                status.update(
-                    f"[bold green]Backfilling {idx}/{len(trader_addresses)}: {addr[:10]}..."
-                )
-                try:
-                    prefetched = prefetched_by_address.get(addr.lower())
-                    pipeline.ingest_trader_history_hybrid(
-                        addr,
-                        prefetched_jbecker_trades=prefetched,
-                        token_cache=token_cache,
+            global_idx = 0
+            for batch_num, batch in enumerate(batches, 1):
+                prefetched_by_address: dict[str, list[dict]] = {}
+
+                if use_jbecker_batch:
+                    is_solo_whale = (
+                        len(batch) == 1
+                        and jbecker_client._index.is_built
+                        and len(files_per_trader.get(_norm(batch[0]), [])) > MAX_FILES_PER_BATCH
                     )
-                    success_count += 1
-                except Exception as e:
-                    logger.warning(f"Backfill failed for {addr[:10]}...: {e}")
-                    error_count += 1
-                    continue
+                    label = " — whale sub-batch" if is_solo_whale else ""
+                    status.update(
+                        f"[bold green]JBecker fetch: batch {batch_num}/{num_batches} "
+                        f"({len(batch)} traders{label})..."
+                    )
+                    logger.info(
+                        f"JBecker batch {batch_num}/{num_batches}: "
+                        f"{len(batch)} traders{label}"
+                    )
+                    try:
+                        if is_solo_whale:
+                            addr = batch[0]
+                            trades = jbecker_client.query_trader_history_subbatched(
+                                addr, max_files_per_batch=MAX_FILES_PER_BATCH
+                            )
+                            prefetched_by_address = {addr.lower(): trades}
+                            logger.info(
+                                f"Whale prefetch: {len(trades)} trades for {addr[:10]}..."
+                            )
+                        else:
+                            prefetched_by_address = jbecker_client.batch_query_traders_history(
+                                batch
+                            )
+                            logger.info(
+                                f"Prefetched {len(prefetched_by_address)} traders "
+                                f"(batch {batch_num}/{num_batches})"
+                            )
+                    except Exception as e:
+                        logger.warning(f"JBecker batch {batch_num} failed: {e}")
+
+                for addr in batch:
+                    global_idx += 1
+                    status.update(
+                        f"[bold green]Backfilling {global_idx}/{len(trader_addresses)}: "
+                        f"{addr[:10]}... (batch {batch_num}/{num_batches})"
+                    )
+                    try:
+                        prefetched = prefetched_by_address.get(addr.lower())
+                        pipeline.ingest_trader_history_hybrid(
+                            addr,
+                            prefetched_jbecker_trades=prefetched,
+                            token_cache=token_cache,
+                        )
+                        success_count += 1
+                    except Exception as e:
+                        logger.warning(f"Backfill failed for {addr[:10]}...: {e}")
+                        error_count += 1
+                        continue
+
+                # Free memory before next batch
+                prefetched_by_address.clear()
 
         processing_time = time.time() - start_time
 
@@ -1586,6 +1714,79 @@ def catalog_stats(verbose):
         f"CATALOG-STATS completed: {total} total, {esports_total} esports, "
         f"{unclassified} unclassified, {len(game_counts)} games"
     )
+
+
+@cli.command("build-index")
+@click.option(
+    "--batch-size",
+    default=100,
+    type=int,
+    show_default=True,
+    help="Parquet files per DuckDB query during build (~120MB per batch at default).",
+)
+@click.option("--verbose", "-v", is_flag=True, help="Enable debug logging")
+def build_index(batch_size, verbose):
+    """Build trader-to-file index for fast JBecker queries.
+
+    Scans all parquet files once and records which files each trader appears in.
+    After building, backfill queries scan only the relevant 5-50 files per trader
+    instead of all 40,000 — eliminating the OOM issue on 8GB machines.
+
+    Run this once before using 'polymarket backfill'. Takes ~20 minutes.
+
+    \b
+    Example:
+        polymarket build-index
+        polymarket build-index --batch-size 50   # more conservative for low RAM
+    """
+    if verbose:
+        logger.remove()
+        logger.add(sys.stderr, level="DEBUG")
+
+    import time
+    from src.datasources.jbecker_index import TraderFileIndex
+    from src.config.settings import get_settings
+
+    console = Console()
+    settings = get_settings()
+
+    index = TraderFileIndex(settings.jbecker_data_path)
+
+    if index.is_built:
+        stats = index.stats()
+        console.print(
+            f"[yellow]Index already exists:[/yellow] "
+            f"{stats['unique_traders']:,} traders, "
+            f"{stats['unique_files']:,} files, "
+            f"{stats['size_mb']}MB"
+        )
+        if not click.confirm("Rebuild from scratch?"):
+            return
+        index.index_path.unlink()
+
+    console.print(
+        f"[bold blue]Building JBecker trader index[/bold blue] "
+        f"(batch_size={batch_size}, ~20 min)..."
+    )
+    console.print("[dim]Progress is logged to stderr. This runs once.[/dim]")
+
+    start = time.time()
+    try:
+        total = index.build(batch_size=batch_size)
+        elapsed = time.time() - start
+        stats = index.stats()
+        console.print(f"\n[bold green]Index built[/bold green] ({elapsed / 60:.1f}m)")
+        console.print(f"  Traders indexed: [green]{stats['unique_traders']:,}[/green]")
+        console.print(f"  Files covered:   [green]{stats['unique_files']:,}[/green]")
+        console.print(f"  Total pairs:     [green]{total:,}[/green]")
+        console.print(f"  Index size:      [green]{stats['size_mb']}MB[/green]")
+        console.print(
+            "\n[dim]Backfill will now scan only relevant files per trader.[/dim]"
+        )
+    except Exception as e:
+        console.print(f"[red]Index build failed: {e}[/red]")
+        logger.error(f"build-index failed: {e}")
+        raise
 
 
 if __name__ == "__main__":
