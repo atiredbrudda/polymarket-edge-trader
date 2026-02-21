@@ -17,7 +17,15 @@ Read this section and the AGENTS.md file in project root before starting work. R
 
 ## Pending Review
 
-(empty — no pending reviews)
+### worker/14-02 — 2026-02-21
+- **Plan:** 14-02 (Pipeline Decomposition)
+- **Branch:** worker/14-02
+- **Commits:** 1eb75f4
+- **Files changed:**
+  - src/cli/commands.py (score, detect, alert commands + rewritten sweep orchestrator)
+  - .planning/phases/14-timestamp-fix-pipeline-decomposition/14-02-SUMMARY.md (NEW)
+- **Worker notes:** Decomposed sweep into composable stages. Added score/detect/alert as independent commands. Sweep now runs inline stages instead of calling run_sweep() from scheduler. Added --with-alerts flag (opt-in).
+- **Decisions made:** Alerts are opt-in for sweep (--with-alerts flag). `detect` command computes signals; `signals` command views them (different purposes).
 
 ## Re-Review
 
