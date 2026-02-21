@@ -1,9 +1,41 @@
 """Converters for transforming JBecker dataset data to internal formats."""
 
-from datetime import datetime
+from datetime import datetime, timezone
 from decimal import Decimal
 
 from src.api.models import TradeResponse
+
+
+_POLYGON_BLOCK_ANCHORS: list[tuple[int, int]] = [
+    (40_000_000, 1678035645),
+    (50_000_000, 1700108689),
+    (60_000_000, 1722368382),
+    (70_000_000, 1744013119),
+    (80_000_000, 1765105043),
+]
+
+
+def block_number_to_timestamp(block_number: int) -> datetime:
+    anchors = _POLYGON_BLOCK_ANCHORS
+
+    for i in range(len(anchors) - 1):
+        b0, t0 = anchors[i]
+        b1, t1 = anchors[i + 1]
+        if b0 <= block_number <= b1:
+            frac = (block_number - b0) / (b1 - b0)
+            unix_ts = t0 + frac * (t1 - t0)
+            return datetime.fromtimestamp(unix_ts, tz=timezone.utc).replace(tzinfo=None)
+
+    if block_number < anchors[0][0]:
+        b0, t0 = anchors[0]
+        b1, t1 = anchors[1]
+    else:
+        b0, t0 = anchors[-2]
+        b1, t1 = anchors[-1]
+
+    frac = (block_number - b0) / (b1 - b0)
+    unix_ts = t0 + frac * (t1 - t0)
+    return datetime.fromtimestamp(unix_ts, tz=timezone.utc).replace(tzinfo=None)
 
 
 def jbecker_trade_to_api_response(
@@ -50,24 +82,29 @@ def jbecker_trade_to_api_response(
     if price <= 0 or price >= 1:
         price = Decimal("0.5")
 
-    ts = jbecker_trade.get("timestamp")
-    if ts is not None:
+    timestamp: datetime | None = None
+    block_number = jbecker_trade.get("block_number")
+    if block_number is not None:
         try:
-            timestamp = datetime.fromtimestamp(int(ts))
-        except (ValueError, TypeError, OSError):
-            ts = None
-    if ts is None:
+            timestamp = block_number_to_timestamp(int(block_number))
+        except (ValueError, TypeError):
+            pass
+
+    if timestamp is None:
         fetched = jbecker_trade.get("_fetched_at")
         if fetched is not None:
             try:
                 if hasattr(fetched, "to_pydatetime"):
-                    timestamp = fetched.to_pydatetime()
+                    timestamp = fetched.to_pydatetime().replace(tzinfo=None)
                 else:
-                    timestamp = datetime.fromisoformat(str(fetched))
+                    timestamp = datetime.fromisoformat(str(fetched)).replace(tzinfo=None)
             except Exception:
-                timestamp = datetime(2025, 1, 1)
+                timestamp = datetime(2024, 1, 1)
         else:
-            timestamp = datetime(2025, 1, 1)
+            timestamp = datetime(2024, 1, 1)
+
+    if timestamp is None:
+        timestamp = datetime(2024, 1, 1)
 
     tx_hash = str(jbecker_trade.get("transaction_hash", "unknown"))
     log_index = str(jbecker_trade.get("log_index", "0"))
