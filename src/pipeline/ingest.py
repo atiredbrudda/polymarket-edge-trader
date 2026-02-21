@@ -2273,32 +2273,6 @@ class IngestionPipeline:
                 session.query(Trader).filter_by(backfill_complete=False).all()
             )
 
-            logger.info(f"Backfilling {len(traders_to_backfill)} traders")
-
-            # Batch fetch JBecker trades for all traders (major speedup)
-            prefetched_by_address: dict[str, list[dict]] = {}
-            if (
-                use_jbecker
-                and self.jbecker_client
-                and self.jbecker_client.is_available()
-                and traders_to_backfill
-            ):
-                addresses = [t.address for t in traders_to_backfill]
-                logger.info(
-                    f"Batch fetching JBecker trades for {len(addresses)} traders..."
-                )
-                try:
-                    prefetched_by_address = (
-                        self.jbecker_client.batch_query_traders_history(addresses)
-                    )
-                    logger.info(
-                        f"Prefetched trades for {len(prefetched_by_address)} traders"
-                    )
-                except Exception as e:
-                    logger.warning(
-                        f"Batch JBecker query failed, falling back to individual queries: {e}"
-                    )
-
             # Build token cache once for all traders (avoids N per-trader DB scans)
             token_cache = None
             if (
@@ -2311,26 +2285,69 @@ class IngestionPipeline:
                     f"Built token cache: {len(token_cache[0])} tokens, {len(token_cache[1])} conditions"
                 )
 
-            for trader in traders_to_backfill:
-                try:
-                    prefetched = prefetched_by_address.get(trader.address.lower())
-                    # Use hybrid method (JBecker -> API -> Graph -> Blockchain)
-                    stats = self.ingest_trader_history_hybrid(
-                        trader.address,
-                        prefer_jbecker=use_jbecker,
-                        fallback_to_blockchain=use_blockchain_fallback,
-                        prefetched_jbecker_trades=prefetched,
-                        token_cache=token_cache,
-                    )
+            # Process traders in chunks: fetch JBecker trades for a batch, process,
+            # discard, repeat. Keeps peak RAM bounded regardless of total trader count.
+            BACKFILL_CHUNK = 50
+            num_chunks = (len(traders_to_backfill) + BACKFILL_CHUNK - 1) // BACKFILL_CHUNK
+            logger.info(
+                f"Backfilling {len(traders_to_backfill)} traders "
+                f"in {num_chunks} chunks of {BACKFILL_CHUNK}"
+            )
+            use_jbecker_batch = (
+                use_jbecker
+                and self.jbecker_client
+                and self.jbecker_client.is_available()
+            )
+            num_chunks = (len(traders_to_backfill) + BACKFILL_CHUNK - 1) // BACKFILL_CHUNK
 
-                    overall_stats["trades_stored"] += stats.get("detail_count", 0)
-                    overall_stats["summaries_created"] += stats.get("summary_count", 0)
-                except Exception as e:
-                    logger.error(
-                        f"Failed to backfill trader {trader.address[:8]}...: {e}"
+            for chunk_idx in range(0, len(traders_to_backfill), BACKFILL_CHUNK):
+                chunk = traders_to_backfill[chunk_idx : chunk_idx + BACKFILL_CHUNK]
+                chunk_num = chunk_idx // BACKFILL_CHUNK + 1
+
+                prefetched_by_address: dict[str, list[dict]] = {}
+                if use_jbecker_batch:
+                    addresses = [t.address for t in chunk]
+                    logger.info(
+                        f"Batch fetching JBecker trades: chunk {chunk_num}/{num_chunks} "
+                        f"({len(addresses)} traders)..."
                     )
-                    # Continue with next trader
-                    continue
+                    try:
+                        prefetched_by_address = (
+                            self.jbecker_client.batch_query_traders_history(addresses)
+                        )
+                        logger.info(
+                            f"Prefetched trades for {len(prefetched_by_address)} traders "
+                            f"(chunk {chunk_num}/{num_chunks})"
+                        )
+                    except Exception as e:
+                        logger.warning(
+                            f"Batch JBecker query failed for chunk {chunk_num}, "
+                            f"falling back to individual queries: {e}"
+                        )
+
+                for trader in chunk:
+                    try:
+                        prefetched = prefetched_by_address.get(trader.address.lower())
+                        # Use hybrid method (JBecker -> API -> Graph -> Blockchain)
+                        stats = self.ingest_trader_history_hybrid(
+                            trader.address,
+                            prefer_jbecker=use_jbecker,
+                            fallback_to_blockchain=use_blockchain_fallback,
+                            prefetched_jbecker_trades=prefetched,
+                            token_cache=token_cache,
+                        )
+
+                        overall_stats["trades_stored"] += stats.get("detail_count", 0)
+                        overall_stats["summaries_created"] += stats.get("summary_count", 0)
+                    except Exception as e:
+                        logger.error(
+                            f"Failed to backfill trader {trader.address[:8]}...: {e}"
+                        )
+                        # Continue with next trader
+                        continue
+
+                # Discard prefetched trades before loading the next chunk
+                prefetched_by_address.clear()
 
         finally:
             session.close()
