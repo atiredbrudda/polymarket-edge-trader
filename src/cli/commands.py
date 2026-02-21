@@ -39,6 +39,7 @@ from src.db.models import (
     Market,
     MarketClassification,
     TokenCatalog,
+    Trade,
 )
 from src.db.session import get_session, get_session_factory
 from src.config.settings import get_settings
@@ -1787,6 +1788,80 @@ def build_index(batch_size, verbose):
         console.print(f"[red]Index build failed: {e}[/red]")
         logger.error(f"build-index failed: {e}")
         raise
+
+
+@cli.command("reset-backfill")
+@click.option("--confirm", is_flag=True, help="Skip confirmation prompt")
+@click.option("--verbose", "-v", is_flag=True, help="Enable debug logging")
+def reset_backfill(confirm, verbose):
+    """Clear JBecker trades and reset backfill status for re-ingestion.
+
+    Deletes all JBecker-sourced trades from the database and marks affected
+    traders as pending backfill (backfill_complete=False). Run this before
+    re-running 'polymarket backfill' after a timestamp fix.
+
+    \b
+    Examples:
+        polymarket reset-backfill
+        polymarket reset-backfill --confirm
+    """
+    logger.info("RESET-BACKFILL command started")
+
+    if verbose:
+        logger.remove()
+        logger.add(sys.stderr, level="DEBUG")
+
+    console = Console()
+
+    session_factory, _, _, _, _ = _get_dependencies()
+
+    with get_session(session_factory) as session:
+        jbecker_count = (
+            session.query(Trade).filter(Trade.trade_id.like("jbecker_%")).count()
+        )
+
+        if jbecker_count == 0:
+            console.print("[green]No JBecker trades found — nothing to reset.[/green]")
+            return
+
+        console.print(
+            f"[yellow]This will delete {jbecker_count:,} JBecker trades and reset backfill status.[/yellow]"
+        )
+
+        if not confirm and not click.confirm("Continue?"):
+            console.print("[dim]Aborted.[/dim]")
+            return
+
+        affected_rows = (
+            session.query(Trade.trader_address)
+            .filter(Trade.trade_id.like("jbecker_%"))
+            .distinct()
+            .all()
+        )
+        affected_addresses = [row[0] for row in affected_rows]
+
+        deleted = (
+            session.query(Trade)
+            .filter(Trade.trade_id.like("jbecker_%"))
+            .delete(synchronize_session=False)
+        )
+
+        if affected_addresses:
+            session.query(Trader).filter(
+                Trader.address.in_(affected_addresses)
+            ).update({"backfill_complete": False}, synchronize_session=False)
+
+        session.commit()
+
+    console.print(f"\n[bold green]Reset complete[/bold green]")
+    console.print(f"  Trades deleted:   [red]{deleted:,}[/red]")
+    console.print(f"  Traders reset:    [yellow]{len(affected_addresses)}[/yellow]")
+    console.print(
+        "\n[dim]Run 'polymarket backfill' to re-ingest with corrected timestamps.[/dim]"
+    )
+    logger.info(
+        f"RESET-BACKFILL completed: {deleted} trades deleted, {len(affected_addresses)} traders reset"
+    )
 
 
 if __name__ == "__main__":
