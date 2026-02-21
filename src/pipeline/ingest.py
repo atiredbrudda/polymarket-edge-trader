@@ -17,6 +17,7 @@ from datetime import datetime, UTC
 from typing import Any, Optional
 
 from loguru import logger
+from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import sessionmaker
 
 from src.api.client import PolymarketClient
@@ -1609,13 +1610,9 @@ class IngestionPipeline:
                         catalog_token_cache[token_id]
                     )
 
-                    # Check-first Market creation
-                    existing_market = (
-                        session.query(Market)
-                        .filter_by(condition_id=condition_id)
-                        .first()
-                    )
-                    if not existing_market:
+                    # Market creation — savepoint for idempotency on re-runs
+                    sp = session.begin_nested()
+                    try:
                         new_market = Market(
                             condition_id=condition_id,
                             question=question,
@@ -1623,10 +1620,12 @@ class IngestionPipeline:
                             active=False,
                         )
                         session.add(new_market)
-                        session.flush()
+                        sp.commit()
                         logger.debug(
                             f"Created Market for catalog hit: {condition_id[:8]}..."
                         )
+                    except IntegrityError:
+                        sp.rollback()
 
                     # Check-first MarketClassification creation
                     existing_cls = (
@@ -1645,13 +1644,18 @@ class IngestionPipeline:
                             if node:
                                 taxonomy_node_id = node.id
 
-                        cls = MarketClassification(
-                            market_id=condition_id,
-                            taxonomy_node_id=taxonomy_node_id,
-                            node_path=node_path,
-                            market_type=market_type,
-                        )
-                        session.add(cls)
+                        sp = session.begin_nested()
+                        try:
+                            cls = MarketClassification(
+                                market_id=condition_id,
+                                taxonomy_node_id=taxonomy_node_id,
+                                node_path=node_path,
+                                market_type=market_type,
+                            )
+                            session.add(cls)
+                            sp.commit()
+                        except IntegrityError:
+                            sp.rollback()
 
                     token_to_condition[token_id] = condition_id
                     condition_to_category[condition_id] = "eSports"
@@ -1723,8 +1727,12 @@ class IngestionPipeline:
                                                         token_to_condition[str(tid)] = (
                                                             cid
                                                         )
-                                                session.add(new_market)
-                                                session.flush()
+                                                sp = session.begin_nested()
+                                                try:
+                                                    session.add(new_market)
+                                                    sp.commit()
+                                                except IntegrityError:
+                                                    sp.rollback()
                                         for t in batch:
                                             clob_tokens = md.get("clobTokenIds")
                                             if clob_tokens:
@@ -1790,15 +1798,6 @@ class IngestionPipeline:
 
                 for trade_with_cat in detail_trades:
                     trade_response = trade_with_cat.trade
-                    existing = (
-                        session.query(Trade)
-                        .filter_by(trade_id=trade_response.id)
-                        .first()
-                    )
-                    if existing:
-                        stats["already_in_db"] += 1
-                        continue
-
                     trade = Trade(
                         market_id=trade_response.market,
                         trader_address=trade_response.trader,
@@ -1809,8 +1808,14 @@ class IngestionPipeline:
                         asset_ticker=trade_response.asset_ticker,
                         trade_id=trade_response.id,
                     )
-                    session.add(trade)
-                    stats["detail_count"] += 1
+                    sp = session.begin_nested()
+                    try:
+                        session.add(trade)
+                        sp.commit()
+                        stats["detail_count"] += 1
+                    except IntegrityError:
+                        sp.rollback()
+                        stats["already_in_db"] += 1
 
                 if summary_trades:
                     summaries = group_and_aggregate(
