@@ -5,15 +5,14 @@
 See: .planning/PROJECT.md (updated 2026-02-21)
 
 **Core value:** Surface where smart money is moving in niche prediction markets so the user can see what informed traders are doing and factor that into their own thinking.
-**Current focus:** v1.1 archived — planning next milestone (v1.2)
+**Current focus:** v1.2 — Market Resolution & Deep Classification
 
 ## Current Position
 
-Milestone: v1.1 SHIPPED (2026-02-21)
-Status: Archived to .planning/milestones/v1.1-ROADMAP.md
-Next: /gsd:new-milestone to define v1.2
-
-Progress: v1.1 [██████████] 100% — ARCHIVED
+Phase: Not started (defining requirements)
+Plan: —
+Status: Defining requirements
+Last activity: 2026-02-21 — Milestone v1.2 Market Resolution & Deep Classification started
 
 ## Performance Metrics
 

@@ -34,16 +34,19 @@ Surface where smart money is moving in niche prediction markets so the user can 
 
 ### Active
 
-See v1.2 requirements (to be defined by `/gsd:new-milestone`).
+- [ ] Market outcome resolution — populate `markets.outcome` via Gamma Events API `outcomePrices`
+- [ ] Deep token classification — update token catalog `node_path`/`depth` to game/tournament/team level via Gamma Events API tags
+- [ ] End-to-end scoring with JBecker data — scoring pipeline produces real leaderboard results (no more empty output)
 
-**Known gaps carried into v1.2:**
-- Market outcome resolution missing — `markets.outcome=NULL` prevents position PnL scoring
-- Token catalog classification only reaches eSports root (node_path=NULL); deep classification via Events API needed
-- Scoring produces no leaderboard results end-to-end until resolution is wired
+## Current Milestone: v1.2 Market Resolution & Deep Classification
 
-## Current Milestone: v1.2 (Planning)
+**Goal:** Integrate Gamma Events API data to fix the two critical v1.1 gaps — outcome resolution and deep classification — enabling the scoring pipeline to produce real leaderboard results end-to-end.
 
-**Goal:** TBD — likely: market outcome resolution via Events API, deep classification beyond eSports root, working end-to-end scoring on JBecker data.
+**Target features:**
+- Gamma Events API ingestion (~8,500 closed eSports events, ~30s download)
+- Market outcome resolution (`markets.outcome` populated from `outcomePrices`)
+- Deep token classification (`node_path`/`depth` at game/tournament/team levels)
+- End-to-end leaderboard working on JBecker data
 
 ### Out of Scope
 
@@ -91,4 +94,4 @@ See v1.2 requirements (to be defined by `/gsd:new-milestone`).
 | Events API for market resolution | Gamma `/events` endpoint returns outcomePrices + clobTokenIds — authoritative resolution source | Pending (v1.2) |
 
 ---
-*Last updated: 2026-02-21 after v1.1 milestone*
+*Last updated: 2026-02-21 after v1.2 milestone started*
