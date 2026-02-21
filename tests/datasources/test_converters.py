@@ -179,19 +179,34 @@ def test_case_insensitive_role_matching():
 
 
 def test_timestamp_conversion():
-    """Unix int timestamp converts to datetime."""
+    """block_number takes priority over timestamp field for date derivation."""
+    from src.datasources.converters import jbecker_trade_to_api_response
+
+    # SAMPLE_JBECKER_TRADE has block_number=50_000_000 → Nov 2023
+    trade = SAMPLE_JBECKER_TRADE.copy()
+    trader_address = "0xeffd76b6a4318d50c6f71a16b276c5b279445a86"
+
+    result = jbecker_trade_to_api_response(trade, trader_address)
+
+    assert isinstance(result.timestamp, datetime)
+    assert result.timestamp.year == 2023
+    assert result.timestamp.month == 11
+
+
+def test_timestamp_fallback_to_fetched_at():
+    """Falls back to _fetched_at when block_number is absent."""
     from src.datasources.converters import jbecker_trade_to_api_response
 
     trade = SAMPLE_JBECKER_TRADE.copy()
-    trade["timestamp"] = 1704067200  # 2024-01-01 00:00:00 UTC
+    trade["block_number"] = None
+    trade["_fetched_at"] = "2024-06-15T12:00:00"
     trader_address = "0xeffd76b6a4318d50c6f71a16b276c5b279445a86"
 
     result = jbecker_trade_to_api_response(trade, trader_address)
 
     assert isinstance(result.timestamp, datetime)
     assert result.timestamp.year == 2024
-    assert result.timestamp.month == 1
-    assert result.timestamp.day == 1
+    assert result.timestamp.month == 6
 
 
 def test_asset_ticker_odd_yes():
