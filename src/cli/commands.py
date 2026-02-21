@@ -666,20 +666,33 @@ def specialists(game_slug, game_threshold, deep_threshold, verbose):
     default=None,
     help="Only scan markets closing within this time window (e.g., 48h, 2d)",
 )
+@click.option(
+    "--with-alerts",
+    is_flag=True,
+    default=False,
+    help="Deliver alerts after detection (requires Telegram config)",
+)
 @click.option("--verbose", "-v", is_flag=True, help="Enable debug logging")
-def sweep(window, niche, closing_within, verbose):
-    """Run signal detection sweep.
+def sweep(window, niche, closing_within, with_alerts, verbose):
+    """Full pipeline orchestrator: discover → score → detect → (alert).
 
-    Refreshes all signals for markets with expert activity.
+    Runs all pipeline stages in sequence. Each stage can also be run
+    independently using its own command:
+      polymarket discover   — ingest markets + find traders
+      polymarket backfill   — fetch trade history
+      polymarket score      — compute expertise scores
+      polymarket detect     — refresh signal detection
+      polymarket alert      — deliver Telegram alerts
 
-    Example:
+    \b
+    Examples:
         polymarket sweep
-        polymarket sweep --window 6
         polymarket sweep --niche esports
-        polymarket sweep --niche esports --niche crypto --closing-within 48h
+        polymarket sweep --niche esports --closing-within 48h
+        polymarket sweep --with-alerts
     """
     logger.info(
-        f"SWEEP command started (window={window}h, niches={niche}, closing_within={closing_within}, verbose={verbose})"
+        f"SWEEP command started (window={window}h, niches={niche}, closing_within={closing_within}, with_alerts={with_alerts})"
     )
 
     if verbose:
@@ -687,6 +700,7 @@ def sweep(window, niche, closing_within, verbose):
         logger.add(sys.stderr, level="DEBUG")
 
     console = Console()
+    import time
 
     if niche:
         console.print(f"[bold blue]Scanning niches:[/bold blue] {', '.join(niche)}")
@@ -702,45 +716,84 @@ def sweep(window, niche, closing_within, verbose):
             console.print(f"[bold red]Error: {e}[/bold red]")
             return
 
-    with console.status("[bold green]Running sweep...", spinner="dots"):
-        import time
+    session_factory, client, category_filter, alerter, gamma_client = _get_dependencies()
 
-        start_time = time.time()
+    sweep_start = time.time()
 
-        session_factory, client, category_filter, alerter, gamma_client = (
-            _get_dependencies()
+    console.print("\n[bold]Stage 1/3:[/bold] Ingesting markets...")
+    try:
+        from src.pipeline.ingest import IngestionPipeline
+
+        pipeline = IngestionPipeline(
+            client, session_factory, category_filter, gamma_client=gamma_client
         )
+        if niche or closing_within:
+            end_date_max = None
+            if closing_within:
+                from src.pipeline.time_utils import parse_closing_within
+                end_date_max = parse_closing_within(closing_within)
+            markets_count = pipeline.ingest_targeted_markets(
+                niches=niche, end_date_max=end_date_max
+            )
+        else:
+            markets_count = pipeline.ingest_active_markets()
+        console.print(f"  Markets ingested: {markets_count}")
+    except Exception as e:
+        console.print(f"  [red]Ingestion failed: {e}[/red]")
+        logger.error(f"Sweep stage 1 (ingest) failed: {e}")
 
-        from src.cli.scheduler import run_sweep
+    console.print("\n[bold]Stage 2/3:[/bold] Computing expertise scores...")
+    try:
+        from src.pipeline.scoring_pipeline import compute_all_game_scores
 
-        stats = run_sweep(
-            session_factory,
-            client,
-            category_filter,
-            alerter,
-            skip_alerts=True,
-            gamma_client=gamma_client,
-            niches=niche,
-            closing_within=closing_within,
-            skip_trader_backfill=True,
-        )
+        with get_session(session_factory) as session:
+            leaderboards = compute_all_game_scores(session)
+            session.commit()
+        total_scores = sum(len(v) for v in leaderboards.values())
+        console.print(f"  Scores computed: {total_scores} across {len(leaderboards)} games")
+    except Exception as e:
+        console.print(f"  [red]Scoring failed: {e}[/red]")
+        logger.error(f"Sweep stage 2 (score) failed: {e}")
 
-        processing_time = time.time() - start_time
+    console.print("\n[bold]Stage 3/3:[/bold] Detecting signals...")
+    try:
+        from src.signals.pipeline import refresh_all_signals
+
+        with get_session(session_factory) as session:
+            detected = refresh_all_signals(session, window_hours=window)
+            session.commit()
+        console.print(f"  Signals detected: {len(detected)}")
+    except Exception as e:
+        console.print(f"  [red]Signal detection failed: {e}[/red]")
+        logger.error(f"Sweep stage 3 (detect) failed: {e}")
+
+    alerts_sent = 0
+    if with_alerts:
+        console.print("\n[bold]Stage 4/4:[/bold] Delivering alerts...")
+        if alerter is None:
+            console.print(
+                "  [yellow]Skipped — no Telegram config (set TELEGRAM_BOT_TOKEN + TELEGRAM_CHAT_ID)[/yellow]"
+            )
+        else:
+            try:
+                from src.alerts.delivery import deliver_signal_alerts
+
+                with get_session(session_factory) as session:
+                    results = deliver_signal_alerts(session, alerter, window_hours=window)
+                alerts_sent = sum(1 for r in results if r.success)
+                console.print(f"  Alerts sent: {alerts_sent}")
+            except Exception as e:
+                console.print(f"  [red]Alert delivery failed: {e}[/red]")
+                logger.error(f"Sweep stage 4 (alert) failed: {e}")
+
+    elapsed = time.time() - sweep_start
+    console.print(f"\n[bold green]Sweep complete[/bold green] ({elapsed:.1f}s)")
+    if not with_alerts:
+        console.print("[dim]Use --with-alerts to deliver Telegram alerts.[/dim]")
 
     logger.info(
-        f"Sweep completed: {stats['markets_ingested']} markets, {stats['signals_detected']} signals, {stats['alerts_sent']} alerts in {processing_time:.2f}s"
+        f"SWEEP completed in {elapsed:.1f}s"
     )
-
-    summary = format_sweep_summary(
-        {
-            "processing_time": processing_time,
-            "markets_count": stats["markets_ingested"],
-            "signals_count": stats["signals_detected"],
-            "alerts_sent": stats["alerts_sent"],
-        }
-    )
-    console.print(summary)
-    logger.info("SWEEP command completed")
 
 
 @cli.command()
@@ -1487,6 +1540,158 @@ def backfill(address, limit, verbose):
         logger.info(
             f"BACKFILL completed: {success_count} ok, {error_count} failed ({processing_time:.1f}s)"
         )
+
+
+@cli.command()
+@click.option("--verbose", "-v", is_flag=True, help="Enable debug logging")
+def score(verbose):
+    """Compute expertise scores for all traders.
+
+    Calculates game-level expertise scores across all traders with trade history.
+    Scores are stored in the expertise_scores table and used for signal detection.
+
+    \b
+    Examples:
+        polymarket score
+    """
+    logger.info("SCORE command started")
+
+    if verbose:
+        logger.remove()
+        logger.add(sys.stderr, level="DEBUG")
+
+    console = Console()
+
+    import time
+
+    start_time = time.time()
+
+    session_factory, _, _, _, _ = _get_dependencies()
+
+    with console.status("[bold green]Computing expertise scores...", spinner="dots"):
+        from src.pipeline.scoring_pipeline import compute_all_game_scores
+
+        with get_session(session_factory) as session:
+            leaderboards = compute_all_game_scores(session)
+            session.commit()
+
+    elapsed = time.time() - start_time
+    total_entries = sum(len(entries) for entries in leaderboards.values())
+
+    console.print(f"\n[bold green]Scoring complete[/bold green] ({elapsed:.1f}s)")
+    console.print(f"  Games scored:    {len(leaderboards)}")
+    console.print(f"  Total entries:   {total_entries}")
+    console.print(
+        "\n[dim]Run 'polymarket detect' to refresh signals, or 'polymarket signals' to view existing signals.[/dim]"
+    )
+    logger.info(
+        f"SCORE completed: {len(leaderboards)} games, {total_entries} entries ({elapsed:.1f}s)"
+    )
+
+
+@cli.command()
+@click.option(
+    "--window", "-w", default=24, help="Time window in hours for expert activity (default: 24)"
+)
+@click.option("--verbose", "-v", is_flag=True, help="Enable debug logging")
+def detect(window, verbose):
+    """Detect and refresh expert consensus signals.
+
+    Recomputes signal detection across all active markets where experts have
+    traded. Results are stored and can be viewed with 'polymarket signals'.
+
+    \b
+    Examples:
+        polymarket detect
+        polymarket detect --window 6
+    """
+    logger.info(f"DETECT command started (window={window}h)")
+
+    if verbose:
+        logger.remove()
+        logger.add(sys.stderr, level="DEBUG")
+
+    console = Console()
+
+    import time
+
+    start_time = time.time()
+
+    session_factory, _, _, _, _ = _get_dependencies()
+
+    with console.status("[bold green]Detecting signals...", spinner="dots"):
+        from src.signals.pipeline import refresh_all_signals
+
+        with get_session(session_factory) as session:
+            detected = refresh_all_signals(session, window_hours=window)
+            session.commit()
+
+    elapsed = time.time() - start_time
+
+    console.print(f"\n[bold green]Detection complete[/bold green] ({elapsed:.1f}s)")
+    console.print(f"  Signals detected: {len(detected)}")
+    console.print(
+        "\n[dim]Run 'polymarket signals' to view detected signals.[/dim]"
+    )
+    logger.info(
+        f"DETECT completed: {len(detected)} signals ({elapsed:.1f}s)"
+    )
+
+
+@cli.command()
+@click.option(
+    "--window", "-w", default=24, help="Time window in hours for signals to alert (default: 24)"
+)
+@click.option("--verbose", "-v", is_flag=True, help="Enable debug logging")
+def alert(window, verbose):
+    """Deliver pending signal alerts via Telegram.
+
+    Sends expert consensus signals to configured Telegram chat.
+    Requires TELEGRAM_BOT_TOKEN and TELEGRAM_CHAT_ID in .env.
+
+    \b
+    Examples:
+        polymarket alert
+        polymarket alert --window 6
+    """
+    logger.info(f"ALERT command started (window={window}h)")
+
+    if verbose:
+        logger.remove()
+        logger.add(sys.stderr, level="DEBUG")
+
+    console = Console()
+
+    session_factory, _, _, alerter, _ = _get_dependencies()
+
+    if alerter is None:
+        console.print(
+            "[yellow]No alerter configured.[/yellow] "
+            "Set TELEGRAM_BOT_TOKEN and TELEGRAM_CHAT_ID in .env to enable alerts."
+        )
+        return
+
+    import time
+
+    start_time = time.time()
+
+    with console.status("[bold green]Delivering alerts...", spinner="dots"):
+        from src.alerts.delivery import deliver_signal_alerts
+
+        with get_session(session_factory) as session:
+            results = deliver_signal_alerts(session, alerter, window_hours=window)
+
+    elapsed = time.time() - start_time
+
+    sent = sum(1 for r in results if r.success)
+    failed = sum(1 for r in results if not r.success)
+
+    console.print(f"\n[bold green]Alerts delivered[/bold green] ({elapsed:.1f}s)")
+    console.print(f"  Sent:   [green]{sent}[/green]")
+    console.print(f"  Failed: [red]{failed}[/red]")
+    logger.info(
+        f"ALERT completed: {sent} sent, {failed} failed ({elapsed:.1f}s)"
+    )
 
 
 @cli.command("resolve-profiles")
