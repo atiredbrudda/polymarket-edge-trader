@@ -25,6 +25,16 @@ Read this section and the AGENTS.md file in project root before starting work. R
 
 ## Cleared
 
+### worker/14-01 — 2026-02-21
+- **Branch:** worker/14-01
+- **Cleared by:** Sonnet 4.6
+- **Reviewer fix:** Updated `test_timestamp_conversion` — test assumed old `timestamp` field was used; new code correctly prioritizes `block_number`. Added `test_timestamp_fallback_to_fetched_at` for the fallback path.
+- **Files in scope:**
+  - src/datasources/converters.py (`_POLYGON_BLOCK_ANCHORS`, `block_number_to_timestamp()`, updated `jbecker_trade_to_api_response()`)
+  - src/cli/commands.py (`reset-backfill` command, `Trade` top-level import)
+  - tests/datasources/test_converters.py (test mock update)
+- **Notes:** Clean implementation. Block interpolation correct — 5 anchor blocks span Mar 2023–Dec 2025 covering full JBecker range (40M–82M). Fallback chain: `block_number` → `_fetched_at` → `datetime(2024,1,1)`. `reset-backfill` correctly finds affected traders before deleting (avoids lost addresses), resets `backfill_complete=False`, and confirms before destructive action. 17 relevant tests pass, 0 new regressions (9 pre-existing failures identical on main, all from phase-13 catalog/jbecker rewrite).
+
 ### worker/13-03 — 2026-02-19
 - **Branch:** worker/13-03
 - **Cleared by:** Sonnet 4.6
