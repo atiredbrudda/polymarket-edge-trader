@@ -25,6 +25,13 @@ Read this section and the AGENTS.md file in project root before starting work. R
 
 ## Cleared
 
+### worker/fix-jbecker-unique-constraint — 2026-02-21
+- **Branch:** worker/fix-jbecker-unique-constraint
+- **Cleared by:** Sonnet 4.6 (self-review, no plan)
+- **Files in scope:**
+  - src/pipeline/ingest.py (savepoint inserts for Market, MarketClassification, Trade in JBecker backfill)
+- **Notes:** Hotfix for UNIQUE constraint spam on backfill re-runs. Root cause: `session.flush()` + autoflush-triggered-by-query would invalidate the entire session on duplicate inserts (concurrent or repeat runs). Fix: `begin_nested()` savepoints isolate IntegrityError per-record — duplicates roll back silently to `already_in_db`, session continues. Also removed redundant check-first query in trade loop (savepoint handles dedup). 27 relevant tests pass, 2 pre-existing failures unchanged.
+
 ### worker/14-02 — 2026-02-21
 - **Branch:** worker/14-02
 - **Cleared by:** Sonnet 4.6
