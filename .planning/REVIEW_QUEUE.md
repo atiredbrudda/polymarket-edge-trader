@@ -17,21 +17,21 @@ Read this section and the AGENTS.md file in project root before starting work. R
 
 ## Pending Review
 
-### worker/14-02 — 2026-02-21
-- **Plan:** 14-02 (Pipeline Decomposition)
-- **Branch:** worker/14-02
-- **Commits:** 1eb75f4
-- **Files changed:**
-  - src/cli/commands.py (score, detect, alert commands + rewritten sweep orchestrator)
-  - .planning/phases/14-timestamp-fix-pipeline-decomposition/14-02-SUMMARY.md (NEW)
-- **Worker notes:** Decomposed sweep into composable stages. Added score/detect/alert as independent commands. Sweep now runs inline stages instead of calling run_sweep() from scheduler. Added --with-alerts flag (opt-in).
-- **Decisions made:** Alerts are opt-in for sweep (--with-alerts flag). `detect` command computes signals; `signals` command views them (different purposes).
+(empty — no pending reviews)
 
 ## Re-Review
 
 (empty — no re-reviews)
 
 ## Cleared
+
+### worker/14-02 — 2026-02-21
+- **Branch:** worker/14-02
+- **Cleared by:** Sonnet 4.6
+- **Files in scope:**
+  - src/cli/commands.py (`score`, `detect`, `alert` commands + rewritten `sweep` orchestrator)
+  - .planning/phases/14-timestamp-fix-pipeline-decomposition/14-02-SUMMARY.md (NEW)
+- **Notes:** Clean implementation. All must_haves verified: `score` calls `compute_all_game_scores`, `detect` calls `refresh_all_signals`, `alert` calls `deliver_signal_alerts`, `sweep --help` describes discover → score → detect → alert orchestrator, sweep executes inline stages. No regressions (10 failures on branch = same 10 on main, all pre-existing). `run_sweep()` from scheduler.py correctly removed from sweep CLI. Alerts opt-in via `--with-alerts` flag is a good design decision. 609 passed, 0 new failures.
 
 ### worker/14-01 — 2026-02-21
 - **Branch:** worker/14-01
