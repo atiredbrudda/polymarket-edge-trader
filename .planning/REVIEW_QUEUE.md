@@ -17,7 +17,16 @@ Read this section and the AGENTS.md file in project root before starting work. R
 
 ## Pending Review
 
-(empty — no pending reviews)
+### worker/15-01 — 2026-02-22
+- **Plan:** 15-01 (Gamma Events Ingestion - Model and API Method)
+- **Branch:** worker/15-01
+- **Commits:** 6c58e38
+- **Files changed:**
+  - src/db/models.py (NEW GammaEvent class)
+  - src/api/gamma_client.py (NEW get_closed_esports_events method)
+  - .planning/phases/15-gamma-events-ingestion/15-01-SUMMARY.md (NEW)
+- **Worker notes:** Added GammaEvent ORM model with all required fields for Phase 15. Added get_closed_esports_events() method to GammaMarketClient for bulk download of closed eSports events. API connectivity verified (status 200). No new test regressions.
+- **Decisions made:** Used 60s timeout for bulk download (vs 30s for other methods) due to ~10MB payload. Used offset-based pagination matching existing get_events() pattern.
 
 ## Re-Review
 
