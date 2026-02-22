@@ -25,6 +25,16 @@ Read this section and the AGENTS.md file in project root before starting work. R
 
 ## Cleared
 
+### worker/15-01 — 2026-02-22
+- **Branch:** worker/15-01
+- **Cleared by:** Sonnet 4.6
+- **Reviewer fix:** Changed `clob_token_ids` from `String(5000)` to `Text` in `GammaEvent` model. Live API probe showed events can have 7,346+ chars of token IDs (e.g. dota-2-the-international-champions: 1,462 tokens). Also added `Text` to the sqlalchemy import in models.py.
+- **Files in scope:**
+  - src/db/models.py (NEW `GammaEvent` class — reviewer fixed `clob_token_ids` type)
+  - src/api/gamma_client.py (NEW `get_closed_esports_events()` method)
+  - .planning/phases/15-gamma-events-ingestion/15-01-SUMMARY.md (NEW)
+- **Notes:** Clean implementation. Pagination pattern matches existing `get_events()`. 60s timeout justified for ~10MB bulk download. `"active": "false"` string matches existing pattern (`str(False).lower()`). 7 existing gamma_client tests pass, 0 new regressions. Pre-existing failure `test_query_uses_parameterized_sql` confirmed on main (not introduced by this branch). No tests added for `get_closed_esports_events()` — acceptable for a thin API method; integration test will come with the CLI plan.
+
 ### worker/fix-jbecker-unique-constraint — 2026-02-21
 - **Branch:** worker/fix-jbecker-unique-constraint
 - **Cleared by:** Sonnet 4.6 (self-review, no plan)
