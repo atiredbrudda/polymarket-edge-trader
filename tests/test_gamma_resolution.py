@@ -103,6 +103,8 @@ class TestResolveMarketOutcomes:
         assert result["resolved"] == 2
         assert result["skipped_events"] == 0
         assert result["skipped_tokens"] == 0
+        # Both tokens map to the same market row; winning token (tok_a) must win
+        assert mock_market.outcome == "YES"
 
     def test_skips_tokens_not_in_markets(self):
         mock_session = MagicMock()

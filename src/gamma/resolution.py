@@ -104,7 +104,13 @@ def resolve_market_outcomes(session: Session) -> dict[str, int]:
                 skipped_tokens += 1
                 continue
 
-            market.outcome = classify_token_outcome(token_id, winning_token)
+            # Never overwrite YES with NO: a market row stores both YES and NO
+            # tokens, so both token_ids map to the same Market row. Processing
+            # order must not matter — winning token always sets the final value.
+            if token_id == winning_token:
+                market.outcome = "YES"
+            elif market.outcome != "YES":
+                market.outcome = "NO"
             resolved += 1
 
     logger.info(
