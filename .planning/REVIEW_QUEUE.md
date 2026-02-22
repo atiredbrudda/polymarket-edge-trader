@@ -17,13 +17,25 @@ Read this section and the AGENTS.md file in project root before starting work. R
 
 ## Pending Review
 
-(empty — no pending reviews)
+(empty)
 
 ## Re-Review
 
 (empty — no re-reviews)
 
 ## Cleared
+
+### worker/16-01 — 2026-02-22
+- **Branch:** worker/16-01
+- **Cleared by:** Sonnet 4.6
+- **Reviewer fix (1):**
+  1. `resolve_market_outcomes` had an outcome-overwrite bug: a binary market row stores both YES and NO token IDs in `markets.tokens`, so both token IDs map to the same `Market` row in `token_to_market`. The loop processed YES first (sets "YES") then NO (overwrites to "NO"), leaving every resolved binary market with `outcome="NO"`. Fix: `if token_id == winning_token: market.outcome = "YES"` else only write "NO" if the market hasn't already been set to YES. Added `assert mock_market.outcome == "YES"` to `test_resolves_single_market` — the test was checking only the count, which masked the bug.
+- **Files in scope:**
+  - src/gamma/persist.py (fixed token ID order: `sorted(set())` → `dict.fromkeys()`)
+  - src/gamma/resolution.py (NEW — `determine_winner`, `classify_token_outcome`, `resolve_market_outcomes`)
+  - tests/test_gamma_resolution.py (NEW — 22 TDD tests; reviewer added outcome assert to `test_resolves_single_market`)
+  - .planning/phases/16-market-outcome-resolution/16-01-SUMMARY.md (NEW)
+- **Notes:** Clean TDD implementation. Decimal precision for price comparison is correct. `dict.fromkeys()` order-preservation fix is correct and necessary for token→outcome alignment. `token_to_market` strategy (99.8% coverage) is the right call over token_catalog (37%). 22/22 tests pass, 8 pre-existing failures unchanged.
 
 ### worker/15-02 — 2026-02-22
 - **Branch:** worker/15-02

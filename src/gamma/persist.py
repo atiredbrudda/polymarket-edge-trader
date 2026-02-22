@@ -34,7 +34,7 @@ def upsert_gamma_events(events: list[dict], session: Session) -> int:
         tags = json.dumps(event.get("tags") or [])
 
         clob_token_ids = _extract_token_ids(event)
-        clob_token_ids_json = json.dumps(sorted(set(clob_token_ids)))
+        clob_token_ids_json = json.dumps(list(dict.fromkeys(clob_token_ids)))
 
         start_date = _parse_datetime(event.get("startDate"))
         end_date = _parse_datetime(event.get("endDate"))
