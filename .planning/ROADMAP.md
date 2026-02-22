@@ -76,7 +76,10 @@ Plans:
   2. Markets resolved as YES win have outcome encoded as `"YES"` (or the winning token ID); NO wins encoded as `"NO"`
   3. `markets.outcome` is NULL only for markets with genuinely unresolved or missing Gamma data — not as a default
   4. A summary is reported showing count of markets resolved vs. skipped
-**Plans**: TBD
+**Plans**: 2 plans
+Plans:
+- [ ] 16-01-PLAN.md — Resolution logic (TDD): determine_winner(), classify_token_outcome(), resolve_market_outcomes()
+- [ ] 16-02-PLAN.md — polymarket resolve-outcomes CLI command wired to resolution logic
 
 ### Phase 17: Deep Token Classification
 **Goal**: Token catalog entries carry `node_path` and `depth` at game, tournament, and team levels derived from Gamma event tags, enabling multi-depth expertise scoring to function correctly
@@ -119,6 +122,6 @@ Plans:
 | 13. Esports Token Catalog | v1.1 | 3/3 | Complete | 2026-02-16 |
 | 14. Timestamp Fix & Pipeline Decomp | v1.1 | 2/2 | Complete | 2026-02-16 |
 | 15. Gamma Events Ingestion | v1.2 | 0/2 | Planned | - |
-| 16. Market Outcome Resolution | v1.2 | 0/? | Not started | - |
+| 16. Market Outcome Resolution | v1.2 | 0/2 | Planned | - |
 | 17. Deep Token Classification | v1.2 | 0/? | Not started | - |
 | 18. End-to-End Validation | v1.2 | 0/? | Not started | - |
