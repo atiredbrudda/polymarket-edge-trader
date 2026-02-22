@@ -1,0 +1,1 @@
+"""Gamma Events ingestion package."""

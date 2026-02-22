@@ -25,6 +25,19 @@ Read this section and the AGENTS.md file in project root before starting work. R
 
 ## Cleared
 
+### worker/15-02 — 2026-02-22
+- **Branch:** worker/15-02
+- **Cleared by:** Sonnet 4.6
+- **Reviewer fixes (2):**
+  1. `INSERT OR REPLACE` → `INSERT INTO ... ON CONFLICT(event_id) DO UPDATE SET ...` in `upsert_gamma_events`. `INSERT OR REPLACE` deletes + re-inserts, overwriting `created_at` on every re-run. The ON CONFLICT form preserves `created_at` after first insert.
+  2. `str(event.get("id", ""))` → `str(event.get("id") or "")` — the original produced `"None"` (truthy) for `{"id": null}` API responses, bypassing the empty-id guard. `or ""` coerces `None` correctly.
+- **Files in scope:**
+  - src/gamma/__init__.py (NEW — package marker)
+  - src/gamma/persist.py (NEW — `upsert_gamma_events`, `_extract_token_ids`, `_parse_datetime`)
+  - src/cli/commands.py (`ingest-events` command, +44 lines)
+  - .planning/phases/15-gamma-events-ingestion/15-02-SUMMARY.md (NEW)
+- **Notes:** Clean implementation. Pagination + rate limiter integration correct. `sorted(set(...))` dedup of token IDs is good defensive coding. Both clobTokenIds formats (list and JSON string) handled. 8,520/8,545 events persisted (25 skipped due to empty IDs) — confirmed in worker's run. Idempotency verified. 7 gamma_client tests pass, 0 new regressions. No tests added for persist module — acceptable; helpers are thin and worker verified via live run.
+
 ### worker/15-01 — 2026-02-22
 - **Branch:** worker/15-01
 - **Cleared by:** Sonnet 4.6
