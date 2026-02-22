@@ -17,7 +17,17 @@ Read this section and the AGENTS.md file in project root before starting work. R
 
 ## Pending Review
 
-(empty — no pending reviews)
+### worker/16-01 — 2026-02-22
+- **Plan:** 16-01 (Market Outcome Resolution - TDD Resolution Logic)
+- **Branch:** worker/16-01
+- **Commits:** aa9663f
+- **Files changed:**
+  - src/gamma/persist.py (fixed token ID order)
+  - src/gamma/resolution.py (NEW - determine_winner, classify_token_outcome, resolve_market_outcomes)
+  - tests/test_gamma_resolution.py (NEW - 22 TDD tests)
+  - .planning/phases/16-market-outcome-resolution/16-01-SUMMARY.md (NEW)
+- **Worker notes:** Fixed order-destroying sorted() in persist.py, re-ingested gamma events with correct token order. Implemented outcome resolution logic with TDD approach. All 22 tests pass. No new regressions.
+- **Decisions made:** Used `dict.fromkeys()` instead of `sorted(set())` to preserve token order while deduplicating. Resolution logic uses markets.tokens JSON (99.8% coverage) instead of token_catalog (37% coverage).
 
 ## Re-Review
 
