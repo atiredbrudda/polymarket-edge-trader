@@ -62,7 +62,10 @@ See `.planning/milestones/v1.1-ROADMAP.md` for full details.
   2. Downloaded events are persisted to the local database and survive process restart
   3. Stored event records include `clobTokenIds` (linking to markets), `outcomePrices` (winning side), and hierarchical tags (game/tournament/team slugs)
   4. Re-running the command is idempotent — no duplicate events created, existing data updated or skipped cleanly
-**Plans**: TBD
+**Plans**: 2 plans
+Plans:
+- [ ] 15-01-PLAN.md — GammaEvent ORM model + GammaMarketClient bulk download method
+- [ ] 15-02-PLAN.md — Persistence layer + polymarket ingest-events CLI command
 
 ### Phase 16: Market Outcome Resolution
 **Goal**: Every resolved market in the database has `markets.outcome` populated, enabling PnL calculations in the scoring pipeline
@@ -115,7 +118,7 @@ See `.planning/milestones/v1.1-ROADMAP.md` for full details.
 | 12. Deep Niche Scoring | v1.1 | 3/3 | Complete | 2026-02-14 |
 | 13. Esports Token Catalog | v1.1 | 3/3 | Complete | 2026-02-16 |
 | 14. Timestamp Fix & Pipeline Decomp | v1.1 | 2/2 | Complete | 2026-02-16 |
-| 15. Gamma Events Ingestion | v1.2 | 0/? | Not started | - |
+| 15. Gamma Events Ingestion | v1.2 | 0/2 | Planned | - |
 | 16. Market Outcome Resolution | v1.2 | 0/? | Not started | - |
 | 17. Deep Token Classification | v1.2 | 0/? | Not started | - |
 | 18. End-to-End Validation | v1.2 | 0/? | Not started | - |
