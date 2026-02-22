@@ -366,3 +366,28 @@ class TokenCatalog(Base):
         Index("ix_catalog_condition", "condition_id"),
         Index("ix_catalog_niche", "niche_slug"),
     )
+
+
+class GammaEvent(Base):
+    """Gamma API event data for closed eSports markets.
+
+    Stores events fetched from gamma-api.polymarket.com/events for Phase 15.
+    Used for market resolution and deep classification.
+    """
+
+    __tablename__ = "gamma_events"
+
+    event_id: Mapped[str] = mapped_column(String(100), primary_key=True)
+    title: Mapped[str | None] = mapped_column(String(500), nullable=True)
+    slug: Mapped[str | None] = mapped_column(String(200), nullable=True)
+    outcome_prices: Mapped[str | None] = mapped_column(String(1000), nullable=True)
+    clob_token_ids: Mapped[str | None] = mapped_column(String(5000), nullable=True)
+    tags: Mapped[str | None] = mapped_column(String(2000), nullable=True)
+    start_date: Mapped[datetime | None] = mapped_column(nullable=True)
+    end_date: Mapped[datetime | None] = mapped_column(nullable=True)
+    created_at: Mapped[datetime] = mapped_column(default=datetime.utcnow, nullable=False)
+    updated_at: Mapped[datetime] = mapped_column(
+        default=datetime.utcnow, onupdate=datetime.utcnow, nullable=False
+    )
+
+    __table_args__ = (Index("ix_gamma_event_end_date", "end_date"),)

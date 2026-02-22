@@ -172,6 +172,59 @@ class GammaMarketClient:
         logger.info(f"Fetched {len(all_events)} events from Gamma API")
         return all_events
 
+    def get_closed_esports_events(
+        self,
+        page_size: int = 200,
+    ) -> list[dict[str, Any]]:
+        """Fetch ALL closed eSports events (tag_id=64) from Gamma API.
+
+        Used for Phase 15 bulk ingestion. Downloads ~8,500 events (~30s).
+        No active/date filtering — fetches the complete historical set.
+
+        Args:
+            page_size: Events per API request (default 200, max 500 per Gamma API)
+
+        Returns:
+            List of event dicts with fields: id, title, slug, outcomePrices,
+            markets[].clobTokenIds, tags[], startDate, endDate
+        """
+        all_events = []
+        offset = 0
+
+        while True:
+            params: dict[str, Any] = {
+                "active": "false",
+                "tag_id": 64,
+                "limit": page_size,
+                "offset": offset,
+                "order": "endDate",
+                "ascending": "true",
+            }
+
+            if self.rate_limiter is not None:
+                self.rate_limiter.acquire()
+
+            response = httpx.get(
+                self.BASE_URL + "/events", params=params, timeout=60.0
+            )
+            response.raise_for_status()
+
+            events = response.json()
+
+            if not events:
+                break
+
+            all_events.extend(events)
+            logger.info(f"Fetched {len(events)} events (total so far: {len(all_events)})")
+
+            if len(events) < page_size:
+                break
+
+            offset += page_size
+
+        logger.info(f"Downloaded {len(all_events)} closed eSports events from Gamma API")
+        return all_events
+
     def get_public_profile(self, address: str) -> dict | None:
         """Fetch public profile for a Polymarket address.
 
