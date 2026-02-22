@@ -17,22 +17,23 @@ Read this section and the AGENTS.md file in project root before starting work. R
 
 ## Pending Review
 
-### worker/15-01 — 2026-02-22
-- **Plan:** 15-01 (Gamma Events Ingestion - Model and API Method)
-- **Branch:** worker/15-01
-- **Commits:** 6c58e38
-- **Files changed:**
-  - src/db/models.py (NEW GammaEvent class)
-  - src/api/gamma_client.py (NEW get_closed_esports_events method)
-  - .planning/phases/15-gamma-events-ingestion/15-01-SUMMARY.md (NEW)
-- **Worker notes:** Added GammaEvent ORM model with all required fields for Phase 15. Added get_closed_esports_events() method to GammaMarketClient for bulk download of closed eSports events. API connectivity verified (status 200). No new test regressions.
-- **Decisions made:** Used 60s timeout for bulk download (vs 30s for other methods) due to ~10MB payload. Used offset-based pagination matching existing get_events() pattern.
+(empty — no pending reviews)
 
 ## Re-Review
 
 (empty — no re-reviews)
 
 ## Cleared
+
+### worker/15-01 — 2026-02-22
+- **Branch:** worker/15-01
+- **Cleared by:** Sonnet 4.6
+- **Reviewer fix:** Changed `clob_token_ids` from `String(5000)` to `Text` in `GammaEvent` model. Live API probe showed events can have 7,346+ chars of token IDs (e.g. dota-2-the-international-champions: 1,462 tokens). Also added `Text` to the sqlalchemy import in models.py.
+- **Files in scope:**
+  - src/db/models.py (NEW `GammaEvent` class — reviewer fixed `clob_token_ids` type)
+  - src/api/gamma_client.py (NEW `get_closed_esports_events()` method)
+  - .planning/phases/15-gamma-events-ingestion/15-01-SUMMARY.md (NEW)
+- **Notes:** Clean implementation. Pagination pattern matches existing `get_events()`. 60s timeout justified for ~10MB bulk download. `"active": "false"` string matches existing pattern (`str(False).lower()`). 7 existing gamma_client tests pass, 0 new regressions. Pre-existing failure `test_query_uses_parameterized_sql` confirmed on main (not introduced by this branch). No tests added for `get_closed_esports_events()` — acceptable for a thin API method; integration test will come with the CLI plan.
 
 ### worker/fix-jbecker-unique-constraint — 2026-02-21
 - **Branch:** worker/fix-jbecker-unique-constraint

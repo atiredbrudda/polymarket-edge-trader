@@ -12,7 +12,7 @@ All models use SQLAlchemy 2.0 declarative style with Mapped[] type hints.
 from datetime import datetime
 from decimal import Decimal
 
-from sqlalchemy import ForeignKey, Index, Numeric, String
+from sqlalchemy import ForeignKey, Index, Numeric, String, Text
 from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column
 
 
@@ -381,7 +381,7 @@ class GammaEvent(Base):
     title: Mapped[str | None] = mapped_column(String(500), nullable=True)
     slug: Mapped[str | None] = mapped_column(String(200), nullable=True)
     outcome_prices: Mapped[str | None] = mapped_column(String(1000), nullable=True)
-    clob_token_ids: Mapped[str | None] = mapped_column(String(5000), nullable=True)
+    clob_token_ids: Mapped[str | None] = mapped_column(Text, nullable=True)
     tags: Mapped[str | None] = mapped_column(String(2000), nullable=True)
     start_date: Mapped[datetime | None] = mapped_column(nullable=True)
     end_date: Mapped[datetime | None] = mapped_column(nullable=True)
