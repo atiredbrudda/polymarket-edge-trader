@@ -48,6 +48,7 @@ from src.api.gamma_client import GammaMarketClient
 from src.pipeline.filters import CategoryFilter
 from src.alerts.telegram import TelegramAlerter
 from src.gamma.persist import upsert_gamma_events
+from src.gamma.resolution import resolve_market_outcomes
 
 
 def _get_dependencies(settings=None):
@@ -2109,6 +2110,64 @@ def ingest_events(verbose):
 
     except Exception as e:
         logger.error(f"ingest-events failed: {e}")
+        console.print(f"[red]Error: {e}[/red]")
+        raise SystemExit(1)
+
+
+@cli.command("resolve-outcomes")
+@click.option("--verbose", "-v", is_flag=True, help="Enable debug logging")
+def resolve_outcomes(verbose):
+    """Populate markets.outcome for all resolved markets using Gamma event data.
+
+    Reads gamma_events table (populated by ingest-events) and sets
+    markets.outcome to 'YES' or 'NO' for each market whose token ID
+    appears in a stored Gamma event.
+
+    Resolution logic:
+    - Parses clob_token_ids and outcome_prices from each gamma event
+    - The token with price closest to 1.0 (and > 0.5) is the winner
+    - Markets linked to the winning token get outcome='YES'
+    - All other tokens in the event get outcome='NO'
+    - Markets not linked to any gamma event remain outcome=NULL
+
+    Safe to re-run — idempotent. Run after 'polymarket ingest-events'.
+
+    Examples:
+        polymarket resolve-outcomes
+        polymarket resolve-outcomes --verbose
+    """
+    logger.info("RESOLVE-OUTCOMES command started")
+
+    if verbose:
+        logger.remove()
+        logger.add(sys.stderr, level="DEBUG")
+
+    console = Console()
+
+    try:
+        settings = get_settings()
+        session_factory, _, _, _, _ = _get_dependencies(settings)
+
+        console.print("[bold]Resolving market outcomes from Gamma event data...[/bold]")
+
+        with get_session(session_factory) as session:
+            counts = resolve_market_outcomes(session)
+            session.commit()
+
+        resolved = counts["resolved"]
+        skipped_events = counts["skipped_events"]
+        skipped_tokens = counts["skipped_tokens"]
+
+        console.print(f"[green]Done.[/green] {resolved} markets resolved.")
+        console.print(f"  Events skipped (no clear winner): [yellow]{skipped_events}[/yellow]")
+        console.print(f"  Tokens skipped (not in catalog):  [yellow]{skipped_tokens}[/yellow]")
+        logger.info(
+            f"RESOLVE-OUTCOMES completed: {resolved} resolved, "
+            f"{skipped_events} events skipped, {skipped_tokens} tokens skipped"
+        )
+
+    except Exception as e:
+        logger.error(f"resolve-outcomes failed: {e}")
         console.print(f"[red]Error: {e}[/red]")
         raise SystemExit(1)
 
