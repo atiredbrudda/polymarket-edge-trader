@@ -17,7 +17,17 @@ Read this section and the AGENTS.md file in project root before starting work. R
 
 ## Pending Review
 
-(empty — no pending reviews)
+### worker/15-02 — 2026-02-22
+- **Plan:** 15-02 (Gamma Events Ingestion - CLI Command)
+- **Branch:** worker/15-02
+- **Commits:** e50166e
+- **Files changed:**
+  - src/gamma/__init__.py (NEW)
+  - src/gamma/persist.py (NEW - upsert_gamma_events function)
+  - src/cli/commands.py (NEW ingest-events command)
+  - .planning/phases/15-gamma-events-ingestion/15-02-SUMMARY.md (NEW)
+- **Worker notes:** Added ingest-events CLI command that downloads all closed eSports events (8520 persisted) from Gamma API and stores them in gamma_events table. Idempotent via INSERT OR REPLACE. No new test regressions.
+- **Decisions made:** Used INSERT OR REPLACE instead of INSERT OR IGNORE so re-runs update existing rows with fresh data. Extracted clob_token_ids from nested markets[] array.
 
 ## Re-Review
 
