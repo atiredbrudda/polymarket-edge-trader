@@ -5,16 +5,16 @@
 See: .planning/PROJECT.md (updated 2026-02-21)
 
 **Core value:** Surface where smart money is moving in niche prediction markets so the user can see what informed traders are doing and factor that into their own thinking.
-**Current focus:** v1.2 — Phase 15: Gamma Events Ingestion
+**Current focus:** v1.2 — Phase 16: Market Outcome Resolution
 
 ## Current Position
 
-Phase: 15 of 18 (Gamma Events Ingestion)
+Phase: 16 of 18 (Market Outcome Resolution)
 Plan: 0 of ? in current phase
 Status: Ready to plan
-Last activity: 2026-02-21 — v1.2 roadmap created; phases 15-18 defined
+Last activity: 2026-02-22 — Phase 15 complete (2/2 plans executed and reviewed)
 
-Progress: [░░░░░░░░░░] 0% (v1.2)
+Progress: [██░░░░░░░░] 25% (v1.2)
 
 ## Performance Metrics
 
@@ -56,7 +56,7 @@ None — Gamma Events API access confirmed, data structure understood from prior
 
 ## Session Continuity
 
-Last session: 2026-02-21
-Stopped at: v1.2 roadmap written — phases 15-18 defined, ready to plan Phase 15
+Last session: 2026-02-22
+Stopped at: Phase 15 reviewed and merged — GammaEvent model, get_closed_esports_events(), upsert_gamma_events(), ingest-events CLI command. 8,520 events persisted, idempotency confirmed.
 Resume file: None
-Next: /gsd:plan-phase 15
+Next: /gsd:plan-phase 16
