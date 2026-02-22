@@ -30,11 +30,10 @@ def upsert_gamma_events(events: list[dict], session: Session) -> int:
         title = str(event.get("title", "") or "")[:500]
         slug = str(event.get("slug", "") or "")[:200]
 
-        outcome_prices = json.dumps(event.get("outcomePrices") or [])
+        clob_token_ids, outcome_prices = _extract_tokens_and_prices(event)
+        clob_token_ids_json = json.dumps(clob_token_ids)
+        outcome_prices_json = json.dumps(outcome_prices)
         tags = json.dumps(event.get("tags") or [])
-
-        clob_token_ids = _extract_token_ids(event)
-        clob_token_ids_json = json.dumps(list(dict.fromkeys(clob_token_ids)))
 
         start_date = _parse_datetime(event.get("startDate"))
         end_date = _parse_datetime(event.get("endDate"))
@@ -43,7 +42,7 @@ def upsert_gamma_events(events: list[dict], session: Session) -> int:
             "event_id": event_id,
             "title": title,
             "slug": slug,
-            "outcome_prices": outcome_prices,
+            "outcome_prices": outcome_prices_json,
             "clob_token_ids": clob_token_ids_json,
             "tags": tags,
             "start_date": start_date.isoformat() if start_date else None,
@@ -77,19 +76,25 @@ def upsert_gamma_events(events: list[dict], session: Session) -> int:
     return len(rows)
 
 
-def _extract_token_ids(event: dict) -> list[str]:
-    """Extract all clobTokenIds from nested markets in an event.
+def _extract_tokens_and_prices(event: dict) -> tuple[list[str], list[str]]:
+    """Extract clobTokenIds and outcomePrices from nested markets in an event.
+
+    Maintains positional correspondence between tokens and prices by processing
+    each market in order and appending token-price pairs together.
 
     Args:
         event: Raw event dict from Gamma API
 
     Returns:
-        Flat list of all token ID strings from all markets in the event
+        Tuple of (token_ids, prices) where token_ids[i] corresponds to prices[i]
     """
     token_ids = []
+    prices = []
 
     for market in event.get("markets") or []:
         raw_ids = market.get("clobTokenIds")
+        raw_prices = market.get("outcomePrices")
+
         if raw_ids is None:
             continue
 
@@ -99,12 +104,34 @@ def _extract_token_ids(event: dict) -> list[str]:
             except json.JSONDecodeError:
                 continue
 
-        if isinstance(raw_ids, list):
-            for tid in raw_ids:
-                if isinstance(tid, str) and tid:
-                    token_ids.append(tid)
+        if isinstance(raw_prices, str):
+            try:
+                raw_prices = json.loads(raw_prices)
+            except json.JSONDecodeError:
+                raw_prices = None
 
-    return token_ids
+        if isinstance(raw_ids, list):
+            if isinstance(raw_prices, list) and len(raw_prices) == len(raw_ids):
+                for tid, price in zip(raw_ids, raw_prices):
+                    if isinstance(tid, str) and tid:
+                        token_ids.append(tid)
+                        prices.append(str(price) if price is not None else "0")
+            else:
+                for tid in raw_ids:
+                    if isinstance(tid, str) and tid:
+                        token_ids.append(tid)
+                        prices.append("0")
+
+    seen = set()
+    unique_token_ids = []
+    unique_prices = []
+    for tid, price in zip(token_ids, prices):
+        if tid not in seen:
+            seen.add(tid)
+            unique_token_ids.append(tid)
+            unique_prices.append(price)
+
+    return unique_token_ids, unique_prices
 
 
 def _parse_datetime(value: str | None) -> datetime | None:

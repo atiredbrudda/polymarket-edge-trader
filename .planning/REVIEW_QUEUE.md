@@ -17,7 +17,16 @@ Read this section and the AGENTS.md file in project root before starting work. R
 
 ## Pending Review
 
-(empty)
+### worker/16-02 — 2026-02-22
+- **Plan:** 16-02 (Market Outcome Resolution - CLI Command)
+- **Branch:** worker/16-02
+- **Commits:** c751606
+- **Files changed:**
+  - src/gamma/persist.py (fixed outcome_prices extraction - was at market level not event)
+  - src/cli/commands.py (NEW resolve-outcomes command)
+  - .planning/phases/16-market-outcome-resolution/16-02-SUMMARY.md (NEW)
+- **Worker notes:** Fixed critical bug in persist.py - outcomePrices is at market level in Gamma API, not event level. Added _extract_tokens_and_prices() to maintain token-price correspondence. Re-ingested events with correct data. Results: 21,594 token updates, 10,797 unique markets resolved. Idempotent on re-run.
+- **Decisions made:** Extract outcome_prices from markets[] array same as clob_token_ids to maintain positional correspondence. The resolution logic uses zip() so order is critical.
 
 ## Re-Review
 
