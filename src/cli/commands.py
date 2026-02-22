@@ -47,6 +47,7 @@ from src.api.client import PolymarketClient
 from src.api.gamma_client import GammaMarketClient
 from src.pipeline.filters import CategoryFilter
 from src.alerts.telegram import TelegramAlerter
+from src.gamma.persist import upsert_gamma_events
 
 
 def _get_dependencies(settings=None):
@@ -2067,6 +2068,49 @@ def reset_backfill(confirm, verbose):
     logger.info(
         f"RESET-BACKFILL completed: {deleted} trades deleted, {len(affected_addresses)} traders reset"
     )
+
+
+@cli.command("ingest-events")
+@click.option("--verbose", "-v", is_flag=True, help="Enable debug logging")
+def ingest_events(verbose):
+    """Download and persist all closed eSports events from Gamma API.
+
+    Downloads ~8,500 closed eSports events (tag_id=64) from
+    gamma-api.polymarket.com/events and persists them to the local
+    gamma_events table. Safe to re-run — existing events are updated
+    in place (idempotent upsert).
+
+    Takes ~30 seconds on first run. Subsequent runs refresh the data.
+    """
+    logger.info("INGEST-EVENTS command started")
+
+    if verbose:
+        logger.remove()
+        logger.add(sys.stderr, level="DEBUG")
+
+    console = Console()
+
+    try:
+        settings = get_settings()
+        session_factory, _, _, _, gamma_client = _get_dependencies(settings)
+
+        console.print("[bold]Downloading closed eSports events from Gamma API...[/bold]")
+
+        events = gamma_client.get_closed_esports_events()
+
+        console.print(f"Downloaded [bold]{len(events)}[/bold] events. Persisting to database...")
+
+        with get_session(session_factory) as session:
+            count = upsert_gamma_events(events, session)
+            session.commit()
+
+        console.print(f"[green]Done.[/green] {count} events upserted into gamma_events table.")
+        logger.info(f"INGEST-EVENTS completed: {count} events upserted")
+
+    except Exception as e:
+        logger.error(f"ingest-events failed: {e}")
+        console.print(f"[red]Error: {e}[/red]")
+        raise SystemExit(1)
 
 
 if __name__ == "__main__":
