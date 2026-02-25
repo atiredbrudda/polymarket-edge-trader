@@ -17,40 +17,44 @@ Read this section and the AGENTS.md file in project root before starting work. R
 
 ## Pending Review
 
-### worker/17-01 — 2026-02-25
-- **Plan:** 17-01 (Deep Token Classification - TDD)
-- **Branch:** worker/17-01
-- **Files changed:**
-  - src/gamma/classification.py (NEW — _extract_classification, classify_tokens_from_gamma_events)
-  - tests/test_gamma_classification.py (NEW — 16 TDD tests)
-  - src/cli/commands.py (classify-tokens CLI command)
-- **Worker notes:** TDD implementation. node_path format: 'esports/cs2/iem-katowice-2024/navi', depth capped at 3. Bulk UPDATE with idempotency guard (depth IS NULL OR depth < :depth). All 16 tests pass.
-
-### worker/17-02 — 2026-02-25
-- **Plan:** 17-02 (Resolution Counter Fix)
-- **Branch:** worker/17-01
-- **Files changed:**
-  - src/gamma/resolution.py (added markets_resolved counter, integrated classify_token_outcome)
-  - src/cli/commands.py (updated resolve-outcomes to show both market and token counts)
-  - tests/test_gamma_resolution.py (removed TestClassifyTokenOutcome, replaced idempotent test with in-memory SQLite)
-- **Worker notes:** Fixed misleading counter - now shows unique markets (not inflated token count). Integrated classify_token_outcome() instead of inline if/elif. All 35 tests pass (19 resolution + 16 classification).
-
-### worker/16-02 — 2026-02-22
-- **Plan:** 16-02 (Market Outcome Resolution - CLI Command)
-- **Branch:** worker/16-02
-- **Commits:** c751606
-- **Files changed:**
-  - src/gamma/persist.py (fixed outcome_prices extraction - was at market level not event)
-  - src/cli/commands.py (NEW resolve-outcomes command)
-  - .planning/phases/16-market-outcome-resolution/16-02-SUMMARY.md (NEW)
-- **Worker notes:** Fixed critical bug in persist.py - outcomePrices is at market level in Gamma API, not event level. Added _extract_tokens_and_prices() to maintain token-price correspondence. Re-ingested events with correct data. Results: 21,594 token updates, 10,797 unique markets resolved. Idempotent on re-run.
-- **Decisions made:** Extract outcome_prices from markets[] array same as clob_token_ids to maintain positional correspondence. The resolution logic uses zip() so order is critical.
+(empty — no pending reviews)
 
 ## Re-Review
 
 (empty — no re-reviews)
 
 ## Cleared
+
+### worker/17-02 — 2026-02-25
+- **Branch:** worker/17-02
+- **Cleared by:** Sonnet 4.6
+- **Files in scope:**
+  - src/gamma/resolution.py (added `markets_resolved_set`, integrated `classify_token_outcome()` call, new `"markets_resolved"` return key)
+  - src/cli/commands.py (`resolve-outcomes` output updated to show `"{markets_resolved} markets resolved ({resolved} token updates)"`)
+  - tests/test_gamma_resolution.py (removed `TestClassifyTokenOutcome` 3 tests; `test_idempotent_re_run` rewritten with real in-memory SQLite — creates Market + GammaEvent rows, verifies YES not flipped to NO on second run)
+- **Notes:** Clean implementation. All three plan objectives correct. `markets_resolved_set` tracks unique `market.condition_id` values — has a minor edge case where markets with NULL condition_id are resolved but not counted, but this is unlikely in practice. `classify_token_outcome()` is now live code (called at resolution.py:113) — correctly replaces the inline if/elif. The new `test_idempotent_re_run` is a proper integration test. 19 resolution tests pass, 0 new regressions.
+
+### worker/17-01 — 2026-02-25
+- **Branch:** worker/17-01
+- **Cleared by:** Sonnet 4.6
+- **Reviewer fixes (2):**
+  1. `classify_tokens_from_gamma_events()` called `session.commit()` internally — inconsistent with `resolve_market_outcomes()` which leaves commit to caller. Removed internal commit; added explicit `session.commit()` to the `classify-tokens` CLI block, matching the `resolve-outcomes` pattern.
+  2. `classified = len(update_rows)` overcounts — the SQL idempotency guard (`depth IS NULL OR depth < :depth`) silently skips already-classified tokens but they were still counted. Renamed `classified` → `token_update_attempts` throughout (function, return dict, log, CLI output), making clear this is an upper bound. Tests updated to use `result["token_update_attempts"]`.
+- **Files in scope:**
+  - src/gamma/classification.py (NEW — `_extract_classification`, `classify_tokens_from_gamma_events`)
+  - tests/test_gamma_classification.py (NEW — 16 TDD tests; reviewer updated 5 `result["classified"]` → `result["token_update_attempts"]`)
+  - src/cli/commands.py (`classify-tokens` CLI command; reviewer added `session.commit()` + updated output label)
+- **Notes:** Clean TDD structure. `_extract_classification()` correctly filters esports root tag by slug equality and caps depth at 3. Bulk UPDATE with idempotency guard is correct. `TestClassifyTokensIdempotency.test_idempotent_re_run` uses real in-memory SQLite with `session.expire_all()` + re-query — solid. 16/16 tests pass, 0 new regressions.
+
+### worker/16-02 — 2026-02-22
+- **Branch:** worker/16-02
+- **Cleared by:** Antigravity (Gemini)
+- **Review commit:** 8c5fb6a
+- **Files in scope:**
+  - src/gamma/persist.py (refactored `_extract_token_ids()` → `_extract_tokens_and_prices()` — fixes outcomePrices extraction from market level, not event level)
+  - src/cli/commands.py (`resolve-outcomes` CLI command, +59 lines)
+  - .planning/phases/16-market-outcome-resolution/16-02-SUMMARY.md (NEW)
+- **Notes:** Clean implementation following `ingest-events` pattern exactly. Bug fix in persist.py is correct — `outcomePrices` is at `markets[].outcomePrices`, not event level. `_extract_tokens_and_prices()` properly maintains positional correspondence with dedup. No cosmetic reformatting, no debug hardcodes. 0 new test regressions (5 pre-existing `test_catalog_builder` failures identical on main). Minor observation: CLI output says "Tokens skipped (not in catalog)" but resolution uses `token_to_market` from markets table, not token_catalog — cosmetic label mismatch inherited from plan spec, non-blocking. (Counter and label fixed in worker/17-02.)
 
 ### worker/16-01 — 2026-02-22
 - **Branch:** worker/16-01

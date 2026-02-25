@@ -89,7 +89,7 @@ class TestClassifyTokensFromGammaEvents:
 
         result = classify_tokens_from_gamma_events(mock_session)
 
-        assert result["classified"] == 2
+        assert result["token_update_attempts"] == 2
         mock_session.execute.assert_called_once()
         mock_session.commit.assert_called_once()
 
@@ -107,7 +107,7 @@ class TestClassifyTokensFromGammaEvents:
         result = classify_tokens_from_gamma_events(mock_session)
 
         assert result["skipped_no_tags"] == 1
-        assert result["classified"] == 0
+        assert result["token_update_attempts"] == 0
 
     def test_skips_event_with_esports_only_tags(self):
         """Root-only tags (no sub-classification) counted as skipped_shallow."""
@@ -123,7 +123,7 @@ class TestClassifyTokensFromGammaEvents:
         result = classify_tokens_from_gamma_events(mock_session)
 
         assert result["skipped_shallow"] == 1
-        assert result["classified"] == 0
+        assert result["token_update_attempts"] == 0
 
     def test_skips_event_with_no_token_ids(self):
         """Valid tags but clob_token_ids=None counts as skipped_no_tokens."""
@@ -139,7 +139,7 @@ class TestClassifyTokensFromGammaEvents:
         result = classify_tokens_from_gamma_events(mock_session)
 
         assert result["skipped_no_tokens"] == 1
-        assert result["classified"] == 0
+        assert result["token_update_attempts"] == 0
 
     def test_skips_event_with_invalid_tags_json(self):
         """Invalid tags JSON string counts as skipped_no_tags."""

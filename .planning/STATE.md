@@ -5,16 +5,16 @@
 See: .planning/PROJECT.md (updated 2026-02-21)
 
 **Core value:** Surface where smart money is moving in niche prediction markets so the user can see what informed traders are doing and factor that into their own thinking.
-**Current focus:** v1.2 — Phase 16: Market Outcome Resolution
+**Current focus:** v1.2 — Phase 18: End-to-End Validation
 
 ## Current Position
 
-Phase: 16 of 18 (Market Outcome Resolution)
-Plan: 0 of ? in current phase
-Status: Ready to plan
-Last activity: 2026-02-22 — Phase 15 complete (2/2 plans executed and reviewed)
+Phase: 17 of 18 (Deep Token Classification — COMPLETE)
+Plan: 2 of 2 in current phase
+Status: Phase 17 complete — ready for Phase 18 planning
+Last activity: 2026-02-25 — Phase 17 complete (2/2 plans executed and reviewed)
 
-Progress: [██░░░░░░░░] 25% (v1.2)
+Progress: [███████░░░] 75% (v1.2)
 
 ## Performance Metrics
 
@@ -56,7 +56,7 @@ None — Gamma Events API access confirmed, data structure understood from prior
 
 ## Session Continuity
 
-Last session: 2026-02-22
-Stopped at: Phase 15 reviewed and merged — GammaEvent model, get_closed_esports_events(), upsert_gamma_events(), ingest-events CLI command. 8,520 events persisted, idempotency confirmed.
+Last session: 2026-02-25
+Stopped at: Phase 17 reviewed and merged — classification.py (_extract_classification, classify_tokens_from_gamma_events) + classify-tokens CLI (17-01) + resolution counter fix, classify_token_outcome integration, idempotency test rewrite (17-02). Reviewer fixes: removed internal session.commit() from classification.py; renamed classified → token_update_attempts.
 Resume file: None
-Next: /gsd:plan-phase 16
+Next: Plan Phase 18 (End-to-End Validation)

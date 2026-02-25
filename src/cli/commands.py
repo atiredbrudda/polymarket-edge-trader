@@ -2234,13 +2234,17 @@ def classify_tokens(verbose):
 
         with get_session(session_factory) as session:
             result = classify_tokens_from_gamma_events(session)
+            session.commit()
 
-        classified = result["classified"]
+        token_update_attempts = result["token_update_attempts"]
         skipped_shallow = result["skipped_shallow"]
         skipped_no_tags = result["skipped_no_tags"]
         skipped_no_tokens = result["skipped_no_tokens"]
 
-        console.print(f"[green]Done.[/green] {classified} token updates applied.")
+        console.print(
+            f"[green]Done.[/green] {token_update_attempts} classification attempts"
+            f" (actual DB updates may be lower on re-runs)."
+        )
         console.print(
             f"  Events skipped (no sub-classification tags): [yellow]{skipped_shallow}[/yellow]"
         )
@@ -2251,7 +2255,7 @@ def classify_tokens(verbose):
             f"  Events skipped (no token IDs): [yellow]{skipped_no_tokens}[/yellow]"
         )
         logger.info(
-            f"CLASSIFY-TOKENS completed: {classified} token updates, "
+            f"CLASSIFY-TOKENS completed: {token_update_attempts} classification attempts, "
             f"{skipped_shallow} shallow, {skipped_no_tags} no_tags, "
             f"{skipped_no_tokens} no_tokens"
         )

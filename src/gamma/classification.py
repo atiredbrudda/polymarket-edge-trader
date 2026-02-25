@@ -36,12 +36,15 @@ def classify_tokens_from_gamma_events(session: Session) -> dict[str, int]:
     tags (game, tournament, team).
 
     Args:
-        session: SQLAlchemy session.
+        session: SQLAlchemy session (caller manages commit).
 
     Returns:
-        Dict with counts: classified, skipped_no_tags, skipped_no_tokens, skipped_shallow.
+        Dict with counts: token_update_attempts, skipped_no_tags, skipped_no_tokens, skipped_shallow.
+        Note: token_update_attempts is the number of token IDs submitted for classification;
+        actual DB rows updated may be lower (idempotency guard skips tokens already at
+        equal or deeper depth, and tokens absent from token_catalog are unaffected).
     """
-    classified = 0
+    token_update_attempts = 0
     skipped_no_tags = 0
     skipped_no_tokens = 0
     skipped_shallow = 0
@@ -97,16 +100,15 @@ def classify_tokens_from_gamma_events(session: Session) -> dict[str, int]:
             ),
             update_rows,
         )
-        classified = len(update_rows)
+        token_update_attempts = len(update_rows)
 
-    session.commit()
     logger.info(
-        f"Classification complete: {classified} token updates, "
+        f"Classification complete: {token_update_attempts} token classification attempts, "
         f"{skipped_shallow} shallow, {skipped_no_tags} no_tags, "
         f"{skipped_no_tokens} no_tokens"
     )
     return {
-        "classified": classified,
+        "token_update_attempts": token_update_attempts,
         "skipped_no_tags": skipped_no_tags,
         "skipped_no_tokens": skipped_no_tokens,
         "skipped_shallow": skipped_shallow,
