@@ -104,7 +104,10 @@ Plans:
   2. Leaderboard shows traders ranked by expertise score with win rates calculated from resolved market outcomes (not NULL)
   3. A trader known to have traded resolved eSports markets appears in the leaderboard with a plausible score
   4. No pipeline errors or empty-result aborts when resolution and classification data are present
-**Plans**: TBD
+**Plans**: 2 plans
+Plans:
+- [ ] 18-01-PLAN.md — TDD resolve_positions() function + resolve-positions CLI command
+- [ ] 18-02-PLAN.md — Diagnostic + MarketClassification backfill + E2E score/leaderboard verification
 
 ## Progress
 
@@ -127,4 +130,4 @@ Plans:
 | 15. Gamma Events Ingestion | v1.2 | 0/2 | Planned | - |
 | 16. Market Outcome Resolution | v1.2 | 0/2 | Planned | - |
 | 17. Deep Token Classification | v1.2 | 0/2 | Planned | - |
-| 18. End-to-End Validation | v1.2 | 0/? | Not started | - |
+| 18. End-to-End Validation | v1.2 | 0/2 | Not started | - |
