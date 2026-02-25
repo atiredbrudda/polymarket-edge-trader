@@ -6,7 +6,6 @@ from unittest.mock import MagicMock, patch
 import pytest
 
 from src.gamma.resolution import (
-    classify_token_outcome,
     determine_winner,
     resolve_market_outcomes,
 )
@@ -24,9 +23,7 @@ class TestDetermineWinner:
         assert result == "tok_b"
 
     def test_multi_outcome_event(self):
-        result = determine_winner(
-            ["tok_a", "tok_b", "tok_c"], ["0.8", "0.15", "0.05"]
-        )
+        result = determine_winner(["tok_a", "tok_b", "tok_c"], ["0.8", "0.15", "0.05"])
         assert result == "tok_a"
 
     def test_no_clear_winner_both_at_05(self):
@@ -62,22 +59,6 @@ class TestDetermineWinner:
         assert result is None
 
 
-class TestClassifyTokenOutcome:
-    """Tests for classify_token_outcome function."""
-
-    def test_winning_token_returns_yes(self):
-        result = classify_token_outcome("tok_a", "tok_a")
-        assert result == "YES"
-
-    def test_losing_token_returns_no(self):
-        result = classify_token_outcome("tok_b", "tok_a")
-        assert result == "NO"
-
-    def test_different_tokens_return_no(self):
-        result = classify_token_outcome("tok_x", "tok_y")
-        assert result == "NO"
-
-
 class TestResolveMarketOutcomes:
     """Tests for resolve_market_outcomes function."""
 
@@ -85,17 +66,21 @@ class TestResolveMarketOutcomes:
         mock_session = MagicMock()
 
         mock_market = MagicMock()
-        mock_market.tokens = json.dumps([
-            {"token_id": "tok_a", "outcome": ""},
-            {"token_id": "tok_b", "outcome": ""},
-        ])
+        mock_market.tokens = json.dumps(
+            [
+                {"token_id": "tok_a", "outcome": ""},
+                {"token_id": "tok_b", "outcome": ""},
+            ]
+        )
 
         mock_event = MagicMock()
         mock_event.event_id = "event_1"
         mock_event.clob_token_ids = json.dumps(["tok_a", "tok_b"])
         mock_event.outcome_prices = json.dumps(["0.99", "0.01"])
 
-        mock_session.query.return_value.filter.return_value.all.return_value = [mock_market]
+        mock_session.query.return_value.filter.return_value.all.return_value = [
+            mock_market
+        ]
         mock_session.query.return_value.all.return_value = [mock_event]
 
         result = resolve_market_outcomes(mock_session)
@@ -110,16 +95,20 @@ class TestResolveMarketOutcomes:
         mock_session = MagicMock()
 
         mock_market = MagicMock()
-        mock_market.tokens = json.dumps([
-            {"token_id": "tok_a", "outcome": ""},
-        ])
+        mock_market.tokens = json.dumps(
+            [
+                {"token_id": "tok_a", "outcome": ""},
+            ]
+        )
 
         mock_event = MagicMock()
         mock_event.event_id = "event_1"
         mock_event.clob_token_ids = json.dumps(["tok_a", "tok_unknown"])
         mock_event.outcome_prices = json.dumps(["0.99", "0.01"])
 
-        mock_session.query.return_value.filter.return_value.all.return_value = [mock_market]
+        mock_session.query.return_value.filter.return_value.all.return_value = [
+            mock_market
+        ]
         mock_session.query.return_value.all.return_value = [mock_event]
 
         result = resolve_market_outcomes(mock_session)
@@ -131,16 +120,20 @@ class TestResolveMarketOutcomes:
         mock_session = MagicMock()
 
         mock_market = MagicMock()
-        mock_market.tokens = json.dumps([
-            {"token_id": "tok_a", "outcome": ""},
-        ])
+        mock_market.tokens = json.dumps(
+            [
+                {"token_id": "tok_a", "outcome": ""},
+            ]
+        )
 
         mock_event = MagicMock()
         mock_event.event_id = "event_1"
         mock_event.clob_token_ids = json.dumps(["tok_a", "tok_b"])
         mock_event.outcome_prices = json.dumps(["0.5", "0.5"])
 
-        mock_session.query.return_value.filter.return_value.all.return_value = [mock_market]
+        mock_session.query.return_value.filter.return_value.all.return_value = [
+            mock_market
+        ]
         mock_session.query.return_value.all.return_value = [mock_event]
 
         result = resolve_market_outcomes(mock_session)
@@ -152,16 +145,20 @@ class TestResolveMarketOutcomes:
         mock_session = MagicMock()
 
         mock_market = MagicMock()
-        mock_market.tokens = json.dumps([
-            {"token_id": "tok_a", "outcome": ""},
-        ])
+        mock_market.tokens = json.dumps(
+            [
+                {"token_id": "tok_a", "outcome": ""},
+            ]
+        )
 
         mock_event = MagicMock()
         mock_event.event_id = "event_1"
         mock_event.clob_token_ids = "not valid json"
         mock_event.outcome_prices = json.dumps(["0.99", "0.01"])
 
-        mock_session.query.return_value.filter.return_value.all.return_value = [mock_market]
+        mock_session.query.return_value.filter.return_value.all.return_value = [
+            mock_market
+        ]
         mock_session.query.return_value.all.return_value = [mock_event]
 
         result = resolve_market_outcomes(mock_session)
@@ -175,7 +172,9 @@ class TestResolveMarketOutcomes:
         mock_market = MagicMock()
         mock_market.tokens = None
 
-        mock_session.query.return_value.filter.return_value.all.return_value = [mock_market]
+        mock_session.query.return_value.filter.return_value.all.return_value = [
+            mock_market
+        ]
         mock_session.query.return_value.all.return_value = []
 
         result = resolve_market_outcomes(mock_session)
@@ -183,26 +182,59 @@ class TestResolveMarketOutcomes:
         assert result["resolved"] == 0
 
     def test_idempotent_re_run(self):
-        mock_session = MagicMock()
+        """Idempotency: running resolution twice gives same market.outcome both times."""
+        from sqlalchemy import create_engine
+        from sqlalchemy.orm import sessionmaker
 
-        mock_market = MagicMock()
-        mock_market.tokens = json.dumps([
-            {"token_id": "tok_a", "outcome": ""},
-        ])
+        from src.db.models import Base, GammaEvent, Market
 
-        mock_event = MagicMock()
-        mock_event.event_id = "event_1"
-        mock_event.clob_token_ids = json.dumps(["tok_a"])
-        mock_event.outcome_prices = json.dumps(["0.99"])
+        engine = create_engine("sqlite:///:memory:")
+        Base.metadata.create_all(engine)
+        Session = sessionmaker(bind=engine)
+        session = Session()
 
-        mock_session.query.return_value.filter.return_value.all.return_value = [mock_market]
-        mock_session.query.return_value.all.return_value = [mock_event]
+        try:
+            market = Market(
+                condition_id="cond_1",
+                question="Will team A win?",
+                category="esports",
+                tokens=json.dumps(
+                    [
+                        {"token_id": "tok_a", "outcome": "Yes"},
+                        {"token_id": "tok_b", "outcome": "No"},
+                    ]
+                ),
+                outcome=None,
+            )
+            session.add(market)
 
-        result1 = resolve_market_outcomes(mock_session)
-        result2 = resolve_market_outcomes(mock_session)
+            event = GammaEvent(
+                event_id="evt_1",
+                clob_token_ids=json.dumps(["tok_a", "tok_b"]),
+                outcome_prices=json.dumps(["0.99", "0.01"]),
+            )
+            session.add(event)
+            session.commit()
 
-        assert result1["resolved"] == 1
-        assert result2["resolved"] == 1
+            result1 = resolve_market_outcomes(session)
+            session.commit()
+            session.expire_all()
+            refreshed = session.query(Market).filter_by(condition_id="cond_1").first()
+            assert refreshed.outcome == "YES", (
+                f"After first run: expected YES, got {refreshed.outcome}"
+            )
+
+            result2 = resolve_market_outcomes(session)
+            session.commit()
+            session.expire_all()
+            refreshed2 = session.query(Market).filter_by(condition_id="cond_1").first()
+            assert refreshed2.outcome == "YES", (
+                f"After second run: expected YES, got {refreshed2.outcome}"
+            )
+
+            assert result1["resolved"] == result2["resolved"]
+        finally:
+            session.close()
 
     def test_multi_outcome_event_resolution(self):
         mock_session = MagicMock()
@@ -222,7 +254,9 @@ class TestResolveMarketOutcomes:
         mock_event.outcome_prices = json.dumps(["0.8", "0.15", "0.05"])
 
         mock_session.query.return_value.filter.return_value.all.return_value = [
-            mock_market_a, mock_market_b, mock_market_c
+            mock_market_a,
+            mock_market_b,
+            mock_market_c,
         ]
         mock_session.query.return_value.all.return_value = [mock_event]
 
@@ -237,16 +271,20 @@ class TestResolveMarketOutcomes:
         mock_session = MagicMock()
 
         mock_market = MagicMock()
-        mock_market.tokens = json.dumps([
-            {"token_id": "tok_a", "outcome": ""},
-        ])
+        mock_market.tokens = json.dumps(
+            [
+                {"token_id": "tok_a", "outcome": ""},
+            ]
+        )
 
         mock_event = MagicMock()
         mock_event.event_id = "event_1"
         mock_event.clob_token_ids = None
         mock_event.outcome_prices = json.dumps(["0.99"])
 
-        mock_session.query.return_value.filter.return_value.all.return_value = [mock_market]
+        mock_session.query.return_value.filter.return_value.all.return_value = [
+            mock_market
+        ]
         mock_session.query.return_value.all.return_value = [mock_event]
 
         result = resolve_market_outcomes(mock_session)

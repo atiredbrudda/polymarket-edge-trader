@@ -17,6 +17,24 @@ Read this section and the AGENTS.md file in project root before starting work. R
 
 ## Pending Review
 
+### worker/17-01 — 2026-02-25
+- **Plan:** 17-01 (Deep Token Classification - TDD)
+- **Branch:** worker/17-01
+- **Files changed:**
+  - src/gamma/classification.py (NEW — _extract_classification, classify_tokens_from_gamma_events)
+  - tests/test_gamma_classification.py (NEW — 16 TDD tests)
+  - src/cli/commands.py (classify-tokens CLI command)
+- **Worker notes:** TDD implementation. node_path format: 'esports/cs2/iem-katowice-2024/navi', depth capped at 3. Bulk UPDATE with idempotency guard (depth IS NULL OR depth < :depth). All 16 tests pass.
+
+### worker/17-02 — 2026-02-25
+- **Plan:** 17-02 (Resolution Counter Fix)
+- **Branch:** worker/17-01
+- **Files changed:**
+  - src/gamma/resolution.py (added markets_resolved counter, integrated classify_token_outcome)
+  - src/cli/commands.py (updated resolve-outcomes to show both market and token counts)
+  - tests/test_gamma_resolution.py (removed TestClassifyTokenOutcome, replaced idempotent test with in-memory SQLite)
+- **Worker notes:** Fixed misleading counter - now shows unique markets (not inflated token count). Integrated classify_token_outcome() instead of inline if/elif. All 35 tests pass (19 resolution + 16 classification).
+
 ### worker/16-02 — 2026-02-22
 - **Plan:** 16-02 (Market Outcome Resolution - CLI Command)
 - **Branch:** worker/16-02
