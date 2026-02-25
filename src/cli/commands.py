@@ -50,6 +50,7 @@ from src.alerts.telegram import TelegramAlerter
 from src.gamma.persist import upsert_gamma_events
 from src.gamma.resolution import resolve_market_outcomes
 from src.gamma.classification import classify_tokens_from_gamma_events
+from src.gamma.position_resolver import resolve_positions
 
 
 def _get_dependencies(settings=None):
@@ -2193,6 +2194,65 @@ def resolve_outcomes(verbose):
 
     except Exception as e:
         logger.error(f"resolve-outcomes failed: {e}")
+        console.print(f"[red]Error: {e}[/red]")
+        raise SystemExit(1)
+
+
+@cli.command("resolve-positions")
+@click.option("--verbose", "-v", is_flag=True, help="Enable debug logging")
+def resolve_positions_cmd(verbose):
+    """Populate Position.resolved, outcome, and pnl from resolved market outcomes.
+
+    Reads positions table and joins with markets where markets.outcome is
+    non-NULL (populated by resolve-outcomes). For each such position,
+    computes win/loss/flat based on position direction and market result.
+
+    Resolution logic:
+    - LONG + YES market -> win (pnl = size * (1.0 - avg_entry_price))
+    - LONG + NO market -> loss (pnl = size * (0.0 - avg_entry_price))
+    - SHORT + NO market -> win
+    - SHORT + YES market -> loss
+    - FLAT positions -> flat, pnl=0
+    - Already-resolved positions are skipped (idempotent)
+
+    Safe to re-run. Run after 'polymarket resolve-outcomes'.
+
+    Examples:
+        polymarket resolve-positions
+        polymarket resolve-positions --verbose
+    """
+    logger.info("RESOLVE-POSITIONS command started")
+
+    if verbose:
+        logger.remove()
+        logger.add(sys.stderr, level="DEBUG")
+
+    console = Console()
+
+    try:
+        settings = get_settings()
+        session_factory, _, _, _, _ = _get_dependencies(settings)
+
+        console.print("[bold]Resolving positions from market outcomes...[/bold]")
+
+        with get_session(session_factory) as session:
+            counts = resolve_positions(session)
+            session.commit()
+
+        resolved = counts["resolved"]
+        skipped_no_outcome = counts["skipped_no_outcome"]
+
+        console.print(f"[green]Done.[/green] {resolved} positions resolved.")
+        console.print(
+            f"  Positions skipped (no market outcome): [yellow]{skipped_no_outcome}[/yellow]"
+        )
+        logger.info(
+            f"RESOLVE-POSITIONS completed: {resolved} resolved, "
+            f"{skipped_no_outcome} skipped"
+        )
+
+    except Exception as e:
+        logger.error(f"resolve-positions failed: {e}")
         console.print(f"[red]Error: {e}[/red]")
         raise SystemExit(1)
 
