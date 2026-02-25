@@ -17,7 +17,25 @@ Read this section and the AGENTS.md file in project root before starting work. R
 
 ## Pending Review
 
-(empty — no pending reviews)
+### worker/18-01 — 2026-02-25
+- **Plan:** 18-01 (Position Resolver TDD)
+- **Branch:** worker/18-01
+- **Commits:** f76a732..dc02634
+- **Files changed:**
+  - src/gamma/position_resolver.py (NEW — resolve_positions function)
+  - tests/test_position_resolver.py (NEW — 9 TDD tests)
+  - src/cli/commands.py (resolve-positions CLI command)
+  - .planning/phases/18-end-to-end-validation/18-01-SUMMARY.md (NEW)
+- **Worker notes:** TDD implementation. 9 test cases covering LONG/SHORT/FLAT/VOID/NULL-price/idempotency. CLI follows resolve-outcomes pattern.
+
+### worker/18-02 — 2026-02-25
+- **Plan:** 18-02 (E2E Validation + Backfill)
+- **Branch:** worker/18-02
+- **Files changed:**
+  - src/gamma/classification.py (backfill_market_classifications function)
+  - src/cli/commands.py (backfill-classifications CLI)
+  - .planning/phases/18-end-to-end-validation/18-02-SUMMARY.md (NEW)
+- **Worker notes:** Implemented classification backfill. Scoring pipeline runs but produces empty leaderboard due to MIN_RESOLVED_MARKETS=5 threshold + Xero100i having 0 positions (data gap).
 
 ## Re-Review
 
