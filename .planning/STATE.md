@@ -5,16 +5,16 @@
 See: .planning/PROJECT.md (updated 2026-02-21)
 
 **Core value:** Surface where smart money is moving in niche prediction markets so the user can see what informed traders are doing and factor that into their own thinking.
-**Current focus:** v1.2 — Phase 18: End-to-End Validation
+**Current focus:** v1.2 — Phase 18 complete; milestone ready to audit/archive
 
 ## Current Position
 
-Phase: 18 of 18 (End-to-End Validation — IN PROGRESS)
-Plan: 1 of 1 in current phase
-Status: Plan 18-01 complete — resolve_positions() implemented, resolve-positions CLI wired
-Last activity: 2026-02-25 — resolve_positions() TDD (9 test cases) + CLI wiring complete
+Phase: 18 of 18 (End-to-End Validation — COMPLETE)
+Plan: 2 of 2 complete
+Status: All phases done — ready to audit milestone
+Last activity: 2026-02-25 — Phase 18 cleared: resolve_positions() TDD + classification backfill + E2E validation
 
-Progress: [████████░░] 83% (v1.2)
+Progress: [██████████] 100% (v1.2)
 
 ## Performance Metrics
 
@@ -46,6 +46,7 @@ Recent decisions affecting v1.2:
 - `token_catalog.node_path=NULL` — classification stuck at eSports root (fixed by Phase 17)
 - Position.resolved=False for all positions — scoring pipeline can't filter (FIXED by 18-01)
 - Scoring produces empty leaderboards end-to-end until both gaps are closed (validated in Phase 18)
+- Note: E2E leaderboard still empty in practice due to MIN_RESOLVED_MARKETS=5 threshold + Xero100i having 0 positions — data gap, not a code gap
 
 ### Pending Todos
 
@@ -58,6 +59,6 @@ None — Gamma Events API access confirmed, data structure understood from prior
 ## Session Continuity
 
 Last session: 2026-02-25
-Stopped at: Plan 18-01 complete — resolve_positions() TDD implementation (9 test cases) + resolve-positions CLI command wired to commands.py. Tests passing. Ready for next plan.
+Stopped at: Phase 18 complete — all 2 plans cleared to main. v1.2 milestone done.
 Resume file: None
-Next: Additional Phase 18 plans if any (E2E scoring pipeline)
+Next: Run /gsd:audit-milestone to review v1.2 before archiving, then /gsd:complete-milestone

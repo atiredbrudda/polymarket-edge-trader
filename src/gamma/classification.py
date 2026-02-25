@@ -164,13 +164,9 @@ def backfill_market_classifications(session: Session) -> dict[str, int]:
             skipped_no_match += 1
             continue
 
-        # Build game slug: "esports.<game>"
-        # Handle both "eSports" and "esports" prefix
+        # Build game slug: "<category>.<game>" (lowercased)
         base = parts[0].lower()
-        if base == "esports" or base == "esports":
-            game_slug = "esports." + parts[1].lower().split("/")[0]
-        else:
-            game_slug = base + "." + parts[1].lower().split("/")[0]
+        game_slug = base + "." + parts[1].lower().split("/")[0]
 
         game_slug_normalized = game_slug.replace(" ", "")
 

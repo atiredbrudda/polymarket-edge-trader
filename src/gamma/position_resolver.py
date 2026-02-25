@@ -31,11 +31,9 @@ def resolve_positions(session: Session) -> dict[str, int]:
         dict with keys:
             - resolved: count of positions resolved in this run
             - skipped_no_outcome: count of positions skipped due to NULL market outcome
-            - skipped_already_resolved: count of positions already resolved (not re-processed)
     """
     resolved = 0
     skipped_no_outcome = 0
-    skipped_already_resolved = 0
 
     # Query all unresolved positions first, then check their markets
     positions = session.query(Position).filter(Position.resolved == False).all()
@@ -109,12 +107,10 @@ def resolve_positions(session: Session) -> dict[str, int]:
 
     logger.info(
         f"Position resolution complete: {resolved} resolved, "
-        f"{skipped_no_outcome} skipped (no market outcome), "
-        f"{skipped_already_resolved} skipped (already resolved)"
+        f"{skipped_no_outcome} skipped (no market outcome)"
     )
 
     return {
         "resolved": resolved,
         "skipped_no_outcome": skipped_no_outcome,
-        "skipped_already_resolved": skipped_already_resolved,
     }
