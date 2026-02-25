@@ -90,7 +90,10 @@ Plans:
   2. Token catalog `depth` field reflects actual classification depth: 1 for game-level, 2 for tournament-level, 3 for team-level tokens
   3. Tokens linked to Gamma events with game + tournament + team tags receive `depth=3`; game-only tags receive `depth=1`
   4. Classification is verifiable — user can query a known token ID and see its resolved `node_path` and `depth`
-**Plans**: TBD
+**Plans**: 2 plans
+Plans:
+- [ ] 17-01-PLAN.md — Token classification logic (TDD) + classify-tokens CLI command
+- [ ] 17-02-PLAN.md — Code quality cleanup: counter naming, dead code integration, idempotency test
 
 ### Phase 18: End-to-End Validation
 **Goal**: The full scoring pipeline produces a non-empty leaderboard with correctly computed win rates and expertise scores on real JBecker data
@@ -123,5 +126,5 @@ Plans:
 | 14. Timestamp Fix & Pipeline Decomp | v1.1 | 2/2 | Complete | 2026-02-16 |
 | 15. Gamma Events Ingestion | v1.2 | 0/2 | Planned | - |
 | 16. Market Outcome Resolution | v1.2 | 0/2 | Planned | - |
-| 17. Deep Token Classification | v1.2 | 0/? | Not started | - |
+| 17. Deep Token Classification | v1.2 | 0/2 | Planned | - |
 | 18. End-to-End Validation | v1.2 | 0/? | Not started | - |

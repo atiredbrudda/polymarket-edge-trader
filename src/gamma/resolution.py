@@ -3,6 +3,7 @@
 Determines which side won for each resolved market using outcome_prices
 from the gamma_events table, then populates markets.outcome.
 """
+
 import json
 from decimal import Decimal, InvalidOperation
 
@@ -36,7 +37,9 @@ def determine_winner(
         try:
             price = Decimal(price_str)
         except InvalidOperation:
-            logger.warning(f"Invalid price string {price_str!r} for token {token_id[:8]}...")
+            logger.warning(
+                f"Invalid price string {price_str!r} for token {token_id[:8]}..."
+            )
             continue
         if price > best_price:
             best_price = price
@@ -58,11 +61,12 @@ def resolve_market_outcomes(session: Session) -> dict[str, int]:
     (vs token_catalog which covers only ~37%).
 
     Returns:
-        {"resolved": N, "skipped_events": M, "skipped_tokens": K}
+        {"resolved": N, "markets_resolved": M, "skipped_events": E, "skipped_tokens": K}
     """
     resolved = 0
     skipped_events = 0
     skipped_tokens = 0
+    markets_resolved_set: set[str] = set()
 
     token_to_market: dict[str, Market] = {}
     markets_scanned = 0
@@ -94,7 +98,9 @@ def resolve_market_outcomes(session: Session) -> dict[str, int]:
 
         winning_token = determine_winner(token_ids, prices)
         if winning_token is None:
-            logger.debug(f"Event {event.event_id}: no clear winner (prices={prices[:3]}) — skipping")
+            logger.debug(
+                f"Event {event.event_id}: no clear winner (prices={prices[:3]}) — skipping"
+            )
             skipped_events += 1
             continue
 
@@ -104,17 +110,24 @@ def resolve_market_outcomes(session: Session) -> dict[str, int]:
                 skipped_tokens += 1
                 continue
 
-            # Never overwrite YES with NO: a market row stores both YES and NO
-            # tokens, so both token_ids map to the same Market row. Processing
-            # order must not matter — winning token always sets the final value.
-            if token_id == winning_token:
-                market.outcome = "YES"
-            elif market.outcome != "YES":
-                market.outcome = "NO"
+            outcome = classify_token_outcome(token_id, winning_token)
+            if outcome == "YES" or market.outcome != "YES":
+                market.outcome = outcome
+
+            if market.condition_id:
+                markets_resolved_set.add(market.condition_id)
+
             resolved += 1
 
+    markets_resolved = len(markets_resolved_set)
+
     logger.info(
-        f"Resolution complete: {resolved} resolved, "
+        f"Resolution complete: {resolved} token updates, {markets_resolved} markets resolved, "
         f"{skipped_events} events skipped, {skipped_tokens} tokens skipped"
     )
-    return {"resolved": resolved, "skipped_events": skipped_events, "skipped_tokens": skipped_tokens}
+    return {
+        "resolved": resolved,
+        "markets_resolved": markets_resolved,
+        "skipped_events": skipped_events,
+        "skipped_tokens": skipped_tokens,
+    }

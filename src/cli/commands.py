@@ -49,6 +49,7 @@ from src.pipeline.filters import CategoryFilter
 from src.alerts.telegram import TelegramAlerter
 from src.gamma.persist import upsert_gamma_events
 from src.gamma.resolution import resolve_market_outcomes
+from src.gamma.classification import classify_tokens_from_gamma_events
 
 
 def _get_dependencies(settings=None):
@@ -718,7 +719,9 @@ def sweep(window, niche, closing_within, with_alerts, verbose):
             console.print(f"[bold red]Error: {e}[/bold red]")
             return
 
-    session_factory, client, category_filter, alerter, gamma_client = _get_dependencies()
+    session_factory, client, category_filter, alerter, gamma_client = (
+        _get_dependencies()
+    )
 
     sweep_start = time.time()
 
@@ -733,6 +736,7 @@ def sweep(window, niche, closing_within, with_alerts, verbose):
             end_date_max = None
             if closing_within:
                 from src.pipeline.time_utils import parse_closing_within
+
                 end_date_max = parse_closing_within(closing_within)
             markets_count = pipeline.ingest_targeted_markets(
                 niches=niche, end_date_max=end_date_max
@@ -752,7 +756,9 @@ def sweep(window, niche, closing_within, with_alerts, verbose):
             leaderboards = compute_all_game_scores(session)
             session.commit()
         total_scores = sum(len(v) for v in leaderboards.values())
-        console.print(f"  Scores computed: {total_scores} across {len(leaderboards)} games")
+        console.print(
+            f"  Scores computed: {total_scores} across {len(leaderboards)} games"
+        )
     except Exception as e:
         console.print(f"  [red]Scoring failed: {e}[/red]")
         logger.error(f"Sweep stage 2 (score) failed: {e}")
@@ -781,7 +787,9 @@ def sweep(window, niche, closing_within, with_alerts, verbose):
                 from src.alerts.delivery import deliver_signal_alerts
 
                 with get_session(session_factory) as session:
-                    results = deliver_signal_alerts(session, alerter, window_hours=window)
+                    results = deliver_signal_alerts(
+                        session, alerter, window_hours=window
+                    )
                 alerts_sent = sum(1 for r in results if r.success)
                 console.print(f"  Alerts sent: {alerts_sent}")
             except Exception as e:
@@ -793,9 +801,7 @@ def sweep(window, niche, closing_within, with_alerts, verbose):
     if not with_alerts:
         console.print("[dim]Use --with-alerts to deliver Telegram alerts.[/dim]")
 
-    logger.info(
-        f"SWEEP completed in {elapsed:.1f}s"
-    )
+    logger.info(f"SWEEP completed in {elapsed:.1f}s")
 
 
 @cli.command()
@@ -1215,6 +1221,7 @@ def discover(niche, closing_within, verbose):
             query = session.query(Market).filter_by(active=True)
             if niche:
                 from sqlalchemy import or_
+
                 query = query.filter(
                     or_(*[Market.category.ilike(f"%{n}%") for n in niche])
                 )
@@ -1441,10 +1448,14 @@ def backfill(address, limit, verbose):
             )
             files_per_trader = jbecker_client._index.lookup_per_trader(trader_addresses)
             batches = _build_dynamic_batches(
-                trader_addresses, files_per_trader, MAX_FILES_PER_BATCH, MAX_TRADERS_PER_BATCH
+                trader_addresses,
+                files_per_trader,
+                MAX_FILES_PER_BATCH,
+                MAX_TRADERS_PER_BATCH,
             )
             whale_count = sum(
-                1 for addr in trader_addresses
+                1
+                for addr in trader_addresses
                 if len(files_per_trader.get(_norm(addr), [])) > MAX_FILES_PER_BATCH
             )
             console.print(
@@ -1477,7 +1488,8 @@ def backfill(address, limit, verbose):
                     is_solo_whale = (
                         len(batch) == 1
                         and jbecker_client._index.is_built
-                        and len(files_per_trader.get(_norm(batch[0]), [])) > MAX_FILES_PER_BATCH
+                        and len(files_per_trader.get(_norm(batch[0]), []))
+                        > MAX_FILES_PER_BATCH
                     )
                     label = " — whale sub-batch" if is_solo_whale else ""
                     status.update(
@@ -1499,8 +1511,8 @@ def backfill(address, limit, verbose):
                                 f"Whale prefetch: {len(trades)} trades for {addr[:10]}..."
                             )
                         else:
-                            prefetched_by_address = jbecker_client.batch_query_traders_history(
-                                batch
+                            prefetched_by_address = (
+                                jbecker_client.batch_query_traders_history(batch)
                             )
                             logger.info(
                                 f"Prefetched {len(prefetched_by_address)} traders "
@@ -1593,7 +1605,10 @@ def score(verbose):
 
 @cli.command()
 @click.option(
-    "--window", "-w", default=24, help="Time window in hours for expert activity (default: 24)"
+    "--window",
+    "-w",
+    default=24,
+    help="Time window in hours for expert activity (default: 24)",
 )
 @click.option("--verbose", "-v", is_flag=True, help="Enable debug logging")
 def detect(window, verbose):
@@ -1632,17 +1647,16 @@ def detect(window, verbose):
 
     console.print(f"\n[bold green]Detection complete[/bold green] ({elapsed:.1f}s)")
     console.print(f"  Signals detected: {len(detected)}")
-    console.print(
-        "\n[dim]Run 'polymarket signals' to view detected signals.[/dim]"
-    )
-    logger.info(
-        f"DETECT completed: {len(detected)} signals ({elapsed:.1f}s)"
-    )
+    console.print("\n[dim]Run 'polymarket signals' to view detected signals.[/dim]")
+    logger.info(f"DETECT completed: {len(detected)} signals ({elapsed:.1f}s)")
 
 
 @cli.command()
 @click.option(
-    "--window", "-w", default=24, help="Time window in hours for signals to alert (default: 24)"
+    "--window",
+    "-w",
+    default=24,
+    help="Time window in hours for signals to alert (default: 24)",
 )
 @click.option("--verbose", "-v", is_flag=True, help="Enable debug logging")
 def alert(window, verbose):
@@ -1691,9 +1705,7 @@ def alert(window, verbose):
     console.print(f"\n[bold green]Alerts delivered[/bold green] ({elapsed:.1f}s)")
     console.print(f"  Sent:   [green]{sent}[/green]")
     console.print(f"  Failed: [red]{failed}[/red]")
-    logger.info(
-        f"ALERT completed: {sent} sent, {failed} failed ({elapsed:.1f}s)"
-    )
+    logger.info(f"ALERT completed: {sent} sent, {failed} failed ({elapsed:.1f}s)")
 
 
 @cli.command("resolve-profiles")
@@ -2054,9 +2066,9 @@ def reset_backfill(confirm, verbose):
         )
 
         if affected_addresses:
-            session.query(Trader).filter(
-                Trader.address.in_(affected_addresses)
-            ).update({"backfill_complete": False}, synchronize_session=False)
+            session.query(Trader).filter(Trader.address.in_(affected_addresses)).update(
+                {"backfill_complete": False}, synchronize_session=False
+            )
 
         session.commit()
 
@@ -2095,17 +2107,23 @@ def ingest_events(verbose):
         settings = get_settings()
         session_factory, _, _, _, gamma_client = _get_dependencies(settings)
 
-        console.print("[bold]Downloading closed eSports events from Gamma API...[/bold]")
+        console.print(
+            "[bold]Downloading closed eSports events from Gamma API...[/bold]"
+        )
 
         events = gamma_client.get_closed_esports_events()
 
-        console.print(f"Downloaded [bold]{len(events)}[/bold] events. Persisting to database...")
+        console.print(
+            f"Downloaded [bold]{len(events)}[/bold] events. Persisting to database..."
+        )
 
         with get_session(session_factory) as session:
             count = upsert_gamma_events(events, session)
             session.commit()
 
-        console.print(f"[green]Done.[/green] {count} events upserted into gamma_events table.")
+        console.print(
+            f"[green]Done.[/green] {count} events upserted into gamma_events table."
+        )
         logger.info(f"INGEST-EVENTS completed: {count} events upserted")
 
     except Exception as e:
@@ -2155,19 +2173,95 @@ def resolve_outcomes(verbose):
             session.commit()
 
         resolved = counts["resolved"]
+        markets_resolved = counts["markets_resolved"]
         skipped_events = counts["skipped_events"]
         skipped_tokens = counts["skipped_tokens"]
 
-        console.print(f"[green]Done.[/green] {resolved} markets resolved.")
-        console.print(f"  Events skipped (no clear winner): [yellow]{skipped_events}[/yellow]")
-        console.print(f"  Tokens skipped (not in catalog):  [yellow]{skipped_tokens}[/yellow]")
+        console.print(
+            f"[green]Done.[/green] {markets_resolved} markets resolved ({resolved} token updates)."
+        )
+        console.print(
+            f"  Events skipped (no clear winner): [yellow]{skipped_events}[/yellow]"
+        )
+        console.print(
+            f"  Tokens skipped (not in catalog):  [yellow]{skipped_tokens}[/yellow]"
+        )
         logger.info(
-            f"RESOLVE-OUTCOMES completed: {resolved} resolved, "
+            f"RESOLVE-OUTCOMES completed: {markets_resolved} markets resolved ({resolved} token updates), "
             f"{skipped_events} events skipped, {skipped_tokens} tokens skipped"
         )
 
     except Exception as e:
         logger.error(f"resolve-outcomes failed: {e}")
+        console.print(f"[red]Error: {e}[/red]")
+        raise SystemExit(1)
+
+
+@cli.command("classify-tokens")
+@click.option("--verbose", "-v", is_flag=True, help="Enable debug logging")
+def classify_tokens(verbose):
+    """Classify tokens in token_catalog using Gamma event tags.
+
+    Reads gamma_events table (populated by ingest-events) and sets
+    token_catalog.node_path and token_catalog.depth for each token
+    linked to a Gamma event with sub-classification tags (game, tournament, team).
+
+    node_path format: slash-separated lowercase slugs (e.g., 'esports/cs2' or
+    'esports/cs2/iem-katowice-2024'). depth: 1=game, 2=tournament, 3=team.
+
+    Only updates tokens where the new depth is greater than existing depth,
+    preserving deeper classifications if run multiple times (idempotent).
+
+    Safe to re-run. Run after 'polymarket ingest-events'.
+
+    Examples:
+        polymarket classify-tokens
+        polymarket classify-tokens --verbose
+    """
+    logger.info("CLASSIFY-TOKENS command started")
+
+    if verbose:
+        logger.remove()
+        logger.add(sys.stderr, level="DEBUG")
+
+    console = Console()
+
+    try:
+        settings = get_settings()
+        session_factory, _, _, _, _ = _get_dependencies(settings)
+
+        console.print("[bold]Classifying tokens from Gamma event tags...[/bold]")
+
+        with get_session(session_factory) as session:
+            result = classify_tokens_from_gamma_events(session)
+            session.commit()
+
+        token_update_attempts = result["token_update_attempts"]
+        skipped_shallow = result["skipped_shallow"]
+        skipped_no_tags = result["skipped_no_tags"]
+        skipped_no_tokens = result["skipped_no_tokens"]
+
+        console.print(
+            f"[green]Done.[/green] {token_update_attempts} classification attempts"
+            f" (actual DB updates may be lower on re-runs)."
+        )
+        console.print(
+            f"  Events skipped (no sub-classification tags): [yellow]{skipped_shallow}[/yellow]"
+        )
+        console.print(
+            f"  Events skipped (no tags):      [yellow]{skipped_no_tags}[/yellow]"
+        )
+        console.print(
+            f"  Events skipped (no token IDs): [yellow]{skipped_no_tokens}[/yellow]"
+        )
+        logger.info(
+            f"CLASSIFY-TOKENS completed: {token_update_attempts} classification attempts, "
+            f"{skipped_shallow} shallow, {skipped_no_tags} no_tags, "
+            f"{skipped_no_tokens} no_tokens"
+        )
+
+    except Exception as e:
+        logger.error(f"classify-tokens failed: {e}")
         console.print(f"[red]Error: {e}[/red]")
         raise SystemExit(1)
 
