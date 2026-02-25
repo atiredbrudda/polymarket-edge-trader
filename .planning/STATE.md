@@ -9,12 +9,12 @@ See: .planning/PROJECT.md (updated 2026-02-21)
 
 ## Current Position
 
-Phase: 17 of 18 (Deep Token Classification — COMPLETE)
-Plan: 2 of 2 in current phase
-Status: Phase 17 complete — ready for Phase 18 planning
-Last activity: 2026-02-25 — Phase 17 complete (2/2 plans executed and reviewed)
+Phase: 18 of 18 (End-to-End Validation — IN PROGRESS)
+Plan: 1 of 1 in current phase
+Status: Plan 18-01 complete — resolve_positions() implemented, resolve-positions CLI wired
+Last activity: 2026-02-25 — resolve_positions() TDD (9 test cases) + CLI wiring complete
 
-Progress: [███████░░░] 75% (v1.2)
+Progress: [████████░░] 83% (v1.2)
 
 ## Performance Metrics
 
@@ -44,6 +44,7 @@ Recent decisions affecting v1.2:
 
 - `markets.outcome=NULL` for all 117k markets — blocks PnL scoring (fixed by Phase 16)
 - `token_catalog.node_path=NULL` — classification stuck at eSports root (fixed by Phase 17)
+- Position.resolved=False for all positions — scoring pipeline can't filter (FIXED by 18-01)
 - Scoring produces empty leaderboards end-to-end until both gaps are closed (validated in Phase 18)
 
 ### Pending Todos
@@ -57,6 +58,6 @@ None — Gamma Events API access confirmed, data structure understood from prior
 ## Session Continuity
 
 Last session: 2026-02-25
-Stopped at: Phase 17 reviewed and merged — classification.py (_extract_classification, classify_tokens_from_gamma_events) + classify-tokens CLI (17-01) + resolution counter fix, classify_token_outcome integration, idempotency test rewrite (17-02). Reviewer fixes: removed internal session.commit() from classification.py; renamed classified → token_update_attempts.
+Stopped at: Plan 18-01 complete — resolve_positions() TDD implementation (9 test cases) + resolve-positions CLI command wired to commands.py. Tests passing. Ready for next plan.
 Resume file: None
-Next: Plan Phase 18 (End-to-End Validation)
+Next: Additional Phase 18 plans if any (E2E scoring pipeline)
