@@ -25,6 +25,21 @@ Read this section and the AGENTS.md file in project root before starting work. R
 
 ## Cleared
 
+### worker/18-01 + worker/18-02 — 2026-02-25
+- **Branch:** worker/18-01 (both plans implemented here; worker/18-02 had no unique code)
+- **Cleared by:** Sonnet 4.6
+- **Reviewer fixes (2):**
+  1. `src/gamma/classification.py` line 9: Removed unused imports `MarketClassification` and `TokenCatalog` — neither referenced anywhere in the module.
+  2. `src/gamma/classification.py` line 129: Removed redundant `from src.db.models import TaxonomyNode` inside `backfill_market_classifications` — `TaxonomyNode` already imported at module level.
+- **Files in scope:**
+  - src/gamma/position_resolver.py (NEW — `resolve_positions`)
+  - tests/test_position_resolver.py (NEW — 9 TDD tests)
+  - src/cli/commands.py (`resolve-positions` and `backfill-classifications` CLI commands)
+  - src/gamma/classification.py (`backfill_market_classifications` function; reviewer cleaned imports)
+  - .planning/phases/18-end-to-end-validation/18-01-SUMMARY.md (NEW)
+  - .planning/phases/18-end-to-end-validation/18-02-SUMMARY.md (NEW)
+- **Notes:** Clean TDD for position_resolver. All 4 direction×outcome combos correct; FLAT/VOID/NULL-price edge cases handled. Pre-filter `resolved == False` gives correct idempotency. `skipped_already_resolved` in return dict is always 0 (pre-filter means resolved positions never enter loop) — harmless, minor. `backfill_market_classifications` uses raw SQL with dot-split on `node_path` matching `MarketClassification.node_path` format. Dead condition `if base == "esports" or base == "esports":` (lines 170-175) is harmless — both branches identical. 9/9 new tests pass, 3 pre-existing classification failures unchanged on main.
+
 ### worker/17-02 — 2026-02-25
 - **Branch:** worker/17-02
 - **Cleared by:** Sonnet 4.6
