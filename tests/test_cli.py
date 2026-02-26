@@ -21,7 +21,8 @@ class TestCLIGroup:
         assert "trader" in result.output
         assert "signals" in result.output
         assert "leaderboard" in result.output
-        assert "sweep" in result.output
+        assert "score" in result.output
+        assert "detect" in result.output
 
 
 class TestMarketsCommand:
@@ -68,15 +69,14 @@ class TestLeaderboardCommand:
         assert "GAME_SLUG" in result.output or "game" in result.output
 
 
-class TestSweepCommand:
-    """Test sweep subcommand."""
+class TestScoreCommand:
+    """Test score subcommand."""
 
     def test_help_shows_options(self):
-        """sweep --help shows refresh option."""
+        """score --help shows options."""
         runner = CliRunner()
-        result = runner.invoke(cli, ["sweep", "--help"])
+        result = runner.invoke(cli, ["score", "--help"])
         assert result.exit_code == 0
-        # Should have some options (even if just --help is present)
         assert "Options:" in result.output
 
 

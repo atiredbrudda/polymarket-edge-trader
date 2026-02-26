@@ -50,10 +50,10 @@ polymarket discover                    # Find traders without backfilling
 polymarket backfill                    # Backfill discovered traders
 polymarket status                      # Show discovery/backfill status
 
-# Targeted Market Scanning - Filter by niche and time
-polymarket sweep --niche esports --niche crypto                    # Scan specific niches
-polymarket sweep --closing-within 48h   # Only markets closing within 48 hours
-polymarket sweep --niche esports --closing-within 24h             # Combined filters
+# Targeted Market Scanning - Filter discover by niche and time
+polymarket discover --niche esports --niche crypto                    # Scan specific niches
+polymarket discover --closing-within 48h   # Only markets closing within 48 hours
+polymarket discover --niche esports --closing-within 24h             # Combined filters
 
 # Research trader history offline (requires JBecker dataset)
 polymarket research 0xAbCd         # Table output
@@ -63,8 +63,10 @@ polymarket research 0xAbCd --output json --limit 100
 polymarket batch-analyze 0xAddr1 0xAddr2
 polymarket batch-analyze --file traders.txt
 
-# Run manual signal detection sweep
-polymarket sweep
+# Score, detect, and alert as standalone steps
+polymarket score                   # Compute expertise scores
+polymarket detect                  # Refresh signal detection
+polymarket alert                   # Deliver Telegram alerts
 
 # Start automated hourly polling
 polymarket poll --interval 60      # Poll every 60 minutes
@@ -173,22 +175,75 @@ The system uses a **4-tier cost-optimized hierarchy** for trader history:
 
 ## Getting Started
 
-### First Run
-
-The database auto-creates on first use:
+### Setup (One-Time)
 
 ```bash
-# Run your first sweep (ingests markets, scores traders, detects signals)
-polymarket sweep
+# Create virtual environment
+python3 -m venv .venv
+source .venv/bin/activate
+
+# Install dependencies
+pip install -e .
+
+# Verify installation
+polymarket --help
 ```
 
-This will:
-- Fetch active eSports events from Polymarket
-- Discover traders from market order books
-- Evaluate their historical performance
-- Calculate expertise scores
-- Detect consensus signals
-- Send Telegram alerts (if configured)
+---
+
+### Pipeline Walkthrough: Zero to Scored Trader
+
+The pipeline has five sequential stages. **If you have already run `discover` and `backfill`, skip to Stage 3.**
+
+**Stage 1 — Discover traders**
+```bash
+polymarket discover
+```
+Ingests active eSports markets and finds trader addresses from market order books. Each new trader is stored with `backfill_complete=False`. Check what was found:
+```bash
+polymarket status
+```
+
+**Stage 2 — Backfill trade history**
+```bash
+polymarket backfill
+```
+Fetches complete trade history for every pending trader using the 4-tier cost hierarchy (JBecker dataset → Polymarket API → The Graph → Blockchain). Each trader is marked `backfill_complete=True` when done.
+
+**Stage 3 — Enrich with market outcomes**
+```bash
+polymarket ingest-events      # Download ~8,500 closed eSports events from Gamma API
+polymarket resolve-outcomes   # Determine YES/NO outcome for each resolved market
+polymarket resolve-positions  # Compute win/loss + PnL for every trader position
+```
+Pulls historical market results and calculates profit/loss per position. This is what feeds PnL data into expertise scores. Safe to re-run — all three commands are idempotent.
+
+**Stage 4 — Compute expertise scores**
+```bash
+polymarket score
+```
+Rebuilds positions from raw trades and computes game-level expertise scores for every trader with history.
+
+**Stage 5 — View results**
+```bash
+polymarket trader 0xAddress          # Profile and scores for a specific trader
+polymarket leaderboard esports.cs2   # Top CS2 traders ranked by expertise score
+polymarket detect                    # Refresh expert consensus signal detection
+polymarket signals                   # View active consensus signals
+```
+
+---
+
+### Quick Reference
+
+| Situation | Commands to run |
+|-----------|----------------|
+| Starting fresh | `discover` → `backfill` → `ingest-events` → `resolve-outcomes` → `resolve-positions` → `score` |
+| Already backfilled new traders | `ingest-events` → `resolve-outcomes` → `resolve-positions` → `score` |
+| Re-score without re-backfilling | `score` |
+| Add more traders, then re-score | `discover` → `backfill` → `score` |
+
+---
 
 ### Exploring Data
 
@@ -218,6 +273,8 @@ polymarket poll --interval 30
 # Dry-run mode (no alerts)
 polymarket poll --no-alerts
 ```
+
+> **Note:** `polymarket poll` covers market ingestion, scoring, and signal detection but does **not** discover or backfill new traders. Run `discover → backfill` separately when you want to add new traders, then `score` to incorporate them.
 
 Press `Ctrl+C` for graceful shutdown.
 
@@ -316,20 +373,17 @@ Instead of scanning all markets, you can filter by niche category and time-to-cl
 ### Examples
 
 ```bash
-# Scan only eSports markets
-polymarket sweep --niche esports
+# Discover only eSports markets
+polymarket discover --niche esports
 
-# Scan multiple niches
-polymarket sweep --niche esports --niche crypto
+# Discover multiple niches
+polymarket discover --niche esports --niche crypto
 
-# Scan markets closing soon
-polymarket sweep --closing-within 48h
+# Discover markets closing soon
+polymarket discover --closing-within 48h
 
 # Combined: eSports closing within 24 hours
-polymarket sweep --niche esports --closing-within 24h
-
-# Run signal detection on targeted markets
-polymarket signals --niche esports
+polymarket discover --niche esports --closing-within 24h
 ```
 
 ### How It Works
@@ -625,9 +679,9 @@ The pipeline is designed to be category-agnostic. To add a new category:
    export DETAIL_CATEGORIES='["eSports", "Politics"]'
    ```
 
-3. **Run sweep**:
+3. **Discover and score**:
    ```bash
-   polymarket sweep
+   polymarket discover && polymarket backfill && polymarket score
    ```
 
 The same expertise scoring, consensus detection, and alerting logic applies to any category.
@@ -635,7 +689,7 @@ The same expertise scoring, consensus detection, and alerting logic applies to a
 ## Performance
 
 - **Average plan execution**: 5.56 minutes
-- **Full sweep** (ingest → score → detect → alert): ~2-5 minutes
+- **score + detect** (compute scores → detect signals): ~2-5 minutes
 - **JBecker query**: ~100ms for 2,000+ trades (DuckDB filter pushdown)
 - **The Graph query**: ~3 seconds for complete trader history (if dataset unavailable)
 - **Blockchain scan**: 6-7 hours per trader for complete history (fallback only)
@@ -683,9 +737,9 @@ export MAX_REQUESTS_PER_SECOND=30  # Lower rate
 
 ### "No signals found"
 
-This is normal if no expert consensus exists yet. Run a sweep to refresh:
+This is normal if no expert consensus exists yet. Re-score and re-detect:
 ```bash
-polymarket sweep
+polymarket score && polymarket detect
 ```
 
 ### Database locked

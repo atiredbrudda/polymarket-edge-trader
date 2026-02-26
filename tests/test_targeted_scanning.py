@@ -83,23 +83,23 @@ MOCK_GAMMA_EVENTS = [
 class TestCLITargetedOptions(unittest.TestCase):
     """Test CLI shows targeted scanning options."""
 
-    def test_sweep_help_shows_niche_option(self):
-        """sweep --help shows --niche option."""
+    def test_discover_help_shows_niche_option(self):
+        """discover --help shows --niche option."""
         from click.testing import CliRunner
         from src.cli.commands import cli
 
         runner = CliRunner()
-        result = runner.invoke(cli, ["sweep", "--help"])
+        result = runner.invoke(cli, ["discover", "--help"])
         self.assertEqual(result.exit_code, 0)
         self.assertIn("--niche", result.output)
 
-    def test_sweep_help_shows_closing_within_option(self):
-        """sweep --help shows --closing-within option."""
+    def test_discover_help_shows_closing_within_option(self):
+        """discover --help shows --closing-within option."""
         from click.testing import CliRunner
         from src.cli.commands import cli
 
         runner = CliRunner()
-        result = runner.invoke(cli, ["sweep", "--help"])
+        result = runner.invoke(cli, ["discover", "--help"])
         self.assertEqual(result.exit_code, 0)
         self.assertIn("--closing-within", result.output)
 
