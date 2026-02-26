@@ -1594,6 +1594,7 @@ class IngestionPipeline:
 
             all_trades_with_category: list[TradeWithCategory] = []
             unknown_tokens: set[str] = set()
+            catalog_condition_ids: set[str] = set()  # markets created via catalog path, need token population
 
             for jbecker_trade in jbecker_trades:
                 trader_addr_lower = trader_address.lower()
@@ -1659,6 +1660,7 @@ class IngestionPipeline:
 
                     token_to_condition[token_id] = condition_id
                     condition_to_category[condition_id] = "eSports"
+                    catalog_condition_ids.add(condition_id)  # queue for token population
 
                 elif token_id != "0" and token_id not in token_to_condition:
                     # FALLBACK PATH: unknown token — queue for Gamma API lookup
@@ -1758,6 +1760,48 @@ class IngestionPipeline:
                 logger.info(
                     f"Looked up {looked_up}/{len(unknown_tokens)} tokens via Gamma"
                 )
+
+            # Populate tokens for catalog-path markets (created without token data)
+            if catalog_condition_ids and self.gamma_client:
+                needs_tokens = [
+                    cid for cid in catalog_condition_ids
+                    if session.query(Market).filter_by(condition_id=cid).first() is not None
+                    and session.query(Market).filter_by(condition_id=cid).first().tokens is None
+                ]
+                if needs_tokens:
+                    logger.info(f"Fetching tokens for {len(needs_tokens)} catalog-path markets")
+                    BATCH_SIZE = 20
+                    for i in range(0, len(needs_tokens), BATCH_SIZE):
+                        batch = needs_tokens[i: i + BATCH_SIZE]
+                        try:
+                            resp = httpx.get(
+                                "https://gamma-api.polymarket.com/markets",
+                                params=[("conditionId", cid) for cid in batch],
+                                timeout=10,
+                            )
+                            if resp.status_code == 200:
+                                for md in resp.json():
+                                    cid = md.get("conditionId")
+                                    clob_tokens = md.get("clobTokenIds")
+                                    if cid and clob_tokens:
+                                        market = session.query(Market).filter_by(condition_id=cid).first()
+                                        if market and market.tokens is None:
+                                            token_ids = (
+                                                json.loads(clob_tokens)
+                                                if isinstance(clob_tokens, str)
+                                                else clob_tokens
+                                            )
+                                            market.tokens = json.dumps(
+                                                [{"token_id": tid, "outcome": ""} for tid in token_ids]
+                                            )
+                                            logger.debug(f"Populated tokens for {cid[:8]}...")
+                        except Exception as e:
+                            logger.debug(f"Token population batch failed: {e}")
+                        time.sleep(0.05)
+                    try:
+                        session.commit()
+                    except Exception:
+                        session.rollback()
 
             for jbecker_trade in jbecker_trades:
                 try:

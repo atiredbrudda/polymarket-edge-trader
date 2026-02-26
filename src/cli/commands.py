@@ -1586,6 +1586,14 @@ def score(verbose):
 
     session_factory, _, _, _, _ = _get_dependencies()
 
+    with console.status("[bold green]Computing positions from trades...", spinner="dots"):
+        from src.discovery.trader_discovery import refresh_all_positions
+
+        with get_session(session_factory) as session:
+            pos_stats = refresh_all_positions(session)
+
+    console.print(f"  Positions computed: {pos_stats['positions_computed']} ({pos_stats['traders_processed']} traders)")
+
     with console.status("[bold green]Computing expertise scores...", spinner="dots"):
         from src.pipeline.scoring_pipeline import compute_all_game_scores
 

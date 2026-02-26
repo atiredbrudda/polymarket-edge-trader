@@ -97,8 +97,10 @@ def calculate_recency_weight(
         >>> calculate_recency_weight(last, now)
         Decimal('0.5')  # Approximately
     """
-    # Calculate days since last resolved
-    days_since = (now - last_resolved_timestamp).total_seconds() / 86400
+    # Calculate days since last resolved (strip timezone info to ensure both are naive)
+    now_naive = now.replace(tzinfo=None) if now.tzinfo is not None else now
+    last_naive = last_resolved_timestamp.replace(tzinfo=None) if last_resolved_timestamp.tzinfo is not None else last_resolved_timestamp
+    days_since = (now_naive - last_naive).total_seconds() / 86400
 
     # Same day or future: full weight (< 1 day)
     if days_since < 1:

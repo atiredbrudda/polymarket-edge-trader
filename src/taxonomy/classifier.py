@@ -134,9 +134,11 @@ class PatternMatcher:
         result = self.classify(market_title)
 
         if result is None:
-            # No match at all - flag for review
+            # No match at all — return empty node_path so taxonomy_node_id stays NULL.
+            # Using root name as node_path previously caused every non-eSports market
+            # (politics, crypto, etc.) to be classified under the eSports root node.
             return ClassificationResult(
-                node_path=self.taxonomy.name,
+                node_path="",
                 depth=0,
                 flagged_for_review=True,
             )
