@@ -10,7 +10,7 @@ standalone via `polymarket patch-catalog`.
 """
 
 import json
-from collections import defaultdict
+import time
 
 import httpx
 from loguru import logger
@@ -98,7 +98,7 @@ def patch_missing_catalog_entries(
     tier3_fallback.extend(tier2_failed)
 
     if tier3_fallback:
-        fallback_count = _try_tier3_fallback(session, tier3_fallback, markets_map, gamma_index)
+        fallback_count = _try_tier3_fallback(session, tier3_fallback, markets_map)
         stats["fallback"] = fallback_count
         stats["patched"] += fallback_count
 
@@ -259,7 +259,6 @@ def _try_tier2_api(
             else:
                 failed.append(cid)
 
-        import time
         time.sleep(API_SLEEP)
 
     return resolved, failed
@@ -269,7 +268,6 @@ def _try_tier3_fallback(
     session: Session,
     condition_ids: list[str],
     markets_map: dict[str, Market],
-    gamma_index: dict[str, GammaEvent],
 ) -> int:
     """Try to resolve gaps via category-only fallback (Tier 3)."""
     inserted = 0
