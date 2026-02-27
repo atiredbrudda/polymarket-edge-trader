@@ -1250,6 +1250,7 @@ def backfill(address, limit, verbose):
                 console.print(f"[green]Backfill complete[/green]")
                 console.print(f"  Tiers used: {', '.join(stats.get('tiers_used', []))}")
                 console.print(f"  Detail trades: {stats.get('detail_count', 0)}")
+                _run_catalog_patch(session_factory, gamma_client, console)
             except Exception as e:
                 console.print(f"[red]Backfill failed: {e}[/red]")
                 logger.error(f"Single trader backfill failed: {e}")
@@ -1410,6 +1411,63 @@ def backfill(address, limit, verbose):
         logger.info(
             f"BACKFILL completed: {success_count} ok, {error_count} failed ({processing_time:.1f}s)"
         )
+        _run_catalog_patch(session_factory, gamma_client, console)
+
+
+def _run_catalog_patch(session_factory, gamma_client, console):
+    """Run catalog gap detection and patch. Called after backfill completes."""
+    from src.catalog.patcher import patch_missing_catalog_entries
+    with get_session(session_factory) as session:
+        patch_stats = patch_missing_catalog_entries(session, gamma_client)
+    if patch_stats["patched"] > 0:
+        console.print(
+            f"  Catalog patched: [cyan]{patch_stats['patched']} markets[/cyan]"
+            f" (local={patch_stats['local']}, api={patch_stats['api']},"
+            f" fallback={patch_stats['fallback']})"
+        )
+    return patch_stats
+
+
+@cli.command("patch-catalog")
+@click.option("--verbose", "-v", is_flag=True, help="Enable debug logging")
+def patch_catalog_cmd(verbose):
+    """Detect and patch token_catalog gaps.
+
+    Finds trades.market_id values with no token_catalog entry and patches
+    them via local gamma_events join, Gamma API, or category-only fallback.
+
+    Safe to re-run -- idempotent (INSERT OR IGNORE).
+
+    \b
+    Examples:
+        polymarket patch-catalog
+        polymarket patch-catalog --verbose
+    """
+    logger.info("PATCH-CATALOG command started")
+
+    if verbose:
+        logger.remove()
+        logger.add(sys.stderr, level="DEBUG")
+
+    console = Console()
+    session_factory, _, _, _, gamma_client = _get_dependencies()
+
+    from src.catalog.patcher import patch_missing_catalog_entries
+    with get_session(session_factory) as session:
+        stats = patch_missing_catalog_entries(session, gamma_client)
+
+    if stats["patched"] == 0:
+        console.print("[green]No catalog gaps detected.[/green]")
+    else:
+        console.print(f"[bold green]Catalog patched:[/bold green] {stats['patched']} markets")
+        console.print(f"  Local (gamma_events): {stats['local']}")
+        console.print(f"  API lookup:           {stats['api']}")
+        console.print(f"  Category fallback:    {stats['fallback']}")
+
+    logger.info(
+        f"PATCH-CATALOG completed: patched={stats['patched']}, "
+        f"local={stats['local']}, api={stats['api']}, fallback={stats['fallback']}"
+    )
 
 
 @cli.command()
