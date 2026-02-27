@@ -83,66 +83,55 @@ def test_tier1_local_hit(in_memory_db):
             assert token.node_path.startswith("esports")
 
 
-@patch("src.catalog.patcher.httpx.get")
-def test_tier1_null_tokens_falls_to_tier2(mock_httpx_get, in_memory_db):
-    """Test Tier 1 skipped when market.tokens is NULL - falls to Tier 2 API."""
+def test_tier1_null_tokens_unresolvable(in_memory_db):
+    """Markets with tokens=NULL skip Tier 2 (no token_id to query) and Tier 3 (nothing to insert)."""
     from src.catalog.patcher import patch_missing_catalog_entries
-    
+
     in_memory_db.execute(text("""
         INSERT INTO trades (id, market_id, trader_address, side, size, price, timestamp, created_at)
         VALUES (1, 'cond1', '0xABC', 'BUY', 100, 0.5, datetime('now'), datetime('now'))
     """))
-    
+
     market = Market(
         condition_id="cond1",
         question="Test market?",
         category="esports",
-        tokens=None
+        tokens=None,
     )
     in_memory_db.add(market)
     in_memory_db.commit()
-    
+
     mock_gamma_client = MagicMock()
-    mock_gamma_client.rate_limiter = None
-    
-    mock_response = MagicMock()
-    mock_response.status_code = 200
-    mock_response.json.return_value = [{
-        "conditionId": "cond1",
-        "clobTokenIds": ["token999"],
-        "tags": [{"slug": "esports"}, {"slug": "cs2"}],
-        "question": "Test market?"
-    }]
-    mock_httpx_get.return_value = mock_response
-    
     result = patch_missing_catalog_entries(in_memory_db, gamma_client=mock_gamma_client)
-    
-    assert result["api"] == 1
-    assert result["local"] == 0
+
+    # Can't resolve without token_id — nothing inserted
+    assert result["patched"] == 0
+    assert result["api"] == 0
+    assert result["fallback"] == 0
 
 
 @patch("src.catalog.patcher.httpx.get")
 def test_tier2_api_hit_with_esports_tags(mock_httpx_get, in_memory_db):
-    """Test Tier 2: API returns eSports tags, node_path extracted."""
+    """Test Tier 2: queries by clob_token_ids, API returns eSports tags, node_path extracted."""
     from src.catalog.patcher import patch_missing_catalog_entries
-    
+
     in_memory_db.execute(text("""
         INSERT INTO trades (id, market_id, trader_address, side, size, price, timestamp, created_at)
         VALUES (1, 'cond_api', '0xABC', 'BUY', 100, 0.5, datetime('now'), datetime('now'))
     """))
-    
+
     market = Market(
         condition_id="cond_api",
         question="CS2 match?",
         category="esports",
-        tokens=None
+        tokens=json.dumps([{"token_id": "tokenA", "outcome": "Yes"}]),
     )
     in_memory_db.add(market)
     in_memory_db.commit()
-    
+
     mock_gamma_client = MagicMock()
     mock_gamma_client.rate_limiter = None
-    
+
     mock_response = MagicMock()
     mock_response.status_code = 200
     mock_response.json.return_value = [{
@@ -152,9 +141,9 @@ def test_tier2_api_hit_with_esports_tags(mock_httpx_get, in_memory_db):
         "question": "CS2 match?"
     }]
     mock_httpx_get.return_value = mock_response
-    
+
     result = patch_missing_catalog_entries(in_memory_db, gamma_client=mock_gamma_client)
-    
+
     assert result["api"] == 1
     tokens = in_memory_db.query(TokenCatalog).filter(
         TokenCatalog.condition_id == "cond_api"
@@ -179,7 +168,7 @@ def test_tier2_api_hit_no_esports_tags(mock_httpx_get, in_memory_db):
         condition_id="cond_politics",
         question="Election?",
         category="Politics",
-        tokens=None
+        tokens=json.dumps([{"token_id": "tokenX", "outcome": "Yes"}]),
     )
     in_memory_db.add(market)
     in_memory_db.commit()
@@ -270,7 +259,7 @@ def test_both_token_ids_inserted_per_condition(in_memory_db):
         condition_id="cond_binary",
         question="Binary market?",
         category="esports",
-        tokens=None
+        tokens=json.dumps([{"token_id": "token_yes", "outcome": "Yes"}]),
     )
     in_memory_db.add(market)
     in_memory_db.commit()
@@ -371,7 +360,7 @@ def test_unknown_category_uses_api_tag(in_memory_db):
         condition_id="cond_unknown",
         question="Crypto bet?",
         category="Unknown",
-        tokens=None
+        tokens=json.dumps([{"token_id": "token_crypto", "outcome": "Yes"}]),
     )
     in_memory_db.add(market)
     in_memory_db.commit()
@@ -410,7 +399,7 @@ def test_full_patch_flow_integration(in_memory_db):
         condition_id="cond_full",
         question="Integration test?",
         category="esports",
-        tokens=None
+        tokens=json.dumps([{"token_id": "token_int_yes", "outcome": "Yes"}]),
     )
     in_memory_db.add(market)
     

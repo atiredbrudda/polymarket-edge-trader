@@ -89,7 +89,7 @@ def patch_missing_catalog_entries(
         stats["patched"] += stats["local"]
         logger.debug(f"Tier 1 resolved {len(tier1_resolved)} via gamma_events")
 
-    tier2_api_resolved, tier2_failed = _try_tier2_api(session, tier2_batch, gamma_client)
+    tier2_api_resolved, tier2_failed = _try_tier2_api(session, tier2_batch, markets_map, gamma_client)
 
     for cid in tier2_api_resolved:
         stats["api"] += 1
@@ -182,36 +182,69 @@ def _try_tier1_local(
 def _try_tier2_api(
     session: Session,
     condition_ids: list[str],
+    markets_map: dict[str, Market],
     gamma_client,
 ) -> tuple[list[str], list[str]]:
-    """Try to resolve gaps via Gamma API (Tier 2)."""
+    """Try to resolve gaps via Gamma API (Tier 2).
+
+    Queries /markets?clob_token_ids=... using token_ids from markets.tokens.
+    The conditionId param is not supported by the Gamma API and returns
+    unrelated markets; clob_token_ids is the correct lookup key.
+    """
     if not condition_ids or not gamma_client:
         return [], condition_ids
 
     resolved = []
     failed = []
 
-    for i in range(0, len(condition_ids), BATCH_SIZE):
-        batch = condition_ids[i:i + BATCH_SIZE]
+    # Build token_id -> condition_id reverse map for this batch
+    token_to_cid: dict[str, str] = {}
+    no_tokens: list[str] = []
+    for cid in condition_ids:
+        market = markets_map.get(cid)
+        if not market or not market.tokens:
+            no_tokens.append(cid)
+            continue
+        try:
+            tokens_data = json.loads(market.tokens)
+        except (json.JSONDecodeError, TypeError):
+            no_tokens.append(cid)
+            continue
+        for entry in (tokens_data if isinstance(tokens_data, list) else []):
+            tid = entry.get("token_id")
+            if tid and tid != "0":
+                token_to_cid[tid] = cid
+
+    token_ids = list(token_to_cid.keys())
+
+    for i in range(0, len(token_ids), BATCH_SIZE):
+        batch_tokens = token_ids[i:i + BATCH_SIZE]
         try:
             if gamma_client.rate_limiter is not None:
                 gamma_client.rate_limiter.acquire()
             resp = httpx.get(
                 f"{GAMMA_API_BASE}/markets",
-                params=[("conditionId", cid) for cid in batch],
+                params=[("clob_token_ids", tid) for tid in batch_tokens],
                 timeout=10,
             )
             resp.raise_for_status()
             markets_data = resp.json()
         except Exception as e:
             logger.debug(f"Tier 2 API batch failed: {e}")
-            failed.extend(batch)
+            # Map failed tokens back to their condition_ids
+            for tid in batch_tokens:
+                cid = token_to_cid.get(tid)
+                if cid and cid not in resolved and cid not in failed:
+                    failed.append(cid)
             continue
 
+        seen_in_response: set[str] = set()
         for market_data in markets_data:
-            cid = market_data.get("conditionId")
-            if not cid:
+            resp_cid = market_data.get("conditionId")
+            if not resp_cid:
                 continue
+
+            seen_in_response.add(resp_cid)
 
             clob_token_ids = market_data.get("clobTokenIds", [])
             if isinstance(clob_token_ids, str):
@@ -221,11 +254,11 @@ def _try_tier2_api(
                     clob_token_ids = []
 
             if not clob_token_ids:
-                failed.append(cid)
+                if resp_cid not in resolved:
+                    failed.append(resp_cid)
                 continue
 
             tags = market_data.get("tags", [])
-            
             first_tag = tags[0].get("slug", "").lower() if tags else ""
             is_esports = first_tag == "esports"
 
@@ -238,14 +271,13 @@ def _try_tier2_api(
                 niche_slug = first_tag if first_tag else "unknown"
 
             question = market_data.get("question", "Unknown")
-
             rows_to_insert = []
             for token_id in clob_token_ids:
                 if not token_id or token_id == "0":
                     continue
                 rows_to_insert.append({
                     "token_id": token_id,
-                    "condition_id": cid,
+                    "condition_id": resp_cid,
                     "question": question,
                     "niche_slug": niche_slug,
                     "node_path": node_path,
@@ -255,11 +287,22 @@ def _try_tier2_api(
 
             if rows_to_insert:
                 _insert_rows(session, rows_to_insert)
-                resolved.append(cid)
+                if resp_cid not in resolved:
+                    resolved.append(resp_cid)
             else:
+                if resp_cid not in resolved:
+                    failed.append(resp_cid)
+
+        # Any cids not seen in response → failed
+        for tid in batch_tokens:
+            cid = token_to_cid.get(tid)
+            if cid and cid not in resolved and cid not in failed:
                 failed.append(cid)
 
         time.sleep(API_SLEEP)
+
+    # Markets with no token data can't be looked up — pass to Tier 3
+    failed.extend(no_tokens)
 
     return resolved, failed
 
