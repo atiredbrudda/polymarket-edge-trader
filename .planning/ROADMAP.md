@@ -50,6 +50,7 @@ See `.planning/milestones/v1.1-ROADMAP.md` for full details.
 - [ ] **Phase 16: Market Outcome Resolution** — Populate `markets.outcome` for all resolved markets using stored Gamma event data
 - [ ] **Phase 17: Deep Token Classification** — Enrich token catalog with game/tournament/team `node_path` from Gamma event tags
 - [ ] **Phase 18: End-to-End Validation** — Verify the scoring pipeline produces a real leaderboard on JBecker data
+- [ ] **Phase 19: Self-Healing Token Catalog** — Automatically detect and patch unclassifiable trades after every backfill run, ensuring no trade silently lacks game/category classification
 
 ## Phase Details
 
@@ -109,6 +110,22 @@ Plans:
 - [ ] 18-01-PLAN.md — TDD resolve_positions() function + resolve-positions CLI command
 - [ ] 18-02-PLAN.md — Diagnostic + MarketClassification backfill + E2E score/leaderboard verification
 
+### Phase 19: Self-Healing Token Catalog
+**Goal**: After every backfill run, trades with no `token_catalog` entry are detected and patched automatically — first via local `gamma_events` join, then via Gamma API lookup — so no trade is permanently unclassifiable
+**Depends on**: Phase 18
+**Requirements**: CAT-01, CAT-02, CAT-03
+**Success Criteria** (what must be TRUE):
+  1. After `backfill` completes, any `trades.market_id` with no matching `token_catalog.condition_id` is detected automatically
+  2. For eSports markets: game/tournament/team `node_path` is resolved via local `gamma_events` join (no API call needed when data exists locally)
+  3. For markets not in `gamma_events`: a Gamma API lookup is attempted and results are persisted to `token_catalog`
+  4. Non-eSports markets (Sports, Politics, etc.) are inserted into `token_catalog` with their correct category but no `node_path` — ensuring they are known, not silently invisible
+  5. The existing 401-market backlog (10,850 trades) is patched on first run
+  6. Running the patch step again is idempotent — no duplicate rows, no unnecessary API calls
+**Plans**: 2 plans
+Plans:
+- [ ] 19-01-PLAN.md — 3-tier patch engine (TDD): src/catalog/patcher.py + 12 tests
+- [ ] 19-02-PLAN.md — CLI wiring: patch-catalog command + backfill auto-hook (both paths)
+
 ## Progress
 
 | Phase | Milestone | Plans Complete | Status | Completed |
@@ -131,3 +148,4 @@ Plans:
 | 16. Market Outcome Resolution | v1.2 | 0/2 | Planned | - |
 | 17. Deep Token Classification | v1.2 | 0/2 | Planned | - |
 | 18. End-to-End Validation | v1.2 | 0/2 | Not started | - |
+| 19. Self-Healing Token Catalog | v1.2 | 0/2 | Planned | - |
