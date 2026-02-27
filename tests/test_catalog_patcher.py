@@ -110,7 +110,7 @@ def test_tier1_null_tokens_falls_to_tier2(in_memory_db):
         "tags": [{"slug": "esports"}, {"slug": "cs2"}],
         "question": "Test market?"
     }]
-    mock_gamma_client.client.get.return_value = mock_response
+    mock_httpx_get.return_value = mock_response
     
     result = patch_missing_catalog_entries(in_memory_db, gamma_client=mock_gamma_client)
     
@@ -145,7 +145,7 @@ def test_tier2_api_hit_with_esports_tags(in_memory_db):
         "tags": [{"slug": "esports"}, {"slug": "cs2"}],
         "question": "CS2 match?"
     }]
-    mock_gamma_client.client.get.return_value = mock_response
+    mock_httpx_get.return_value = mock_response
     
     result = patch_missing_catalog_entries(in_memory_db, gamma_client=mock_gamma_client)
     
@@ -186,7 +186,7 @@ def test_tier2_api_hit_no_esports_tags(in_memory_db):
         "tags": [{"slug": "politics"}, {"slug": "us-election"}],
         "question": "Election?"
     }]
-    mock_gamma_client.client.get.return_value = mock_response
+    mock_httpx_get.return_value = mock_response
     
     result = patch_missing_catalog_entries(in_memory_db, gamma_client=mock_gamma_client)
     
@@ -218,7 +218,7 @@ def test_tier3_fallback_on_api_failure(in_memory_db):
     in_memory_db.commit()
     
     mock_gamma_client = MagicMock()
-    mock_gamma_client.client.get.side_effect = Exception("API Error")
+    mock_httpx_get.side_effect = Exception("API Error")
     
     result = patch_missing_catalog_entries(in_memory_db, gamma_client=mock_gamma_client)
     
@@ -273,7 +273,7 @@ def test_both_token_ids_inserted_per_condition(in_memory_db):
         "tags": [{"slug": "esports"}],
         "question": "Binary market?"
     }]
-    mock_gamma_client.client.get.return_value = mock_response
+    mock_httpx_get.return_value = mock_response
     
     result = patch_missing_catalog_entries(in_memory_db, gamma_client=mock_gamma_client)
     
@@ -305,7 +305,7 @@ def test_niche_slug_from_category_sports(in_memory_db):
     in_memory_db.commit()
     
     mock_gamma_client = MagicMock()
-    mock_gamma_client.client.get.side_effect = Exception("API down")
+    mock_httpx_get.side_effect = Exception("API down")
     
     result = patch_missing_catalog_entries(in_memory_db, gamma_client=mock_gamma_client)
     
@@ -370,7 +370,7 @@ def test_unknown_category_uses_api_tag(in_memory_db):
         "tags": [{"slug": "crypto"}],
         "question": "Crypto bet?"
     }]
-    mock_gamma_client.client.get.return_value = mock_response
+    mock_httpx_get.return_value = mock_response
     
     result = patch_missing_catalog_entries(in_memory_db, gamma_client=mock_gamma_client)
     
@@ -412,7 +412,7 @@ def test_full_patch_flow_integration(in_memory_db):
         "tags": [{"slug": "esports"}, {"slug": "valorant"}],
         "question": "Integration test?"
     }]
-    mock_gamma_client.client.get.return_value = mock_response
+    mock_httpx_get.return_value = mock_response
     
     result = patch_missing_catalog_entries(in_memory_db, gamma_client=mock_gamma_client)
     

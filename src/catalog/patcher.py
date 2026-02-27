@@ -193,7 +193,10 @@ def _try_tier2_api(
     for i in range(0, len(condition_ids), BATCH_SIZE):
         batch = condition_ids[i:i + BATCH_SIZE]
         try:
-            resp = gamma_client.client.get(
+            if gamma_client.rate_limiter is not None:
+                gamma_client.rate_limiter.acquire()
+            import httpx
+            resp = httpx.get(
                 f"{GAMMA_API_BASE}/markets",
                 params=[("conditionId", cid) for cid in batch],
                 timeout=10,
@@ -276,31 +279,36 @@ def _try_tier3_fallback(
         if not market:
             continue
 
-        token_id = None
-        if market.tokens:
-            try:
-                tokens_data = json.loads(market.tokens)
-                if isinstance(tokens_data, list) and tokens_data:
-                    token_id = tokens_data[0].get("token_id")
-            except (json.JSONDecodeError, TypeError):
-                pass
+        if not market.tokens:
+            continue
 
-        if not token_id or token_id == "0":
+        try:
+            tokens_data = json.loads(market.tokens)
+        except (json.JSONDecodeError, TypeError):
+            continue
+
+        if not isinstance(tokens_data, list):
             continue
 
         niche_slug = _derive_niche_slug(market.category, None)
+        rows = []
+        for token_entry in tokens_data:
+            token_id = token_entry.get("token_id")
+            if not token_id or token_id == "0":
+                continue
+            rows.append({
+                "token_id": token_id,
+                "condition_id": cid,
+                "question": market.question,
+                "niche_slug": niche_slug,
+                "node_path": None,
+                "depth": None,
+                "market_type": None,
+            })
 
-        row = {
-            "token_id": token_id,
-            "condition_id": cid,
-            "question": market.question,
-            "niche_slug": niche_slug,
-            "node_path": None,
-            "depth": None,
-            "market_type": None,
-        }
-        _insert_rows(session, [row])
-        inserted += 1
+        if rows:
+            _insert_rows(session, rows)
+            inserted += 1
 
     return inserted
 
@@ -313,24 +321,6 @@ def _derive_niche_slug(category: str | None, node_path: str | None) -> str:
         return category.lower().strip() or "unknown"
     return "unknown"
 
-
-def _derive_niche_slug_from_tags(
-    category: str | None,
-    node_path: str | None,
-    tags: list[dict],
-) -> str:
-    """Derive niche_slug from tags, with fallback to category."""
-    if node_path and node_path.startswith("esports"):
-        return "esports"
-    
-    if tags:
-        first_slug = tags[0].get("slug", "").lower()
-        if first_slug and first_slug != "esports":
-            return first_slug
-    
-    if category:
-        return category.lower().strip() or "unknown"
-    return "unknown"
 
 
 def _insert_rows(session: Session, rows: list[dict]) -> None:
