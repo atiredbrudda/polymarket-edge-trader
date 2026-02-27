@@ -88,3 +88,44 @@ def test_catalog_stats_no_crash_without_catalog_table():
         # Should not crash - either handles gracefully or shows error message
         # Exit code might be 0 (graceful) or 1 (error shown but not exception)
         assert result.exit_code in (0, 1)
+
+
+def test_patch_catalog_no_gaps(in_memory_session_factory):
+    """Test patch-catalog with no gaps shows no gaps message."""
+    with patch("src.cli.commands._get_dependencies") as mock_deps:
+        mock_deps.return_value = (in_memory_session_factory, None, None, None, None)
+        
+        with patch("src.catalog.patcher.patch_missing_catalog_entries") as mock_patch:
+            mock_patch.return_value = {"patched": 0, "local": 0, "api": 0, "fallback": 0}
+            
+            runner = CliRunner()
+            result = runner.invoke(cli, ["patch-catalog"])
+            
+            assert result.exit_code == 0
+            assert "No catalog gaps detected" in result.output
+
+
+def test_patch_catalog_with_gaps(in_memory_session_factory):
+    """Test patch-catalog with gaps shows patch statistics."""
+    with patch("src.cli.commands._get_dependencies") as mock_deps:
+        mock_deps.return_value = (in_memory_session_factory, None, None, None, None)
+        
+        with patch("src.catalog.patcher.patch_missing_catalog_entries") as mock_patch:
+            mock_patch.return_value = {"patched": 401, "local": 21, "api": 362, "fallback": 18}
+            
+            runner = CliRunner()
+            result = runner.invoke(cli, ["patch-catalog"])
+            
+            assert result.exit_code == 0
+            assert "401" in result.output
+            assert "21" in result.output
+            assert "362" in result.output
+            assert "18" in result.output
+
+
+def test_patch_catalog_command_registered():
+    """Test patch-catalog command is registered in CLI."""
+    runner = CliRunner()
+    result = runner.invoke(cli, ["--help"])
+    assert result.exit_code == 0
+    assert "patch-catalog" in result.output
