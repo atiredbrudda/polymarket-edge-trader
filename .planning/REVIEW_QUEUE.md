@@ -17,7 +17,18 @@ Read this section and the AGENTS.md file in project root before starting work. R
 
 ## Pending Review
 
-(empty — no pending reviews)
+### worker/19-01 — 2026-02-27
+- **Plan:** 19-01 + 19-02 (Self-Healing Token Catalog)
+- **Branch:** worker/19-01
+- **Commits:** defe357
+- **Files changed:**
+  - src/catalog/patcher.py (NEW — patch_missing_catalog_entries)
+  - tests/test_catalog_patcher.py (NEW — 12 TDD tests)
+  - src/cli/commands.py (MODIFIED — _run_catalog_patch helper, backfill hooks, patch-catalog command)
+  - tests/test_cli_catalog.py (MODIFIED — 3 new CLI tests)
+  - .planning/phases/19-self-healing-token-catalog/19-01-SUMMARY.md (NEW)
+  - .planning/phases/19-self-healing-token-catalog/19-02-SUMMARY.md (NEW)
+- **Worker notes:** Implemented 3-tier (local gamma patcher_events join → Gamma API → category fallback). Auto-patches at end of backfill. Standalone patch-catalog command available. 18 new tests pass.
 
 ## Re-Review
 
