@@ -83,7 +83,8 @@ def test_tier1_local_hit(in_memory_db):
             assert token.node_path.startswith("esports")
 
 
-def test_tier1_null_tokens_falls_to_tier2(in_memory_db):
+@patch("src.catalog.patcher.httpx.get")
+def test_tier1_null_tokens_falls_to_tier2(mock_httpx_get, in_memory_db):
     """Test Tier 1 skipped when market.tokens is NULL - falls to Tier 2 API."""
     from src.catalog.patcher import patch_missing_catalog_entries
     
@@ -102,6 +103,8 @@ def test_tier1_null_tokens_falls_to_tier2(in_memory_db):
     in_memory_db.commit()
     
     mock_gamma_client = MagicMock()
+    mock_gamma_client.rate_limiter = None
+    
     mock_response = MagicMock()
     mock_response.status_code = 200
     mock_response.json.return_value = [{
@@ -118,7 +121,8 @@ def test_tier1_null_tokens_falls_to_tier2(in_memory_db):
     assert result["local"] == 0
 
 
-def test_tier2_api_hit_with_esports_tags(in_memory_db):
+@patch("src.catalog.patcher.httpx.get")
+def test_tier2_api_hit_with_esports_tags(mock_httpx_get, in_memory_db):
     """Test Tier 2: API returns eSports tags, node_path extracted."""
     from src.catalog.patcher import patch_missing_catalog_entries
     
@@ -137,6 +141,8 @@ def test_tier2_api_hit_with_esports_tags(in_memory_db):
     in_memory_db.commit()
     
     mock_gamma_client = MagicMock()
+    mock_gamma_client.rate_limiter = None
+    
     mock_response = MagicMock()
     mock_response.status_code = 200
     mock_response.json.return_value = [{
@@ -159,7 +165,8 @@ def test_tier2_api_hit_with_esports_tags(in_memory_db):
             assert "esports" in token.node_path
 
 
-def test_tier2_api_hit_no_esports_tags(in_memory_db):
+@patch("src.catalog.patcher.httpx.get")
+def test_tier2_api_hit_no_esports_tags(mock_httpx_get, in_memory_db):
     """Test Tier 2: API returns non-esports tags, fallback to niche_slug from tag."""
     from src.catalog.patcher import patch_missing_catalog_entries
     
@@ -178,6 +185,8 @@ def test_tier2_api_hit_no_esports_tags(in_memory_db):
     in_memory_db.commit()
     
     mock_gamma_client = MagicMock()
+    mock_gamma_client.rate_limiter = None
+    
     mock_response = MagicMock()
     mock_response.status_code = 200
     mock_response.json.return_value = [{
@@ -218,9 +227,11 @@ def test_tier3_fallback_on_api_failure(in_memory_db):
     in_memory_db.commit()
     
     mock_gamma_client = MagicMock()
-    mock_httpx_get.side_effect = Exception("API Error")
     
-    result = patch_missing_catalog_entries(in_memory_db, gamma_client=mock_gamma_client)
+    with patch("src.catalog.patcher.httpx.get") as mock_httpx_get:
+        mock_httpx_get.side_effect = Exception("API Error")
+        
+        result = patch_missing_catalog_entries(in_memory_db, gamma_client=mock_gamma_client)
     
     assert result["fallback"] == 1
     tokens = in_memory_db.query(TokenCatalog).filter(
@@ -273,9 +284,11 @@ def test_both_token_ids_inserted_per_condition(in_memory_db):
         "tags": [{"slug": "esports"}],
         "question": "Binary market?"
     }]
-    mock_httpx_get.return_value = mock_response
     
-    result = patch_missing_catalog_entries(in_memory_db, gamma_client=mock_gamma_client)
+    with patch("src.catalog.patcher.httpx.get") as mock_httpx_get:
+        mock_httpx_get.return_value = mock_response
+        
+        result = patch_missing_catalog_entries(in_memory_db, gamma_client=mock_gamma_client)
     
     tokens = in_memory_db.query(TokenCatalog).filter(
         TokenCatalog.condition_id == "cond_binary"
@@ -305,9 +318,11 @@ def test_niche_slug_from_category_sports(in_memory_db):
     in_memory_db.commit()
     
     mock_gamma_client = MagicMock()
-    mock_httpx_get.side_effect = Exception("API down")
     
-    result = patch_missing_catalog_entries(in_memory_db, gamma_client=mock_gamma_client)
+    with patch("src.catalog.patcher.httpx.get") as mock_httpx_get:
+        mock_httpx_get.side_effect = Exception("API down")
+        
+        result = patch_missing_catalog_entries(in_memory_db, gamma_client=mock_gamma_client)
     
     assert result["fallback"] == 1
     token = in_memory_db.query(TokenCatalog).filter(
@@ -370,9 +385,11 @@ def test_unknown_category_uses_api_tag(in_memory_db):
         "tags": [{"slug": "crypto"}],
         "question": "Crypto bet?"
     }]
-    mock_httpx_get.return_value = mock_response
     
-    result = patch_missing_catalog_entries(in_memory_db, gamma_client=mock_gamma_client)
+    with patch("src.catalog.patcher.httpx.get") as mock_httpx_get:
+        mock_httpx_get.return_value = mock_response
+        
+        result = patch_missing_catalog_entries(in_memory_db, gamma_client=mock_gamma_client)
     
     token = in_memory_db.query(TokenCatalog).filter(
         TokenCatalog.condition_id == "cond_unknown"
@@ -412,9 +429,11 @@ def test_full_patch_flow_integration(in_memory_db):
         "tags": [{"slug": "esports"}, {"slug": "valorant"}],
         "question": "Integration test?"
     }]
-    mock_httpx_get.return_value = mock_response
     
-    result = patch_missing_catalog_entries(in_memory_db, gamma_client=mock_gamma_client)
+    with patch("src.catalog.patcher.httpx.get") as mock_httpx_get:
+        mock_httpx_get.return_value = mock_response
+        
+        result = patch_missing_catalog_entries(in_memory_db, gamma_client=mock_gamma_client)
     
     assert result["patched"] >= 1
     tokens = in_memory_db.query(TokenCatalog).filter(

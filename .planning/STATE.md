@@ -5,14 +5,14 @@
 See: .planning/PROJECT.md (updated 2026-02-21)
 
 **Core value:** Surface where smart money is moving in niche prediction markets so the user can see what informed traders are doing and factor that into their own thinking.
-**Current focus:** v1.2 — Phase 18 complete; milestone ready to audit/archive
+**Current focus:** v1.2 — Phase 19 complete, pending review
 
 ## Current Position
 
-Phase: 18 of 18 (End-to-End Validation — COMPLETE)
+Phase: 19 of 19 (Self-Healing Token Catalog — COMPLETE)
 Plan: 2 of 2 complete
-Status: All phases done — ready to audit milestone
-Last activity: 2026-02-25 — Phase 18 cleared: resolve_positions() TDD + classification backfill + E2E validation
+Status: Pending review — worker/19-01 submitted
+Last activity: 2026-02-27 — Phase 19 implemented: 3-tier catalog patcher + CLI integration
 
 Progress: [██████████] 100% (v1.2)
 
@@ -39,6 +39,7 @@ Recent decisions affecting v1.2:
 - v1.0 phases 1-9 completed and archived (milestones/v1.0-ROADMAP.md)
 - v1.1 phases 10-14 completed and archived (milestones/v1.1-ROADMAP.md)
 - v1.2 phases 15-18 defined: Gamma ingestion → Resolution → Classification → E2E validation
+- Phase 19: Self-healing token catalog (auto-patch gaps after backfill)
 
 ### Known Limitations (carry to v1.2 work)
 
@@ -54,11 +55,11 @@ None.
 
 ### Blockers/Concerns
 
-None — Gamma Events API access confirmed, data structure understood from prior investigation.
+None — Phase 19 in review, awaiting approval to merge.
 
 ## Session Continuity
 
-Last session: 2026-02-25
-Stopped at: Phase 18 complete — all 2 plans cleared to main. v1.2 milestone done.
+Last session: 2026-02-27
+Stopped at: Phase 19 submitted for review (worker/19-01)
 Resume file: None
-Next: Run /gsd:audit-milestone to review v1.2 before archiving, then /gsd:complete-milestone
+Next: Awaiting review, then milestone v1.2 complete

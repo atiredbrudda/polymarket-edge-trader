@@ -12,6 +12,7 @@ standalone via `polymarket patch-catalog`.
 import json
 from collections import defaultdict
 
+import httpx
 from loguru import logger
 from sqlalchemy import text
 from sqlalchemy.orm import Session
@@ -195,7 +196,6 @@ def _try_tier2_api(
         try:
             if gamma_client.rate_limiter is not None:
                 gamma_client.rate_limiter.acquire()
-            import httpx
             resp = httpx.get(
                 f"{GAMMA_API_BASE}/markets",
                 params=[("conditionId", cid) for cid in batch],
