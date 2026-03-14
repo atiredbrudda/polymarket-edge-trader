@@ -14,6 +14,7 @@ All commands delegate formatting to src.cli.formatters for clean separation.
 import csv
 import json
 import sys
+from datetime import datetime
 from decimal import Decimal
 from pathlib import Path
 
@@ -1097,8 +1098,6 @@ def discover(niche, closing_within, verbose):
                         market.condition_id
                     )
                     traders_discovered += len(new_traders)
-
-                    from datetime import datetime
 
                     raw_result = extract_entities(market.question)
                     normalized = normalize_entities(raw_result)

@@ -17,37 +17,29 @@ Read this section and the AGENTS.md file in project root before starting work. R
 
 ## Pending Review
 
-### worker/21-01-market-entity-extraction (21-01 + 21-02) — 2026-03-14
-- **Plans:** 21-01 (data model + extraction), 21-02 (normalizer + discover integration)
-- **Branch:** worker/21-01-market-entity-extraction
-- **Commits:** f28ff46..c0da2f9
-- **Files changed:**
-  - src/db/models.py (MODIFIED — MarketEntity ORM model, 21-01)
-  - src/extraction/__init__.py (NEW — 21-01)
-  - src/extraction/llm_extractor.py (NEW — 21-01)
-  - src/extraction/normalizer.py (NEW — 21-02)
-  - tests/extraction/test_llm_extractor.py (NEW — 4 tests, 21-01)
-  - tests/extraction/test_normalizer.py (NEW — 5 tests, 21-02)
-  - src/cli/commands.py (MODIFIED — discover integration, 21-02)
-  - pyproject.toml (MODIFIED — anthropic dependency)
-  - .planning/phases/21-market-entity-extraction/21-01-SUMMARY.md (NEW)
-  - .planning/phases/21-market-entity-extraction/21-02-SUMMARY.md (NEW)
-- **Worker notes:**
-  - 21-01: MarketEntity model (condition_id, team_a, team_b, tournament, game, market_type), extract_entities() using Anthropic Claude Haiku 3.5
-  - 21-02: normalize_entities() maps aliases (NaVi -> Natus Vincere) using esports.yaml, discover now extracts + upserts per market
-  - All 9 extraction tests pass (0 real API calls — mocked)
-  - discover reports "Entities stored: N" in output
-- **Checklist:**
-  - [x] All tests pass (source .venv/bin/activate && pytest) — 9/9 extraction tests, 26/26 catalog tests
-  - [x] STATE.md updated (Phase 21 in progress)
-  - [x] Plan SUMMARY.md written (21-01-SUMMARY.md, 21-02-SUMMARY.md)
-  - [x] No debug artifacts, no cosmetic changes outside scope
+(empty — no pending reviews)
 
 ## Re-Review
 
 (empty — no re-reviews)
 
 ## Cleared
+
+### worker/21-01-market-entity-extraction (21-01 + 21-02) — 2026-03-14
+- **Plans:** 21-01 (data model + extraction), 21-02 (normalizer + discover integration)
+- **Cleared by:** Sonnet 4.6
+- **Reviewer fix (1):**
+  1. `src/cli/commands.py` line ~1101: `from datetime import datetime` was inside the market loop body — moved to module-level stdlib imports. Python caches module imports so this was non-breaking, but poor form.
+- **Files in scope:**
+  - src/db/models.py (MODIFIED — MarketEntity ORM model)
+  - src/extraction/__init__.py (NEW)
+  - src/extraction/llm_extractor.py (NEW)
+  - src/extraction/normalizer.py (NEW)
+  - tests/extraction/test_llm_extractor.py (NEW — 4 tests)
+  - tests/extraction/test_normalizer.py (NEW — 5 tests)
+  - src/cli/commands.py (MODIFIED — discover integration; reviewer moved inline import to module level)
+  - pyproject.toml (MODIFIED — anthropic dependency)
+- **Notes:** Clean implementation. MarketEntity model correct — no FK, unique constraint on condition_id, SQLAlchemy 2.0 style. `extract_entities()` catches all exceptions and returns all-None EntityResult — correct. `normalize_entities()` case-insensitive alias lookup, immutable (returns new EntityResult). Upsert logic in discover is correct — check-then-update or insert, single commit per market. Alias maps loaded at module import time (not per call). 9/9 extraction tests pass, 0 new regressions.
 
 ### worker/20-esports-token-gap-recovery (20-01 + 20-02) — 2026-03-14
 - **Plans:** 20-01, 20-02
