@@ -17,7 +17,28 @@ Read this section and the AGENTS.md file in project root before starting work. R
 
 ## Pending Review
 
-(empty — no pending reviews)
+### worker/22-01-org-team-mapping — 2026-03-14
+- **Plans:** 22-01 (TraderTeamStats model + query layer), 22-02 (team-stats CLI command)
+- **Branch:** worker/22-01-org-team-mapping
+- **Commits:** 09bf6a9..03ff461
+- **Files changed:**
+  - src/org_mapping/__init__.py (NEW)
+  - src/org_mapping/models.py (NEW — TraderTeamStats ORM model)
+  - src/org_mapping/queries.py (NEW — get_team_stats_for_trader, compute_and_upsert_team_stats)
+  - tests/org_mapping/__init__.py (NEW)
+  - tests/org_mapping/test_queries.py (NEW — 6 unit tests MAP-01..MAP-06)
+  - tests/org_mapping/test_cli.py (NEW — 1 integration test MAP-07)
+  - src/cli/commands.py (MODIFIED — team-stats command, +68 lines)
+  - .planning/phases/22-org-team-mapping/22-01-SUMMARY.md (NEW)
+  - .planning/phases/22-org-team-mapping/22-02-SUMMARY.md (NEW)
+  - .planning/STATE.md (MODIFIED — updated to Phase 22 in progress)
+- **Worker notes:** Phase 21 (worker/21-01-market-entity-extraction) was merged to this branch to get MarketEntity model. All 7 tests pass (MAP-01..MAP-07). LONG=team_a / SHORT=team_b convention documented in module docstrings.
+- **Checklist:**
+  - [x] All tests pass (source .venv/bin/activate && pytest tests/org_mapping/ -x -q)
+  - [x] No debug artifacts
+  - [x] STATE.md updated (current phase, plan number, last activity date)
+  - [x] Plan SUMMARY.md written (22-01-SUMMARY.md, 22-02-SUMMARY.md)
+  - [x] No cosmetic changes outside scope
 
 ## Re-Review
 
