@@ -167,13 +167,14 @@ Plans:
 
 ### Phase 23: Contextual Analyze Command
 
-**Goal:** [To be planned]
-**Requirements**: TBD
+**Goal:** Build `polymarket analyze` CLI command with two modes: batch mode (no flags) analyzes latest-discover-batch traders through their market_entities, and crawler mode (--crawl) exhausts all market_entities across all traders with pausable/resumable cursor state. Results are persisted to a new `entity_alpha` table (team/tournament/game dimensions). Alpha threshold: >= 5 resolved positions AND >= 60% win rate.
+**Requirements**: ANALYZE-01, ANALYZE-02, ANALYZE-03, ANALYZE-04, ANALYZE-05, ANALYZE-06, ANALYZE-07
 **Depends on:** Phase 22
-**Plans:** 0 plans
+**Plans:** 2 plans
 
 Plans:
-- [ ] TBD (run /gsd:plan-phase 23 to break down)
+- [ ] 23-01-PLAN.md — EntityAlpha ORM model + query layer (get_entity_alpha_for_trader, upsert_entity_alpha, build_batch_trader_list) + crawler cursor module (TDD, ANALYZE-01..06)
+- [ ] 23-02-PLAN.md — polymarket analyze CLI command: batch mode + crawler mode wired + integration test (ANALYZE-07)
 
 ## Progress
 
@@ -200,3 +201,5 @@ Plans:
 | 19. Self-Healing Token Catalog | v1.2 | 0/2 | Planned | - |
 | 20. eSports Token Gap Recovery | v1.2 | 0/2 | Not started | - |
 | 21. Market Entity Extraction | v1.3 | 0/2 | Planned | - |
+| 22. Org-Team Mapping | v1.3 | 0/2 | In Progress | - |
+| 23. Contextual Analyze Command | v1.3 | 0/2 | Planned | - |
