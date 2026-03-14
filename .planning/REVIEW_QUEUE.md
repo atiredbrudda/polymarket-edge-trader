@@ -17,7 +17,31 @@ Read this section and the AGENTS.md file in project root before starting work. R
 
 ## Pending Review
 
-(empty)
+### worker/21-01-market-entity-extraction (21-01 + 21-02) — 2026-03-14
+- **Plans:** 21-01 (data model + extraction), 21-02 (normalizer + discover integration)
+- **Branch:** worker/21-01-market-entity-extraction
+- **Commits:** f28ff46..c0da2f9
+- **Files changed:**
+  - src/db/models.py (MODIFIED — MarketEntity ORM model, 21-01)
+  - src/extraction/__init__.py (NEW — 21-01)
+  - src/extraction/llm_extractor.py (NEW — 21-01)
+  - src/extraction/normalizer.py (NEW — 21-02)
+  - tests/extraction/test_llm_extractor.py (NEW — 4 tests, 21-01)
+  - tests/extraction/test_normalizer.py (NEW — 5 tests, 21-02)
+  - src/cli/commands.py (MODIFIED — discover integration, 21-02)
+  - pyproject.toml (MODIFIED — anthropic dependency)
+  - .planning/phases/21-market-entity-extraction/21-01-SUMMARY.md (NEW)
+  - .planning/phases/21-market-entity-extraction/21-02-SUMMARY.md (NEW)
+- **Worker notes:**
+  - 21-01: MarketEntity model (condition_id, team_a, team_b, tournament, game, market_type), extract_entities() using Anthropic Claude Haiku 3.5
+  - 21-02: normalize_entities() maps aliases (NaVi -> Natus Vincere) using esports.yaml, discover now extracts + upserts per market
+  - All 9 extraction tests pass (0 real API calls — mocked)
+  - discover reports "Entities stored: N" in output
+- **Checklist:**
+  - [x] All tests pass (source .venv/bin/activate && pytest) — 9/9 extraction tests, 26/26 catalog tests
+  - [x] STATE.md updated (Phase 21 in progress)
+  - [x] Plan SUMMARY.md written (21-01-SUMMARY.md, 21-02-SUMMARY.md)
+  - [x] No debug artifacts, no cosmetic changes outside scope
 
 ## Re-Review
 

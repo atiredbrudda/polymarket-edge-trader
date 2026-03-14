@@ -9,12 +9,12 @@ See: .planning/PROJECT.md (updated 2026-02-21)
 
 ## Current Position
 
-Phase: 21 (Market Entity Extraction — IN PROGRESS)
-Plan: 20-01 + 20-02 complete (merged 2026-03-14), 21-01 pending execution
-Status: Phase 20 complete. Starting Phase 21 Plan 01.
-Last activity: 2026-03-14 — Phase 21 Plan 01 execution started.
+Phase: 21 (Market Entity Extraction — COMPLETE)
+Plan: 21-01 + 21-02 complete (2026-03-14)
+Status: Both plans complete, pending review.
+Last activity: 2026-03-14 — Phase 21 submitted for review.
 
-Progress: [█████████░] 90% (v1.2 — phase 21 in progress)
+Progress: [█████████░] 90% (v1.2 — phase 21 complete, pending review)
 
 ## Performance Metrics
 
