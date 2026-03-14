@@ -26,6 +26,16 @@ Read this section and the AGENTS.md file in project root before starting work. R
 
 ## Cleared
 
+### worker/23-02-analyze-cli-command (23-02) — 2026-03-14
+- **Plan:** 23-02
+- **Cleared by:** Sonnet 4.6
+- **No reviewer fixes required.**
+- **Files in scope:**
+  - src/cli/commands.py (MODIFIED — `analyze` command, `_run_batch_mode`, `_run_crawl_mode`)
+  - tests/test_analyze.py (MODIFIED — ANALYZE-07 integration test)
+  - .planning/phases/23-contextual-analyze-command/23-02-SUMMARY.md (NEW)
+- **Notes:** Clean implementation. Batch and crawl modes correct. Cursor resumption via address string comparison (`a > cursor["last_trader"]`) works because crawl is ordered by address. Alpha threshold (total_resolved ≥ 5, win_rate ≥ 60%) is correct Decimal comparison. Worker correctly left STATE.md alone. Minor: both modes call `get_entity_alpha_for_trader` twice per trader (once inside upsert, once for alpha check) — redundant query, non-blocking. 14/14 tests pass, 0 regressions.
+
 ### worker/23-01-contextual-analyze (23-01) — 2026-03-14
 - **Plan:** 23-01
 - **Cleared by:** Sonnet 4.6

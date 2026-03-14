@@ -344,3 +344,59 @@ def test_crawler_cursor(tmp_cursor):
     clear_cursor()
     result = load_cursor()
     assert result is None
+
+
+def test_analyze_cli(tmp_path, monkeypatch):
+    """ANALYZE-07: Integration test - CLI analyze command runs on seeded DB without error."""
+    from click.testing import CliRunner
+    from src.cli.commands import cli
+    from src.db.session import get_session_factory
+    from sqlalchemy import create_engine
+    from src.db.models import Base, MarketEntity, Position
+
+    engine = create_engine(f"sqlite:///{tmp_path}/test.db")
+    Base.metadata.create_all(engine)
+
+    now = datetime.utcnow()
+    with Session(engine) as session:
+        trader_alpha = Trader(
+            address="0xALPHA123456789012345678901234567890", first_seen=now
+        )
+        trader_noalpha = Trader(
+            address="0xNOALPHA12345678901234567890123456789", first_seen=now
+        )
+        session.add_all([trader_alpha, trader_noalpha])
+
+        for i in range(5):
+            entity = MarketEntity(
+                condition_id=f"cid-{i}",
+                team_a="NaVi",
+                team_b="FaZe",
+                game="cs2",
+                tournament="IEM Katowice",
+                market_type="match",
+            )
+            session.add(entity)
+            position = Position(
+                market_id=f"cid-{i}",
+                trader_address="0xALPHA123456789012345678901234567890",
+                size=Decimal("100.0"),
+                direction="LONG",
+                outcome="win",
+                resolved=True,
+            )
+            session.add(position)
+
+        session.commit()
+
+    def mock_get_dependencies(settings=None):
+        session_factory = get_session_factory(engine)
+        return session_factory, None, None, None, None
+
+    monkeypatch.setattr("src.cli.commands._get_dependencies", mock_get_dependencies)
+
+    runner = CliRunner()
+    result = runner.invoke(cli, ["analyze"])
+
+    assert result.exit_code == 0
+    assert "alpha" in result.output.lower() or "no alpha" in result.output.lower()

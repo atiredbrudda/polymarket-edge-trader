@@ -60,7 +60,14 @@ from src.gamma.classification import (
     backfill_market_classifications,
 )
 from src.gamma.position_resolver import resolve_positions
-from src.org_mapping.queries import get_team_stats_for_trader, compute_and_upsert_team_stats
+from src.org_mapping.queries import (
+    get_team_stats_for_trader,
+    compute_and_upsert_team_stats,
+    get_entity_alpha_for_trader,
+    upsert_entity_alpha,
+    build_batch_trader_list,
+)
+from src.org_mapping.crawler import load_cursor, save_cursor, clear_cursor
 
 
 def _get_dependencies(settings=None):
@@ -2463,6 +2470,117 @@ def team_stats(address, verbose):
         )
 
     console.print(table)
+
+
+@cli.command("analyze")
+@click.option(
+    "--crawl", is_flag=True, help="Exhaust all known entities across all traders"
+)
+@click.option("--verbose", "-v", is_flag=True, help="Enable debug logging")
+def analyze(crawl, verbose):
+    """Compute entity-level alpha for traders.
+
+    Batch mode (no flags): processes traders from the most recent discover run.
+    Crawler mode (--crawl): exhausts all market_entities across all traders.
+
+    Alpha threshold: >= 5 resolved positions AND >= 60% win rate on an entity.
+
+    Examples:
+        polymarket analyze
+        polymarket analyze --crawl
+    """
+    if verbose:
+        logger.remove()
+        logger.add(sys.stderr, level="DEBUG")
+
+    console = Console()
+    session_factory, _, _, _, _ = _get_dependencies()
+
+    if crawl:
+        _run_crawl_mode(console, session_factory)
+    else:
+        _run_batch_mode(console, session_factory)
+
+
+def _run_batch_mode(console, session_factory):
+    """Run batch mode: process latest discover batch traders."""
+    with get_session(session_factory) as session:
+        trader_addresses = build_batch_trader_list(session)
+
+        if not trader_addresses:
+            console.print("[yellow]No new traders in latest discover batch.[/yellow]")
+            return
+
+        alpha_count = 0
+        with console.status("[bold green]Analyzing batch...", spinner="dots") as status:
+            for idx, addr in enumerate(trader_addresses, 1):
+                status.update(
+                    f"[bold green]Processing {idx}/{len(trader_addresses)}: {addr[:10]}..."
+                )
+                upsert_entity_alpha(session, addr)
+                stats = get_entity_alpha_for_trader(session, addr)
+                has_alpha = any(
+                    s["total_resolved"] >= 5
+                    and s["win_rate"] is not None
+                    and s["win_rate"] >= Decimal("60.0")
+                    for s in stats
+                )
+                if has_alpha:
+                    alpha_count += 1
+                label = "1 alpha found" if has_alpha else "no alpha"
+                console.print(f"  {addr[:10]}... — {label}")
+
+        console.print(
+            f"[bold]Batch complete: {alpha_count}/{len(trader_addresses)} traders with alpha[/bold]"
+        )
+
+
+def _run_crawl_mode(console, session_factory):
+    """Run crawler mode: process all traders with cursor-based resumption."""
+    with get_session(session_factory) as session:
+        all_traders = (
+            session.execute(select(Trader.address).order_by(Trader.address))
+            .scalars()
+            .all()
+        )
+
+        if not all_traders:
+            console.print("[yellow]No traders in database.[/yellow]")
+            return
+
+        cursor = load_cursor()
+        if cursor:
+            console.print(
+                f"[dim]Resuming from cursor: last trader {cursor['last_trader'][:10]}...[/dim]"
+            )
+            remaining = [a for a in all_traders if a > cursor["last_trader"]]
+        else:
+            remaining = all_traders
+
+        if not remaining:
+            console.print("[green]All traders already processed.[/green]")
+            clear_cursor()
+            return
+
+        total_upserted = 0
+        with console.status(
+            "[bold green]Crawling entities...", spinner="dots"
+        ) as status:
+            for idx, addr in enumerate(remaining, 1):
+                status.update(
+                    f"[bold green]Processing {idx}/{len(remaining)}: {addr[:10]}..."
+                )
+                count = upsert_entity_alpha(session, addr)
+                total_upserted += count
+                stats = get_entity_alpha_for_trader(session, addr)
+                last_entity = stats[0]["entity_type"] if stats else ""
+                last_game = stats[0]["game"] if stats else None
+                save_cursor(addr, last_entity, last_game, idx)
+
+        clear_cursor()
+        console.print(
+            f"[bold]Crawl complete: {total_upserted} entities upserted across {len(remaining)} traders[/bold]"
+        )
 
 
 if __name__ == "__main__":
