@@ -17,34 +17,32 @@ Read this section and the AGENTS.md file in project root before starting work. R
 
 ## Pending Review
 
-### worker/22-01-org-team-mapping — 2026-03-14
-- **Plans:** 22-01 (TraderTeamStats model + query layer), 22-02 (team-stats CLI command)
-- **Branch:** worker/22-01-org-team-mapping
-- **Commits:** 09bf6a9..03ff461
-- **Files changed:**
-  - src/org_mapping/__init__.py (NEW)
-  - src/org_mapping/models.py (NEW — TraderTeamStats ORM model)
-  - src/org_mapping/queries.py (NEW — get_team_stats_for_trader, compute_and_upsert_team_stats)
-  - tests/org_mapping/__init__.py (NEW)
-  - tests/org_mapping/test_queries.py (NEW — 6 unit tests MAP-01..MAP-06)
-  - tests/org_mapping/test_cli.py (NEW — 1 integration test MAP-07)
-  - src/cli/commands.py (MODIFIED — team-stats command, +68 lines)
-  - .planning/phases/22-org-team-mapping/22-01-SUMMARY.md (NEW)
-  - .planning/phases/22-org-team-mapping/22-02-SUMMARY.md (NEW)
-  - .planning/STATE.md (MODIFIED — updated to Phase 22 in progress)
-- **Worker notes:** Phase 21 (worker/21-01-market-entity-extraction) was merged to this branch to get MarketEntity model. All 7 tests pass (MAP-01..MAP-07). LONG=team_a / SHORT=team_b convention documented in module docstrings.
-- **Checklist:**
-  - [x] All tests pass (source .venv/bin/activate && pytest tests/org_mapping/ -x -q)
-  - [x] No debug artifacts
-  - [x] STATE.md updated (current phase, plan number, last activity date)
-  - [x] Plan SUMMARY.md written (22-01-SUMMARY.md, 22-02-SUMMARY.md)
-  - [x] No cosmetic changes outside scope
+(empty — no pending reviews)
 
 ## Re-Review
 
 (empty — no re-reviews)
 
 ## Cleared
+
+### worker/22-01-org-team-mapping (22-01 + 22-02) — 2026-03-14
+- **Plans:** 22-01 (TraderTeamStats model + query layer), 22-02 (team-stats CLI command)
+- **Cleared by:** Sonnet 4.6
+- **Reviewer fixes (5):**
+  1. `src/cli/commands.py`: `import sys` inside `team_stats` function — removed, already at module level (line 16)
+  2. `src/cli/commands.py`: `from sqlalchemy import select` inside `with get_session` block — removed, already at module level (line 24)
+  3. `src/cli/commands.py`: `from rich.table import Table` inside function — moved to module level
+  4. `src/cli/commands.py`: `from src.org_mapping.queries import ...` + `from src.db.models import Position` inside function — moved to module level; `Position` added to existing `from src.db.models import (...)` block
+  5. `src/org_mapping/queries.py`: `_Pos` inner class defined inside `for` loop body — moved above the loop (was being redefined on every team iteration)
+- **Files in scope:**
+  - src/org_mapping/__init__.py (NEW)
+  - src/org_mapping/models.py (NEW — TraderTeamStats ORM model)
+  - src/org_mapping/queries.py (NEW — get_team_stats_for_trader, compute_and_upsert_team_stats; reviewer moved _Pos above loop)
+  - tests/org_mapping/__init__.py (NEW)
+  - tests/org_mapping/test_queries.py (NEW — 6 unit tests MAP-01..MAP-06)
+  - tests/org_mapping/test_cli.py (NEW — 1 integration test MAP-07)
+  - src/cli/commands.py (MODIFIED — team-stats command; reviewer cleaned 5 inline imports)
+- **Notes:** Clean TDD implementation. TraderTeamStats schema correct — (trader_address, team_name, game) unique index handles cross-game teams. LONG=team_a/SHORT=team_b convention documented in module docstring and function docstring. Upsert is idempotent (SELECT-then-UPDATE). `_Pos` synthetic class for `calculate_win_rate` reuse is functional. 7/7 tests pass, 0 new regressions.
 
 ### worker/21-01-market-entity-extraction (21-01 + 21-02) — 2026-03-14
 - **Plans:** 21-01 (data model + extraction), 21-02 (normalizer + discover integration)

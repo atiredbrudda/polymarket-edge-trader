@@ -21,6 +21,7 @@ from pathlib import Path
 import click
 from loguru import logger
 from rich.console import Console
+from rich.table import Table
 from sqlalchemy import create_engine, select
 
 from src.cli.formatters import (
@@ -41,6 +42,7 @@ from src.db.models import (
     MarketClassification,
     TokenCatalog,
     Trade,
+    Position,
 )
 from src.db.session import get_session, get_session_factory
 from src.config.settings import get_settings
@@ -58,6 +60,7 @@ from src.gamma.classification import (
     backfill_market_classifications,
 )
 from src.gamma.position_resolver import resolve_positions
+from src.org_mapping.queries import get_team_stats_for_trader, compute_and_upsert_team_stats
 
 
 def _get_dependencies(settings=None):
@@ -2401,14 +2404,6 @@ def team_stats(address, verbose):
     Examples:
         polymarket team-stats 0xeffd76b6a4318d50c6f71a16b276c5b279445a86
     """
-    import sys
-    from rich.table import Table
-    from src.org_mapping.queries import (
-        get_team_stats_for_trader,
-        compute_and_upsert_team_stats,
-    )
-    from src.db.models import Position
-
     if verbose:
         logger.remove()
         logger.add(sys.stderr, level="DEBUG")
@@ -2417,8 +2412,6 @@ def team_stats(address, verbose):
     session_factory, _, _, _, _ = _get_dependencies()
 
     with get_session(session_factory) as session:
-        from sqlalchemy import select
-
         total_resolved = (
             session.execute(
                 select(Position).where(

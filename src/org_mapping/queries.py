@@ -69,14 +69,13 @@ def get_team_stats_for_trader(session: Session, trader_address: str) -> list[dic
         elif pos.outcome == "loss":
             stats[key]["losses"] += 1
 
+    class _Pos:
+        def __init__(self, outcome):
+            self.resolved = True
+            self.outcome = outcome
+
     results = []
     for (team_name, game), s in stats.items():
-
-        class _Pos:
-            def __init__(self, outcome):
-                self.resolved = True
-                self.outcome = outcome
-
         synthetic = [_Pos("win")] * s["wins"] + [_Pos("loss")] * s["losses"]
         rate_result = calculate_win_rate(synthetic)
         total = s["wins"] + s["losses"]
