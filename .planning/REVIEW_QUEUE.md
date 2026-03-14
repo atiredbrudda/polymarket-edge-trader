@@ -10,6 +10,7 @@ Read this section and the AGENTS.md file in project root before starting work. R
 4. **Remove debug hardcodes before submitting.**
 5. **Attach debug summaries to all significant changes.**
 6. **Run `bash scripts/worker_validate.sh` before pushing.** If it shows regressions, fix them.
+7. **Do NOT update STATE.md.** Worker scope is: execute plan tasks, write SUMMARY.md, update REVIEW_QUEUE.md. STATE.md is reviewer-only.
 
 ## Review Feedback
 
@@ -17,13 +18,25 @@ Read this section and the AGENTS.md file in project root before starting work. R
 
 ## Pending Review
 
-(empty — no pending reviews)
+(empty)
 
 ## Re-Review
 
 (empty — no re-reviews)
 
 ## Cleared
+
+### worker/23-01-contextual-analyze (23-01) — 2026-03-14
+- **Plan:** 23-01
+- **Cleared by:** Sonnet 4.6
+- **Reviewer note (1):** Worker must not update STATE.md — that's reviewer scope. Added rule 7 to Reviewer Notes.
+- **Files in scope:**
+  - src/org_mapping/models.py (MODIFIED — EntityAlpha ORM model appended)
+  - src/org_mapping/queries.py (MODIFIED — get_entity_alpha_for_trader, upsert_entity_alpha, build_batch_trader_list)
+  - src/org_mapping/crawler.py (NEW — load_cursor, save_cursor, clear_cursor)
+  - tests/test_analyze.py (NEW — 6 unit tests ANALYZE-01..06)
+  - .planning/phases/23-contextual-analyze-command/23-01-SUMMARY.md (NEW)
+- **Notes:** Clean TDD implementation. EntityAlpha schema correct — unique index on (trader_address, entity_type, entity_name, game). LONG→team_a/SHORT→team_b direction convention correct. Tournament and game dimensions independent of direction. upsert_entity_alpha() SELECT-then-UPDATE idempotent. build_batch_trader_list() MAX(first_seen)-60s window correct, returns [] on empty table. Redundant `if team_name is not None:` guard (post-continue) — harmless. 13/13 tests pass (6 new + 7 org_mapping), 0 regressions.
 
 ### worker/22-01-org-team-mapping (22-01 + 22-02) — 2026-03-14
 - **Plans:** 22-01 (TraderTeamStats model + query layer), 22-02 (team-stats CLI command)
