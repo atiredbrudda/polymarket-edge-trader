@@ -143,6 +143,37 @@ Plans:
 - [ ] 20-01-PLAN.md — Events-based token recovery: fetch by tag, populate markets.tokens, re-run patcher
 - [ ] 20-02-PLAN.md — Fix ingest.py populate-tokens block + re-score affected traders
 
+### Phase 21: Market Entity Extraction
+
+**Goal**: During `discover`, Claude API extracts {team_a, team_b, tournament, game, market_type} from each market's question text and stores entities per market in the `market_entities` table, normalized against taxonomy aliases
+**Depends on:** Phase 20
+**Requirements**: ENT-01, ENT-02, ENT-03, ENT-04, ENT-05
+**Plans:** 2 plans
+
+Plans:
+- [ ] 21-01-PLAN.md — MarketEntity ORM model + LLM extraction function (src/extraction/llm_extractor.py)
+- [ ] 21-02-PLAN.md — Taxonomy normalizer + wire extraction into discover command
+
+### Phase 22: Org-Team Mapping
+
+**Goal:** [To be planned]
+**Requirements**: TBD
+**Depends on:** Phase 21
+**Plans:** 0 plans
+
+Plans:
+- [ ] TBD (run /gsd:plan-phase 22 to break down)
+
+### Phase 23: Contextual Analyze Command
+
+**Goal:** [To be planned]
+**Requirements**: TBD
+**Depends on:** Phase 22
+**Plans:** 0 plans
+
+Plans:
+- [ ] TBD (run /gsd:plan-phase 23 to break down)
+
 ## Progress
 
 | Phase | Milestone | Plans Complete | Status | Completed |
@@ -167,3 +198,4 @@ Plans:
 | 18. End-to-End Validation | v1.2 | 0/2 | Not started | - |
 | 19. Self-Healing Token Catalog | v1.2 | 0/2 | Planned | - |
 | 20. eSports Token Gap Recovery | v1.2 | 0/2 | Not started | - |
+| 21. Market Entity Extraction | v1.3 | 0/2 | Planned | - |
