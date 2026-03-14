@@ -48,6 +48,9 @@ from src.api.gamma_client import GammaMarketClient
 from src.pipeline.filters import CategoryFilter
 from src.alerts.telegram import TelegramAlerter
 from src.gamma.persist import upsert_gamma_events
+from src.extraction.llm_extractor import extract_entities, EntityResult
+from src.extraction.normalizer import normalize_entities
+from src.db.models import MarketEntity
 from src.gamma.resolution import resolve_market_outcomes
 from src.gamma.classification import (
     classify_tokens_from_gamma_events,
@@ -658,7 +661,6 @@ def specialists(game_slug, game_threshold, deep_threshold, verbose):
     logger.info("SPECIALISTS command completed")
 
 
-
 @cli.command()
 @click.option(
     "--interval", "-i", default=None, type=int, help="Polling interval in minutes"
@@ -1073,6 +1075,7 @@ def discover(niche, closing_within, verbose):
             markets_count = pipeline.ingest_active_markets()
 
         traders_discovered = 0
+        entities_extracted = 0
         with get_session(session_factory) as session:
             query = session.query(Market).filter_by(active=True)
             if niche:
@@ -1094,6 +1097,35 @@ def discover(niche, closing_within, verbose):
                         market.condition_id
                     )
                     traders_discovered += len(new_traders)
+
+                    from datetime import datetime
+
+                    raw_result = extract_entities(market.question)
+                    normalized = normalize_entities(raw_result)
+                    existing = (
+                        session.query(MarketEntity)
+                        .filter_by(condition_id=market.condition_id)
+                        .first()
+                    )
+                    if existing:
+                        existing.team_a = normalized.team_a
+                        existing.team_b = normalized.team_b
+                        existing.tournament = normalized.tournament
+                        existing.game = normalized.game
+                        existing.market_type = normalized.market_type
+                        existing.extracted_at = datetime.utcnow()
+                    else:
+                        entity_row = MarketEntity(
+                            condition_id=market.condition_id,
+                            team_a=normalized.team_a,
+                            team_b=normalized.team_b,
+                            tournament=normalized.tournament,
+                            game=normalized.game,
+                            market_type=normalized.market_type,
+                        )
+                        session.add(entity_row)
+                    session.commit()
+                    entities_extracted += 1
                 except Exception as e:
                     logger.warning(
                         f"Failed to discover traders from {market.condition_id}: {e}"
@@ -1108,6 +1140,7 @@ def discover(niche, closing_within, verbose):
     console.print(f"  Markets scanned: {markets_count}")
     console.print(f"  Detail markets:  {len(detail_markets)}")
     console.print(f"  New traders:     [green]{traders_discovered}[/green]")
+    console.print(f"  Entities stored: [cyan]{entities_extracted}[/cyan]")
     console.print(
         "\n[dim]Run 'polymarket backfill' to fetch history for discovered traders.[/dim]"
     )
@@ -1417,6 +1450,7 @@ def backfill(address, limit, verbose):
 def _run_catalog_patch(session_factory, gamma_client, console):
     """Run catalog gap detection and patch. Called after backfill completes."""
     from src.catalog.patcher import patch_missing_catalog_entries
+
     with get_session(session_factory) as session:
         patch_stats = patch_missing_catalog_entries(session, gamma_client)
     if patch_stats["patched"] > 0:
@@ -1453,13 +1487,16 @@ def patch_catalog_cmd(verbose):
     session_factory, _, _, _, gamma_client = _get_dependencies()
 
     from src.catalog.patcher import patch_missing_catalog_entries
+
     with get_session(session_factory) as session:
         stats = patch_missing_catalog_entries(session, gamma_client)
 
     if stats["patched"] == 0:
         console.print("[green]No catalog gaps detected.[/green]")
     else:
-        console.print(f"[bold green]Catalog patched:[/bold green] {stats['patched']} markets")
+        console.print(
+            f"[bold green]Catalog patched:[/bold green] {stats['patched']} markets"
+        )
         console.print(f"  Local (gamma_events): {stats['local']}")
         console.print(f"  API lookup:           {stats['api']}")
         console.print(f"  Category fallback:    {stats['fallback']}")
@@ -1495,6 +1532,7 @@ def recover_catalog_cmd(verbose):
     session_factory, _, _, _, gamma_client = _get_dependencies()
 
     from src.catalog.recovery import recover_esports_token_gaps
+
     with get_session(session_factory) as session:
         stats = recover_esports_token_gaps(session)
 
@@ -1543,13 +1581,17 @@ def score(verbose):
 
     session_factory, _, _, _, _ = _get_dependencies()
 
-    with console.status("[bold green]Computing positions from trades...", spinner="dots"):
+    with console.status(
+        "[bold green]Computing positions from trades...", spinner="dots"
+    ):
         from src.discovery.trader_discovery import refresh_all_positions
 
         with get_session(session_factory) as session:
             pos_stats = refresh_all_positions(session)
 
-    console.print(f"  Positions computed: {pos_stats['positions_computed']} ({pos_stats['traders_processed']} traders)")
+    console.print(
+        f"  Positions computed: {pos_stats['positions_computed']} ({pos_stats['traders_processed']} traders)"
+    )
 
     with console.status("[bold green]Computing expertise scores...", spinner="dots"):
         from src.pipeline.scoring_pipeline import compute_all_game_scores
