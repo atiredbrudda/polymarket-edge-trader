@@ -5,16 +5,16 @@
 See: .planning/PROJECT.md (updated 2026-02-21)
 
 **Core value:** Surface where smart money is moving in niche prediction markets so the user can see what informed traders are doing and factor that into their own thinking.
-**Current focus:** v1.2 — Phase 19 complete, pending review
+**Current focus:** v1.2 — Phase 22 planned, ready to execute
 
 ## Current Position
 
-Phase: 21 (Market Entity Extraction — COMPLETE)
-Plan: 21-01 + 21-02 complete (2026-03-14)
-Status: Both plans complete, pending review.
-Last activity: 2026-03-14 — Phase 21 submitted for review.
+Phase: 22 (Org-Team Mapping — PLANNED)
+Plan: 22-01 + 22-02 planned (2026-03-14)
+Status: Phase 21 reviewed and cleared. Phase 22 plans ready for execution.
+Last activity: 2026-03-14 — Phase 21 cleared (reviewer fix: inline datetime import moved to module level). Phase 22 planned: TraderTeamStats model + get_team_stats_for_trader() + team-stats CLI command.
 
-Progress: [█████████░] 90% (v1.2 — phase 21 complete, pending review)
+Progress: [█████████░] 91% (v1.2 — 21/23 phases complete, phase 22 planned)
 
 ## Performance Metrics
 
@@ -59,11 +59,11 @@ None.
 
 ### Blockers/Concerns
 
-None — Phase 19 in review, awaiting approval to merge.
+None.
 
 ## Session Continuity
 
-Last session: 2026-02-27
-Stopped at: Phase 19 submitted for review (worker/19-01)
+Last session: 2026-03-14
+Stopped at: Phase 22 planned (worker/21-01-market-entity-extraction branch)
 Resume file: None
-Next: Awaiting review, then milestone v1.2 complete
+Next: Execute Phase 22 (/gsd:execute-phase 22)
