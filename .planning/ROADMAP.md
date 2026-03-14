@@ -156,13 +156,14 @@ Plans:
 
 ### Phase 22: Org-Team Mapping
 
-**Goal:** [To be planned]
-**Requirements**: TBD
+**Goal:** Build TraderTeamStats ORM model and query layer that joins positions to market_entities, computing per-team win/loss stats per trader. Wire into a `polymarket team-stats` CLI command. Establishes the LONG=team_a / SHORT=team_b direction convention for Phase 23.
+**Requirements**: MAP-01, MAP-02, MAP-03, MAP-04, MAP-05, MAP-06, MAP-07
 **Depends on:** Phase 21
-**Plans:** 0 plans
+**Plans:** 2 plans
 
 Plans:
-- [ ] TBD (run /gsd:plan-phase 22 to break down)
+- [ ] 22-01-PLAN.md — TraderTeamStats ORM model + get_team_stats_for_trader() query function (TDD, MAP-01..MAP-06)
+- [ ] 22-02-PLAN.md — polymarket team-stats CLI command + integration test (MAP-07)
 
 ### Phase 23: Contextual Analyze Command
 
