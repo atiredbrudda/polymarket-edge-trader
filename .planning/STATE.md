@@ -9,12 +9,12 @@ See: .planning/PROJECT.md (updated 2026-02-21)
 
 ## Current Position
 
-Phase: 22 (Org-Team Mapping — PLANNED)
-Plan: 22-01 + 22-02 planned (2026-03-14)
-Status: Phase 21 reviewed and cleared. Phase 22 plans ready for execution.
-Last activity: 2026-03-14 — Phase 21 cleared (reviewer fix: inline datetime import moved to module level). Phase 22 planned: TraderTeamStats model + get_team_stats_for_trader() + team-stats CLI command.
+Phase: 22 (Org-Team Mapping — IN PROGRESS)
+Plan: 22-01 + 22-02 complete, pending review (2026-03-14)
+Status: Phase 22 plans 01-02 implemented. TraderTeamStats model + query layer + team-stats CLI command ready for review.
+Last activity: 2026-03-14 — Phase 22 plans 01-02 implemented: TraderTeamStats ORM model, get_team_stats_for_trader(), compute_and_upsert_team_stats(), team-stats CLI command. 7/7 tests passing (MAP-01..MAP-07).
 
-Progress: [█████████░] 91% (v1.2 — 21/23 phases complete, phase 22 planned)
+Progress: [█████████░] 91% (v1.2 — 21/23 phases complete, phase 22 in progress)
 
 ## Performance Metrics
 
@@ -64,6 +64,6 @@ None.
 ## Session Continuity
 
 Last session: 2026-03-14
-Stopped at: Phase 22 planned (worker/21-01-market-entity-extraction branch)
+Stopped at: Phase 22 plans 01-02 complete, pending review
 Resume file: None
-Next: Execute Phase 22 (/gsd:execute-phase 22)
+Next: Reviewer to review worker/22-01-org-team-mapping branch

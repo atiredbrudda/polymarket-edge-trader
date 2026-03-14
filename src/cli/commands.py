@@ -2386,5 +2386,91 @@ def backfill_classifications_cmd(verbose):
         raise SystemExit(1)
 
 
+@cli.command("team-stats")
+@click.argument("address")
+@click.option("--verbose", "-v", is_flag=True, help="Enable debug logging")
+def team_stats(address, verbose):
+    """Display per-team win/loss statistics for a trader.
+
+    Shows which teams the trader has bet on, with win rate per team.
+    Only match-type markets with resolved outcomes are included.
+
+    Direction convention: LONG position = bet on team_a (YES), SHORT = team_b (NO).
+
+    \b
+    Examples:
+        polymarket team-stats 0xeffd76b6a4318d50c6f71a16b276c5b279445a86
+    """
+    import sys
+    from rich.table import Table
+    from src.org_mapping.queries import (
+        get_team_stats_for_trader,
+        compute_and_upsert_team_stats,
+    )
+    from src.db.models import Position
+
+    if verbose:
+        logger.remove()
+        logger.add(sys.stderr, level="DEBUG")
+
+    console = Console()
+    session_factory, _, _, _, _ = _get_dependencies()
+
+    with get_session(session_factory) as session:
+        from sqlalchemy import select
+
+        total_resolved = (
+            session.execute(
+                select(Position).where(
+                    Position.trader_address == address,
+                    Position.resolved == True,
+                    Position.outcome.in_(["win", "loss"]),
+                )
+            )
+            .scalars()
+            .all()
+        )
+        total_resolved_count = len(total_resolved)
+
+        row_count = compute_and_upsert_team_stats(session, address)
+        stats = get_team_stats_for_trader(session, address)
+
+    if not stats:
+        console.print(f"[yellow]No team stats found for {address}.[/yellow]")
+        console.print(
+            f"[dim]Trader has {total_resolved_count} resolved win/loss positions, "
+            f"but none matched a market entity row (run 'discover' to extract entities).[/dim]"
+        )
+        return
+
+    console.print(
+        f"[dim]Join coverage: {row_count} team(s) matched from {total_resolved_count} "
+        f"total resolved positions.[/dim]\n"
+    )
+
+    table = Table(title=f"Team Stats: {address[:10]}...")
+    table.add_column("Team", style="cyan", no_wrap=True)
+    table.add_column("Game", style="blue")
+    table.add_column("Wins", justify="right", style="green")
+    table.add_column("Losses", justify="right", style="red")
+    table.add_column("Resolved", justify="right")
+    table.add_column("Win Rate %", justify="right", style="bold")
+
+    sorted_stats = sorted(stats, key=lambda r: r["total_resolved"], reverse=True)
+
+    for row in sorted_stats:
+        win_rate_str = f"{row['win_rate']:.1f}%" if row["win_rate"] is not None else "—"
+        table.add_row(
+            row["team_name"],
+            row["game"] or "—",
+            str(row["wins"]),
+            str(row["losses"]),
+            str(row["total_resolved"]),
+            win_rate_str,
+        )
+
+    console.print(table)
+
+
 if __name__ == "__main__":
     cli()
