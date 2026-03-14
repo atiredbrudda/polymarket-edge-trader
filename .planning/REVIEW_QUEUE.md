@@ -17,13 +17,48 @@ Read this section and the AGENTS.md file in project root before starting work. R
 
 ## Pending Review
 
-(empty)
+(empty — no pending reviews)
 
 ## Re-Review
 
 (empty — no re-reviews)
 
 ## Cleared
+
+### worker/22-01-org-team-mapping (22-01 + 22-02) — 2026-03-14
+- **Plans:** 22-01 (TraderTeamStats model + query layer), 22-02 (team-stats CLI command)
+- **Cleared by:** Sonnet 4.6
+- **Reviewer fixes (5):**
+  1. `src/cli/commands.py`: `import sys` inside `team_stats` function — removed, already at module level (line 16)
+  2. `src/cli/commands.py`: `from sqlalchemy import select` inside `with get_session` block — removed, already at module level (line 24)
+  3. `src/cli/commands.py`: `from rich.table import Table` inside function — moved to module level
+  4. `src/cli/commands.py`: `from src.org_mapping.queries import ...` + `from src.db.models import Position` inside function — moved to module level; `Position` added to existing `from src.db.models import (...)` block
+  5. `src/org_mapping/queries.py`: `_Pos` inner class defined inside `for` loop body — moved above the loop (was being redefined on every team iteration)
+- **Files in scope:**
+  - src/org_mapping/__init__.py (NEW)
+  - src/org_mapping/models.py (NEW — TraderTeamStats ORM model)
+  - src/org_mapping/queries.py (NEW — get_team_stats_for_trader, compute_and_upsert_team_stats; reviewer moved _Pos above loop)
+  - tests/org_mapping/__init__.py (NEW)
+  - tests/org_mapping/test_queries.py (NEW — 6 unit tests MAP-01..MAP-06)
+  - tests/org_mapping/test_cli.py (NEW — 1 integration test MAP-07)
+  - src/cli/commands.py (MODIFIED — team-stats command; reviewer cleaned 5 inline imports)
+- **Notes:** Clean TDD implementation. TraderTeamStats schema correct — (trader_address, team_name, game) unique index handles cross-game teams. LONG=team_a/SHORT=team_b convention documented in module docstring and function docstring. Upsert is idempotent (SELECT-then-UPDATE). `_Pos` synthetic class for `calculate_win_rate` reuse is functional. 7/7 tests pass, 0 new regressions.
+
+### worker/21-01-market-entity-extraction (21-01 + 21-02) — 2026-03-14
+- **Plans:** 21-01 (data model + extraction), 21-02 (normalizer + discover integration)
+- **Cleared by:** Sonnet 4.6
+- **Reviewer fix (1):**
+  1. `src/cli/commands.py` line ~1101: `from datetime import datetime` was inside the market loop body — moved to module-level stdlib imports. Python caches module imports so this was non-breaking, but poor form.
+- **Files in scope:**
+  - src/db/models.py (MODIFIED — MarketEntity ORM model)
+  - src/extraction/__init__.py (NEW)
+  - src/extraction/llm_extractor.py (NEW)
+  - src/extraction/normalizer.py (NEW)
+  - tests/extraction/test_llm_extractor.py (NEW — 4 tests)
+  - tests/extraction/test_normalizer.py (NEW — 5 tests)
+  - src/cli/commands.py (MODIFIED — discover integration; reviewer moved inline import to module level)
+  - pyproject.toml (MODIFIED — anthropic dependency)
+- **Notes:** Clean implementation. MarketEntity model correct — no FK, unique constraint on condition_id, SQLAlchemy 2.0 style. `extract_entities()` catches all exceptions and returns all-None EntityResult — correct. `normalize_entities()` case-insensitive alias lookup, immutable (returns new EntityResult). Upsert logic in discover is correct — check-then-update or insert, single commit per market. Alias maps loaded at module import time (not per call). 9/9 extraction tests pass, 0 new regressions.
 
 ### worker/20-esports-token-gap-recovery (20-01 + 20-02) — 2026-03-14
 - **Plans:** 20-01, 20-02

@@ -5,16 +5,16 @@
 See: .planning/PROJECT.md (updated 2026-02-21)
 
 **Core value:** Surface where smart money is moving in niche prediction markets so the user can see what informed traders are doing and factor that into their own thinking.
-**Current focus:** v1.2 — Phase 19 complete, pending review
+**Current focus:** v1.2 — Phase 22 planned, ready to execute
 
 ## Current Position
 
-Phase: 20 (eSports Token Gap Recovery — COMPLETE)
-Plan: 20-01 complete, 20-02 complete (2026-03-14)
-Status: Both plans complete, ready for merge. Phase 20 ready for review.
-Last activity: 2026-03-14 — 20-02 executed, both plans ready for merge.
+Phase: 22 (Org-Team Mapping — IN PROGRESS)
+Plan: 22-01 + 22-02 complete, pending review (2026-03-14)
+Status: Phase 22 plans 01-02 implemented. TraderTeamStats model + query layer + team-stats CLI command ready for review.
+Last activity: 2026-03-14 — Phase 22 plans 01-02 implemented: TraderTeamStats ORM model, get_team_stats_for_trader(), compute_and_upsert_team_stats(), team-stats CLI command. 7/7 tests passing (MAP-01..MAP-07).
 
-Progress: [██████████] 100% (v1.2 — phase 20 complete, pending review)
+Progress: [█████████░] 91% (v1.2 — 21/23 phases complete, phase 22 in progress)
 
 ## Performance Metrics
 
@@ -59,11 +59,11 @@ None.
 
 ### Blockers/Concerns
 
-None — Phase 19 in review, awaiting approval to merge.
+None.
 
 ## Session Continuity
 
-Last session: 2026-02-27
-Stopped at: Phase 19 submitted for review (worker/19-01)
+Last session: 2026-03-14
+Stopped at: Phase 22 plans 01-02 complete, pending review
 Resume file: None
-Next: Awaiting review, then milestone v1.2 complete
+Next: Reviewer to review worker/22-01-org-team-mapping branch

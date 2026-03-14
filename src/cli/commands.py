@@ -14,12 +14,14 @@ All commands delegate formatting to src.cli.formatters for clean separation.
 import csv
 import json
 import sys
+from datetime import datetime
 from decimal import Decimal
 from pathlib import Path
 
 import click
 from loguru import logger
 from rich.console import Console
+from rich.table import Table
 from sqlalchemy import create_engine, select
 
 from src.cli.formatters import (
@@ -40,6 +42,7 @@ from src.db.models import (
     MarketClassification,
     TokenCatalog,
     Trade,
+    Position,
 )
 from src.db.session import get_session, get_session_factory
 from src.config.settings import get_settings
@@ -48,12 +51,16 @@ from src.api.gamma_client import GammaMarketClient
 from src.pipeline.filters import CategoryFilter
 from src.alerts.telegram import TelegramAlerter
 from src.gamma.persist import upsert_gamma_events
+from src.extraction.llm_extractor import extract_entities, EntityResult
+from src.extraction.normalizer import normalize_entities
+from src.db.models import MarketEntity
 from src.gamma.resolution import resolve_market_outcomes
 from src.gamma.classification import (
     classify_tokens_from_gamma_events,
     backfill_market_classifications,
 )
 from src.gamma.position_resolver import resolve_positions
+from src.org_mapping.queries import get_team_stats_for_trader, compute_and_upsert_team_stats
 
 
 def _get_dependencies(settings=None):
@@ -658,7 +665,6 @@ def specialists(game_slug, game_threshold, deep_threshold, verbose):
     logger.info("SPECIALISTS command completed")
 
 
-
 @cli.command()
 @click.option(
     "--interval", "-i", default=None, type=int, help="Polling interval in minutes"
@@ -1073,6 +1079,7 @@ def discover(niche, closing_within, verbose):
             markets_count = pipeline.ingest_active_markets()
 
         traders_discovered = 0
+        entities_extracted = 0
         with get_session(session_factory) as session:
             query = session.query(Market).filter_by(active=True)
             if niche:
@@ -1094,6 +1101,33 @@ def discover(niche, closing_within, verbose):
                         market.condition_id
                     )
                     traders_discovered += len(new_traders)
+
+                    raw_result = extract_entities(market.question)
+                    normalized = normalize_entities(raw_result)
+                    existing = (
+                        session.query(MarketEntity)
+                        .filter_by(condition_id=market.condition_id)
+                        .first()
+                    )
+                    if existing:
+                        existing.team_a = normalized.team_a
+                        existing.team_b = normalized.team_b
+                        existing.tournament = normalized.tournament
+                        existing.game = normalized.game
+                        existing.market_type = normalized.market_type
+                        existing.extracted_at = datetime.utcnow()
+                    else:
+                        entity_row = MarketEntity(
+                            condition_id=market.condition_id,
+                            team_a=normalized.team_a,
+                            team_b=normalized.team_b,
+                            tournament=normalized.tournament,
+                            game=normalized.game,
+                            market_type=normalized.market_type,
+                        )
+                        session.add(entity_row)
+                    session.commit()
+                    entities_extracted += 1
                 except Exception as e:
                     logger.warning(
                         f"Failed to discover traders from {market.condition_id}: {e}"
@@ -1108,6 +1142,7 @@ def discover(niche, closing_within, verbose):
     console.print(f"  Markets scanned: {markets_count}")
     console.print(f"  Detail markets:  {len(detail_markets)}")
     console.print(f"  New traders:     [green]{traders_discovered}[/green]")
+    console.print(f"  Entities stored: [cyan]{entities_extracted}[/cyan]")
     console.print(
         "\n[dim]Run 'polymarket backfill' to fetch history for discovered traders.[/dim]"
     )
@@ -1417,6 +1452,7 @@ def backfill(address, limit, verbose):
 def _run_catalog_patch(session_factory, gamma_client, console):
     """Run catalog gap detection and patch. Called after backfill completes."""
     from src.catalog.patcher import patch_missing_catalog_entries
+
     with get_session(session_factory) as session:
         patch_stats = patch_missing_catalog_entries(session, gamma_client)
     if patch_stats["patched"] > 0:
@@ -1453,13 +1489,16 @@ def patch_catalog_cmd(verbose):
     session_factory, _, _, _, gamma_client = _get_dependencies()
 
     from src.catalog.patcher import patch_missing_catalog_entries
+
     with get_session(session_factory) as session:
         stats = patch_missing_catalog_entries(session, gamma_client)
 
     if stats["patched"] == 0:
         console.print("[green]No catalog gaps detected.[/green]")
     else:
-        console.print(f"[bold green]Catalog patched:[/bold green] {stats['patched']} markets")
+        console.print(
+            f"[bold green]Catalog patched:[/bold green] {stats['patched']} markets"
+        )
         console.print(f"  Local (gamma_events): {stats['local']}")
         console.print(f"  API lookup:           {stats['api']}")
         console.print(f"  Category fallback:    {stats['fallback']}")
@@ -1495,6 +1534,7 @@ def recover_catalog_cmd(verbose):
     session_factory, _, _, _, gamma_client = _get_dependencies()
 
     from src.catalog.recovery import recover_esports_token_gaps
+
     with get_session(session_factory) as session:
         stats = recover_esports_token_gaps(session)
 
@@ -1543,13 +1583,17 @@ def score(verbose):
 
     session_factory, _, _, _, _ = _get_dependencies()
 
-    with console.status("[bold green]Computing positions from trades...", spinner="dots"):
+    with console.status(
+        "[bold green]Computing positions from trades...", spinner="dots"
+    ):
         from src.discovery.trader_discovery import refresh_all_positions
 
         with get_session(session_factory) as session:
             pos_stats = refresh_all_positions(session)
 
-    console.print(f"  Positions computed: {pos_stats['positions_computed']} ({pos_stats['traders_processed']} traders)")
+    console.print(
+        f"  Positions computed: {pos_stats['positions_computed']} ({pos_stats['traders_processed']} traders)"
+    )
 
     with console.status("[bold green]Computing expertise scores...", spinner="dots"):
         from src.pipeline.scoring_pipeline import compute_all_game_scores
@@ -2343,6 +2387,82 @@ def backfill_classifications_cmd(verbose):
         logger.error(f"backfill-classifications failed: {e}")
         console.print(f"[red]Error: {e}[/red]")
         raise SystemExit(1)
+
+
+@cli.command("team-stats")
+@click.argument("address")
+@click.option("--verbose", "-v", is_flag=True, help="Enable debug logging")
+def team_stats(address, verbose):
+    """Display per-team win/loss statistics for a trader.
+
+    Shows which teams the trader has bet on, with win rate per team.
+    Only match-type markets with resolved outcomes are included.
+
+    Direction convention: LONG position = bet on team_a (YES), SHORT = team_b (NO).
+
+    \b
+    Examples:
+        polymarket team-stats 0xeffd76b6a4318d50c6f71a16b276c5b279445a86
+    """
+    if verbose:
+        logger.remove()
+        logger.add(sys.stderr, level="DEBUG")
+
+    console = Console()
+    session_factory, _, _, _, _ = _get_dependencies()
+
+    with get_session(session_factory) as session:
+        total_resolved = (
+            session.execute(
+                select(Position).where(
+                    Position.trader_address == address,
+                    Position.resolved == True,
+                    Position.outcome.in_(["win", "loss"]),
+                )
+            )
+            .scalars()
+            .all()
+        )
+        total_resolved_count = len(total_resolved)
+
+        row_count = compute_and_upsert_team_stats(session, address)
+        stats = get_team_stats_for_trader(session, address)
+
+    if not stats:
+        console.print(f"[yellow]No team stats found for {address}.[/yellow]")
+        console.print(
+            f"[dim]Trader has {total_resolved_count} resolved win/loss positions, "
+            f"but none matched a market entity row (run 'discover' to extract entities).[/dim]"
+        )
+        return
+
+    console.print(
+        f"[dim]Join coverage: {row_count} team(s) matched from {total_resolved_count} "
+        f"total resolved positions.[/dim]\n"
+    )
+
+    table = Table(title=f"Team Stats: {address[:10]}...")
+    table.add_column("Team", style="cyan", no_wrap=True)
+    table.add_column("Game", style="blue")
+    table.add_column("Wins", justify="right", style="green")
+    table.add_column("Losses", justify="right", style="red")
+    table.add_column("Resolved", justify="right")
+    table.add_column("Win Rate %", justify="right", style="bold")
+
+    sorted_stats = sorted(stats, key=lambda r: r["total_resolved"], reverse=True)
+
+    for row in sorted_stats:
+        win_rate_str = f"{row['win_rate']:.1f}%" if row["win_rate"] is not None else "—"
+        table.add_row(
+            row["team_name"],
+            row["game"] or "—",
+            str(row["wins"]),
+            str(row["losses"]),
+            str(row["total_resolved"]),
+            win_rate_str,
+        )
+
+    console.print(table)
 
 
 if __name__ == "__main__":
