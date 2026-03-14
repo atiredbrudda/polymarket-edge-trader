@@ -17,27 +17,7 @@ Read this section and the AGENTS.md file in project root before starting work. R
 
 ## Pending Review
 
-### worker/20-esports-token-gap-recovery (20-01 + 20-02) — 2026-03-14
-- **Plans:** 20-01 (recovery tool), 20-02 (ingest fix)
-- **Branch:** worker/20-esports-token-gap-recovery
-- **Commits:** 94625d4..a3ea101
-- **Files changed:**
-  - src/catalog/recovery.py (NEW — 20-01)
-  - tests/test_catalog_recovery.py (NEW — 20-01)
-  - src/cli/commands.py (MODIFIED — recover-catalog command, 20-01)
-  - src/pipeline/ingest.py (MODIFIED — populate-tokens block fix, 20-02)
-  - .planning/phases/20-esports-token-gap-recovery/20-01-SUMMARY.md (NEW)
-  - .planning/phases/20-esports-token-gap-recovery/20-02-SUMMARY.md (NEW)
-- **Worker notes:** 
-  - 20-01: recovers 156 null-token eSports markets (3,633 trades from 1,451 traders)
-  - 20-02: fixes broken GET /markets?conditionId=X call → uses events index (O(1) vs O(markets))
-  - Both plans must be merged together (20-02 depends on 20-01's recovery.py)
-  - After merge, user runs: `polymarket recover-catalog` then `polymarket score`
-- **Checklist:**
-  - [x] All tests pass (source .venv/bin/activate && pytest) — 26/26 catalog tests pass
-  - [x] STATE.md updated (Phase 20 complete, 2026-03-14)
-  - [x] Plan SUMMARY.md written (20-01-SUMMARY.md, 20-02-SUMMARY.md)
-  - [x] No debug artifacts, no cosmetic changes outside scope
+(empty)
 
 ## Re-Review
 
@@ -45,15 +25,16 @@ Read this section and the AGENTS.md file in project root before starting work. R
 
 ## Cleared
 
-### worker/20-esports-token-gap-recovery (20-01) — 2026-03-14
-- **Plan:** 20-01
+### worker/20-esports-token-gap-recovery (20-01 + 20-02) — 2026-03-14
+- **Plans:** 20-01, 20-02
 - **Cleared by:** Sonnet 4.6
-- **Merge commit:** pending (branch not yet merged to main — 20-02 must be executed first)
+- **Merge commit:** pending (ready to merge to main)
 - **Files in scope:**
   - src/catalog/recovery.py (NEW)
   - tests/test_catalog_recovery.py (NEW)
   - src/cli/commands.py (MODIFIED — recover-catalog command)
-- **Notes:** 8/8 tests pass. Clean implementation. Dict token format correct for Tier 1 patcher. Idempotent. Minor: markets absent from events index not logged (plan said "logged") — non-blocking, Tier 3 handles them. **20-02 must be executed before this branch is merged to main.**
+  - src/pipeline/ingest.py (MODIFIED — broken conditionId endpoint replaced with events index)
+- **Notes:** 26/26 tests pass. 20-01: clean recovery tool, dict token format, idempotent. 20-02: broken `/markets?conditionId=X` endpoint removed, replaced with O(1) events index lookup. Minor: markets absent from events index not logged in 20-01 — non-blocking. Ready to merge.
 
 ### worker/19-01 — 2026-02-27
 - **Branch:** worker/19-01

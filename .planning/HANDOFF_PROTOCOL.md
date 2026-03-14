@@ -2,58 +2,122 @@
 
 ## Roles
 
-- **Worker** (Model A): Executes plans, writes code. Typically an open source model.
+- **Worker** (Model A): Executes plans, writes code. Works on feature branches.
 - **Reviewer** (Model B): Reviews code quality, approves or requests fixes. Typically Opus 4.6.
 
 ## Rules
 
-1. Worker NEVER pushes to `main`. Always works on a feature branch.
+1. Worker NEVER pushes to `main`. Always works on a feature branch. This rule is enforced by a `pre-commit` hook that rejects commits made directly on `main` — see the Branch Protection section in AGENTS.md. A submission that bypasses this (e.g. via `--no-verify`) must be rejected and the Worker required to recreate the work on a proper branch.
 2. Worker updates `REVIEW_QUEUE.md` after every work session.
-3. Reviewer checks `REVIEW_QUEUE.md` at session start.
-4. Reviewer marks entries as cleared (with commit hash) after approval.
-5. If Worker modifies a file that was previously cleared, it MUST flag it for re-review.
-6. Only Reviewer merges to `main`.
+3. Worker updates `STATE.md` to reflect current plan and status on every submission.
+4. Reviewer checks `REVIEW_QUEUE.md` at session start.
+5. **Reviewer updates `STATE.md` immediately on every merge — same session, non-negotiable.**
+6. **Reviewer writes or verifies plan SUMMARY.md before closing out every approved plan.**
+7. Reviewer marks entries as cleared (with commit hash) after approval.
+8. If Worker modifies a file that was previously cleared, it MUST flag it for re-review.
+9. Only Reviewer merges to `main`.
 
 ## Branch Convention
 
 ```
-worker/<phase>-<plan>       # e.g. worker/10-01
-worker/<phase>-<plan>-fix   # if reworking after review feedback
+worker/<phase>-<slug>       # e.g. worker/21-market-entity-extraction
+worker/<phase>-<slug>-fix   # if reworking after review feedback
 ```
 
 ## Work Session Flow
 
 ### Worker (Model A) Session
 
-1. Pull latest `main`, create or checkout feature branch
-2. Read the relevant PLAN.md — this is your spec
-3. Execute the plan, commit atomically per task
-4. Before ending session, update `REVIEW_QUEUE.md`:
+1. Switch to `main`, pull latest, then create your branch from it: `git checkout main && git pull && git checkout -b worker/<name>`. Never create a branch from an arbitrary HEAD.
+2. Read the relevant PLAN.md — this is your spec.
+3. Execute the plan, commit atomically per task.
+4. Activate the virtual environment and run `pytest` — fix any failures before continuing.
+5. **Update STATE.md:** set current phase, current plan number, status, last activity date. Must reflect actual current state, not phase-start state.
+6. **Write `{phase-dir}/{phase-num}-{plan-num}-SUMMARY.md` for every plan before submission.** e.g. `21-01-SUMMARY.md`, `21-02-SUMMARY.md`. Required every time, not optional.
+7. Before ending session, update `.planning/REVIEW_QUEUE.md`:
    - Add entry to `## Pending Review`
    - List every file created or modified
    - Note the commit range (first..last commit hash)
    - Flag any files from `## Cleared` that were modified → move to `## Re-Review`
-   - Add any decisions or concerns to `## Worker Notes`
-5. Push the feature branch
+   - Add any decisions or concerns to Worker Notes
+   - Tick the pre-submit checklist honestly
+8. Push the feature branch.
+
+### Worker Pre-Submit Checklist
+
+```
+- [ ] Virtual environment active, all tests pass (pytest)
+- [ ] No debug artifacts (no hardcoded values, no TODO: remove, no stray print() statements)
+- [ ] STATE.md updated — current phase, plan number, last activity date
+- [ ] Plan SUMMARY.md written (`{phase-num}-{plan-num}-SUMMARY.md` — required for every plan)
+- [ ] No cosmetic changes outside task scope
+```
+
+Reviewer will reject any submission with unchecked boxes.
+
+### Worker — Fixing Review Feedback
+
+1. Mark your `## Re-Review` entry `Status: In Progress`.
+2. Address every issue listed in `## Review Feedback`.
+3. Update STATE.md to reflect the fix status.
+4. Move entry back to `## Pending Review`, add a `Fixes:` line summarising what was addressed.
+5. Clear the `## Review Feedback` entry — replace content with `Resolved — moved to Pending Review [date]`.
+6. Push the fix branch.
 
 ### Reviewer (Model B) Session
 
-1. Read `REVIEW_QUEUE.md`
+1. Read `.planning/REVIEW_QUEUE.md` — if `## Pending Review` has items, review immediately.
 2. For each entry in `## Pending Review`:
-   - `git diff main..worker/<branch>` to see full diff
-   - Review code quality, correctness, test coverage
-   - If approved: move entry to `## Cleared` with review commit hash
-   - If changes needed: add feedback to `## Review Feedback`, worker addresses next session
+   - `git diff main..worker/<branch>` to see full diff.
+   - Check pre-submit checklist — reject if any boxes unchecked.
+   - Review code quality, correctness, test coverage, no debug artifacts.
+   - **If approved:**
+     1. Move entry to `## Cleared` with date and review notes.
+     2. **Merge branch to `main`** (`git merge --no-ff worker/<branch>`).
+     3. **Push `main` to origin immediately after merging.** Workers reset local main to `origin/main` before branching — an unpushed merge will be silently discarded, causing the merged code to disappear from the next worker's branch base.
+     4. **Update STATE.md immediately** — phase, plan counts, last activity. Do this in the same session. Do not defer.
+     5. **Commit STATE.md and REVIEW_QUEUE.md to main immediately.** Do not leave them as working-tree edits — uncommitted edits will be overwritten by the next worker's git operations.
+     6. **Verify merge is complete:** `git log --oneline main..worker/<branch>` must return empty. If not, the merge didn't happen. Do it now.
+     7. **Verify `{phase-num}-{plan-num}-SUMMARY.md` exists for this plan.** If not, write it before closing. If this was the last plan of the phase, update ROADMAP.md phase row to complete with date.
+   - **If changes needed:** write actionable feedback to `## Review Feedback`, move entry to `## Re-Review`.
 3. For each entry in `## Re-Review`:
-   - Only diff the specific files flagged, against the cleared commit
-   - If approved: move back to `## Cleared` with updated commit hash
-   - If changes needed: add to `## Review Feedback`
-4. Merge approved branches to `main`
-5. Update STATE.md with progress
+   - Only diff the specific files flagged.
+   - Same approval/rejection flow as above.
+4. Entry must leave `## Pending Review` before session ends.
+
+## STATE.md Update Protocol
+
+STATE.md must always reflect reality. It is the Reviewer's responsibility to keep it current on merge. The Worker keeps it current on submission.
+
+**On every Worker submission, STATE.md must show:**
+- Current phase number and name
+- Current plan number and status
+- Last activity date
+
+**On every Reviewer merge, STATE.md must additionally show:**
+- Plan marked complete
+- Phase marked complete if applicable
+- Last activity updated to today
+
+**STATE.md that is more than one plan behind reality is a bug. Treat it as one.**
+
+## SUMMARY.md Protocol
+
+Every plan must have a `{phase-num}-{plan-num}-SUMMARY.md` in its phase directory before the plan is considered closed.
+
+**Worker writes it on every submission — not just the last plan of a phase.**
+**Reviewer writes it if Worker missed it — before closing the session, not deferred.**
+
+Contents (minimum):
+- What was built
+- Key decisions made during implementation
+- Any deviations from the PLAN.md and why
+- Test results
+- Known issues or follow-up items
+
+A plan with no SUMMARY.md is not complete, regardless of whether it is merged.
 
 ## File: .planning/REVIEW_QUEUE.md
-
-This is the shared ledger. Both models read and write it. Structure:
 
 ```markdown
 # Review Queue
@@ -61,133 +125,63 @@ This is the shared ledger. Both models read and write it. Structure:
 ## Pending Review
 
 ### [branch-name] — [date]
-- **Plan:** 10-01 (Targeted Market Scanning - Filter Engine)
-- **Branch:** worker/10-01
+- **Plan:** 21-01
+- **Branch:** worker/21-market-entity-extraction
 - **Commits:** abc1234..def5678
 - **Files changed:**
-  - src/scanning/filters.py (NEW)
-  - src/scanning/time_filter.py (NEW)
-  - tests/test_filters.py (NEW)
-  - src/pipeline/runner.py (MODIFIED)
-- **Worker notes:** Chose to implement time filter as a separate class rather than
-  inline in the scanner. Tests cover edge cases for timezone handling.
-- **Decisions made:** [any architectural choices the worker made autonomously]
+  - src/extraction/llm_extractor.py (NEW)
+  - src/db/models.py (MODIFIED)
+  - tests/extraction/test_llm_extractor.py (NEW)
+- **Worker notes:** [decisions, concerns]
+- **Checklist:**
+  - [x] Tests pass (pytest)
+  - [x] No debug artifacts
+  - [x] STATE.md updated
+  - [x] SUMMARY.md written (`{phase-num}-{plan-num}-SUMMARY.md`)
 
 ## Re-Review
 
 ### [branch-name] — [date]
-- **Previously cleared:** [date of clearance]
-- **Cleared commit:** abc1234
-- **Files re-touched:**
-  - src/pipeline/runner.py — added new filter integration
-- **Reason:** Needed to modify cleared code to integrate new filter from plan 10-02
-- **Worker notes:** Minimal change, only added 2 lines to the import section and
-  1 function call in run_scan().
+- **Status:** Pending / In Progress
+- **Previously cleared:** [date]
+- **Files re-touched:** [list]
+- **Reason:** [why cleared file was touched]
 
 ## Review Feedback
 
 ### [branch-name] — [date]
 - **Reviewer:** Opus 4.6
-- **Status:** Changes requested
 - **Issues:**
-  - src/scanning/filters.py:45 — SQL injection risk in raw query
-  - tests/test_filters.py — missing edge case for empty market list
-- **Action required:** Worker fixes issues, moves entry back to Pending Review
+  - src/extraction/llm_extractor.py:42 — extraction failures not logged
+- **Action required:** Worker fixes, moves to Pending Review
 
 ## Cleared
 
 ### [branch-name] — [date cleared]
-- **Plan:** 10-01
+- **Plan:** 21-01
 - **Cleared by:** Opus 4.6
-- **Review commit:** ghi9012
-- **Files in scope:**
-  - src/scanning/filters.py
-  - src/scanning/time_filter.py
-  - tests/test_filters.py
-  - src/pipeline/runner.py
-- **Notes:** Clean implementation, good test coverage.
+- **Merge commit:** ghi9012
+- **Notes:** Clean model + extractor, tests passing.
 ```
-
-## Detecting Re-Review Needs
-
-When Worker modifies any file, check it against the `## Cleared` section:
-
-```bash
-# Get list of cleared files
-grep "^  - " .planning/REVIEW_QUEUE.md | grep -A999 "## Cleared" | sed 's/^  - //' | cut -d' ' -f1
-
-# Compare with files you just changed
-git diff --name-only HEAD~N
-```
-
-If overlap exists → entry moves from Cleared to Re-Review with the specific files flagged.
-
-## Worker Pre-Submit Checklist
-
-Before updating REVIEW_QUEUE.md and pushing, verify:
-
-1. **All plan tests pass:** `pytest tests/test_<new_file>.py -v`
-2. **No regressions in related tests:** If you modified a function's signature or return value, grep test files for mocks of that function and update them: `grep -r "function_name" tests/`
-3. **Full suite spot-check:** `pytest --tb=line -q` — compare failure count to what's on main. If you introduced new failures, fix them before submitting.
-
-## Worker Code Standards
-
-These rules come from patterns flagged during review. Violating them will result in changes-requested feedback.
-
-### 1. No cosmetic reformatting outside your scope
-
-Do NOT run auto-formatters on files you didn't functionally change. Line-wrapping, re-indenting, or reflowing code that isn't part of your task adds noise to diffs, pollutes git blame, and makes review harder. If you modify a function, you may reformat *that function*. Do not touch the rest of the file.
-
-**Bad:** Changing 120 lines of `db/models.py` line wrapping when you only added 1 field.
-**Good:** Adding the field and leaving everything else alone.
-
-### 2. Never leave debug hardcodes in submitted code
-
-Hardcoded test values, `TODO: remove after debugging` blocks, and bypass logic MUST be removed before pushing to the review queue. If `ingest_active_markets()` only processes 1 hardcoded market, that's not a fix — it's broken production code.
-
-Before submitting, search your own changes:
-```bash
-git diff main..HEAD | grep -i "debug\|TODO\|hardcode\|temporary\|FIXME"
-```
-
-### 3. Update tests when you change interfaces
-
-If you rename a method (e.g., `get_markets` → `get_events`), change a function signature, or alter return types, you MUST update all test mocks that reference the old interface. This is the #1 source of regressions found in review.
-
-```bash
-# After changing any function, check for test mocks
-grep -r "old_function_name" tests/
-```
-
-### 4. Debug sessions MUST have summary files
-
-Every debug session that results in code changes MUST produce a summary file in `.planning/debug/`. The file must document:
-- **Trigger:** What symptom started the investigation
-- **Evidence:** What you checked and what you found (with timestamps)
-- **Root cause:** The actual underlying problem
-- **Fix:** What you changed and why
-- **Files changed:** List of modified files
-
-This is non-negotiable. The summary is how future sessions understand *why* code looks the way it does. If the biggest change in your branch has no debug summary, the review will be sent back.
-
-Use the existing files in `.planning/debug/` as a template.
-
-### 5. Don't document unbuilt features
-
-Do not update README.md or user-facing docs to describe features that haven't been implemented yet. Docs ship with code, not before it.
-
-### 6. Keep debug/diagnostic output opt-in
-
-Debug JSON dumps, verbose logging to files, and diagnostic outputs should be gated behind an environment variable (`POLYMARKET_DEBUG`) or a `--debug`/`--verbose` CLI flag. Do not write debug artifacts unconditionally on every run.
 
 ## Quick Reference
 
 | Situation | Action |
-|-----------|--------|
-| Worker finishes a plan | Add to Pending Review, push branch |
-| Reviewer approves | Move to Cleared, merge to main |
-| Reviewer rejects | Add to Review Feedback with specifics |
-| Worker fixes feedback | Move from Feedback back to Pending Review |
-| Worker touches cleared file | Move affected files to Re-Review |
-| Worker gets stuck | Add to Worker Notes, reviewer advises next session |
-| Both models idle | Check Pending Review — if empty, next plan is ready |
+|---|---|
+| Worker finishes a plan | Write `{phase}-{plan}-SUMMARY.md`, update STATE.md, add to Pending Review, push branch |
+| Reviewer approves | Merge, push origin, update STATE.md, verify SUMMARY.md exists, move to Cleared |
+| Reviewer rejects | Write actionable feedback, move to Re-Review |
+| Worker picks up feedback | Mark Re-Review Status: In Progress |
+| Worker fixes feedback | Move to Pending Review with Fixes: note |
+| Worker touches cleared file | Move affected files to Re-Review before pushing |
+| STATE.md is stale | Whoever notices it — fix it immediately |
+| Plan merged, no SUMMARY.md | Reviewer writes it before closing session |
+
+## Code Standards
+
+1. **No cosmetic reformatting outside scope.** If you modify a function, you may reformat that function. Do not touch the rest of the file.
+2. **No debug hardcodes.** Hardcoded test values, bypass logic, and `TODO: remove` blocks must be removed before pushing. Run `git diff main..HEAD | grep -i "debug\|TODO\|hardcode\|temporary\|FIXME"` before submitting.
+3. **Update tests when you change interfaces.** Rename a method → update all test mocks. `grep -r "old_function_name" tests/` after every interface change.
+4. **Debug sessions must have summary files.** Any debug session resulting in code changes must produce a summary in `.planning/debug/` documenting trigger, evidence, root cause, fix, and files changed.
+5. **Don't document unbuilt features.** Do not update README or user-facing docs for features not yet implemented.
+6. **Keep debug output opt-in.** Debug dumps and verbose logging must be gated behind `POLYMARKET_DEBUG` env var or a `--debug` CLI flag. Never write debug artifacts unconditionally.
