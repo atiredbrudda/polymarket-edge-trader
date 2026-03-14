@@ -17,13 +17,24 @@ Read this section and the AGENTS.md file in project root before starting work. R
 
 ## Pending Review
 
-(empty — no pending reviews)
+(empty)
 
 ## Re-Review
 
 (empty — no re-reviews)
 
 ## Cleared
+
+### worker/20-esports-token-gap-recovery (20-01 + 20-02) — 2026-03-14
+- **Plans:** 20-01, 20-02
+- **Cleared by:** Sonnet 4.6
+- **Merge commit:** pending (ready to merge to main)
+- **Files in scope:**
+  - src/catalog/recovery.py (NEW)
+  - tests/test_catalog_recovery.py (NEW)
+  - src/cli/commands.py (MODIFIED — recover-catalog command)
+  - src/pipeline/ingest.py (MODIFIED — broken conditionId endpoint replaced with events index)
+- **Notes:** 26/26 tests pass. 20-01: clean recovery tool, dict token format, idempotent. 20-02: broken `/markets?conditionId=X` endpoint removed, replaced with O(1) events index lookup. Minor: markets absent from events index not logged in 20-01 — non-blocking. Ready to merge.
 
 ### worker/19-01 — 2026-02-27
 - **Branch:** worker/19-01

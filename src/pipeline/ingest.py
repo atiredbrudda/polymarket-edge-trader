@@ -1594,7 +1594,9 @@ class IngestionPipeline:
 
             all_trades_with_category: list[TradeWithCategory] = []
             unknown_tokens: set[str] = set()
-            catalog_condition_ids: set[str] = set()  # markets created via catalog path, need token population
+            catalog_condition_ids: set[str] = (
+                set()
+            )  # markets created via catalog path, need token population
 
             for jbecker_trade in jbecker_trades:
                 trader_addr_lower = trader_address.lower()
@@ -1660,7 +1662,9 @@ class IngestionPipeline:
 
                     token_to_condition[token_id] = condition_id
                     condition_to_category[condition_id] = "eSports"
-                    catalog_condition_ids.add(condition_id)  # queue for token population
+                    catalog_condition_ids.add(
+                        condition_id
+                    )  # queue for token population
 
                 elif token_id != "0" and token_id not in token_to_condition:
                     # FALLBACK PATH: unknown token — queue for Gamma API lookup
@@ -1762,46 +1766,51 @@ class IngestionPipeline:
                 )
 
             # Populate tokens for catalog-path markets (created without token data)
-            if catalog_condition_ids and self.gamma_client:
+            if catalog_condition_ids:
                 needs_tokens = [
-                    cid for cid in catalog_condition_ids
-                    if session.query(Market).filter_by(condition_id=cid).first() is not None
-                    and session.query(Market).filter_by(condition_id=cid).first().tokens is None
+                    cid
+                    for cid in catalog_condition_ids
+                    if session.query(Market).filter_by(condition_id=cid).first()
+                    is not None
+                    and session.query(Market).filter_by(condition_id=cid).first().tokens
+                    is None
                 ]
                 if needs_tokens:
-                    logger.info(f"Fetching tokens for {len(needs_tokens)} catalog-path markets")
-                    BATCH_SIZE = 20
-                    for i in range(0, len(needs_tokens), BATCH_SIZE):
-                        batch = needs_tokens[i: i + BATCH_SIZE]
-                        try:
-                            resp = httpx.get(
-                                "https://gamma-api.polymarket.com/markets",
-                                params=[("conditionId", cid) for cid in batch],
-                                timeout=10,
-                            )
-                            if resp.status_code == 200:
-                                for md in resp.json():
-                                    cid = md.get("conditionId")
-                                    clob_tokens = md.get("clobTokenIds")
-                                    if cid and clob_tokens:
-                                        market = session.query(Market).filter_by(condition_id=cid).first()
-                                        if market and market.tokens is None:
-                                            token_ids = (
-                                                json.loads(clob_tokens)
-                                                if isinstance(clob_tokens, str)
-                                                else clob_tokens
-                                            )
-                                            market.tokens = json.dumps(
-                                                [{"token_id": tid, "outcome": ""} for tid in token_ids]
-                                            )
-                                            logger.debug(f"Populated tokens for {cid[:8]}...")
-                        except Exception as e:
-                            logger.debug(f"Token population batch failed: {e}")
-                        time.sleep(0.05)
+                    logger.info(
+                        f"Fetching tokens for {len(needs_tokens)} catalog-path markets via events index"
+                    )
                     try:
-                        session.commit()
-                    except Exception:
-                        session.rollback()
+                        from src.catalog.recovery import _fetch_esports_events_index
+
+                        events_index = _fetch_esports_events_index()
+                        populated = 0
+                        for cid in needs_tokens:
+                            tokens = events_index.get(cid)
+                            if tokens:
+                                market = (
+                                    session.query(Market)
+                                    .filter_by(condition_id=cid)
+                                    .first()
+                                )
+                                if market and market.tokens is None:
+                                    market.tokens = json.dumps(tokens)
+                                    populated += 1
+                                    logger.debug(
+                                        f"Populated tokens for {cid[:8]}... ({len(tokens)} tokens)"
+                                    )
+                            else:
+                                logger.debug(
+                                    f"No events index entry for catalog-path market {cid[:8]}..."
+                                )
+                        try:
+                            session.commit()
+                        except Exception:
+                            session.rollback()
+                        logger.info(
+                            f"Populated tokens for {populated}/{len(needs_tokens)} catalog-path markets"
+                        )
+                    except Exception as e:
+                        logger.warning(f"Events-based token population failed: {e}")
 
             for jbecker_trade in jbecker_trades:
                 try:
@@ -2271,12 +2280,11 @@ class IngestionPipeline:
             if niches:
                 # Query markets that match any of the niche filters
                 from sqlalchemy import or_
+
                 markets = (
                     session.query(Market)
                     .filter(Market.active == True)
-                    .filter(
-                        or_(*[Market.category.ilike(f"%{n}%") for n in niches])
-                    )
+                    .filter(or_(*[Market.category.ilike(f"%{n}%") for n in niches]))
                     .all()
                 )
             else:
@@ -2337,7 +2345,9 @@ class IngestionPipeline:
             # Process traders in chunks: fetch JBecker trades for a batch, process,
             # discard, repeat. Keeps peak RAM bounded regardless of total trader count.
             BACKFILL_CHUNK = 50
-            num_chunks = (len(traders_to_backfill) + BACKFILL_CHUNK - 1) // BACKFILL_CHUNK
+            num_chunks = (
+                len(traders_to_backfill) + BACKFILL_CHUNK - 1
+            ) // BACKFILL_CHUNK
             logger.info(
                 f"Backfilling {len(traders_to_backfill)} traders "
                 f"in {num_chunks} chunks of {BACKFILL_CHUNK}"
@@ -2347,7 +2357,9 @@ class IngestionPipeline:
                 and self.jbecker_client
                 and self.jbecker_client.is_available()
             )
-            num_chunks = (len(traders_to_backfill) + BACKFILL_CHUNK - 1) // BACKFILL_CHUNK
+            num_chunks = (
+                len(traders_to_backfill) + BACKFILL_CHUNK - 1
+            ) // BACKFILL_CHUNK
 
             for chunk_idx in range(0, len(traders_to_backfill), BACKFILL_CHUNK):
                 chunk = traders_to_backfill[chunk_idx : chunk_idx + BACKFILL_CHUNK]
@@ -2387,7 +2399,9 @@ class IngestionPipeline:
                         )
 
                         overall_stats["trades_stored"] += stats.get("detail_count", 0)
-                        overall_stats["summaries_created"] += stats.get("summary_count", 0)
+                        overall_stats["summaries_created"] += stats.get(
+                            "summary_count", 0
+                        )
                     except Exception as e:
                         logger.error(
                             f"Failed to backfill trader {trader.address[:8]}...: {e}"

@@ -9,12 +9,12 @@ See: .planning/PROJECT.md (updated 2026-02-21)
 
 ## Current Position
 
-Phase: 19 of 19 (Self-Healing Token Catalog — COMPLETE)
-Plan: 2 of 2 complete
-Status: Pending review — worker/19-01 submitted
-Last activity: 2026-02-27 — Phase 19 implemented: 3-tier catalog patcher + CLI integration
+Phase: 20 (eSports Token Gap Recovery — COMPLETE)
+Plan: 20-01 complete, 20-02 complete (2026-03-14)
+Status: Both plans complete, ready for merge. Phase 20 ready for review.
+Last activity: 2026-03-14 — 20-02 executed, both plans ready for merge.
 
-Progress: [██████████] 100% (v1.2)
+Progress: [██████████] 100% (v1.2 — phase 20 complete, pending review)
 
 ## Performance Metrics
 
@@ -40,6 +40,10 @@ Recent decisions affecting v1.2:
 - v1.1 phases 10-14 completed and archived (milestones/v1.1-ROADMAP.md)
 - v1.2 phases 15-18 defined: Gamma ingestion → Resolution → Classification → E2E validation
 - Phase 19: Self-healing token catalog (auto-patch gaps after backfill)
+- Phase 20: eSports token gap recovery (156 null-token markets, 3,633 trades)
+- Phase 21 added: Market Entity Extraction — LLM extracts team_a, team_b, tournament, game from market question text during discover
+- Phase 22 added: Org-Team Mapping — data model for org→team relationships, cross-game org tracking, normalization layer
+- Phase 23 added: Contextual Analyze Command — query-time win rate per dimension per trader, replaces pre-computed scoring
 
 ### Known Limitations (carry to v1.2 work)
 

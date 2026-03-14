@@ -1470,6 +1470,53 @@ def patch_catalog_cmd(verbose):
     )
 
 
+@cli.command("recover-catalog")
+@click.option("--verbose", "-v", is_flag=True, help="Enable debug logging")
+def recover_catalog_cmd(verbose):
+    """Populate markets.tokens for null-token eSports gap markets, then re-patch.
+
+    Fetches eSports events from Gamma API (tag_id=64), extracts token IDs for
+    null-token markets, populates markets.tokens, and runs the patcher.
+
+    Safe to re-run -- idempotent (skips already-populated markets).
+
+    \b
+    Examples:
+        polymarket recover-catalog
+        polymarket recover-catalog --verbose
+    """
+    logger.info("RECOVER-CATALOG command started")
+
+    if verbose:
+        logger.remove()
+        logger.add(sys.stderr, level="DEBUG")
+
+    console = Console()
+    session_factory, _, _, _, gamma_client = _get_dependencies()
+
+    from src.catalog.recovery import recover_esports_token_gaps
+    with get_session(session_factory) as session:
+        stats = recover_esports_token_gaps(session)
+
+    if stats["found"] == 0:
+        console.print("[green]No null-token eSports gap markets found.[/green]")
+    else:
+        console.print(f"[bold green]Recovery complete:[/bold green]")
+        console.print(f"  Gap markets found:    {stats['found']}")
+        console.print(f"  Tokens populated:     {stats['populated']}")
+        console.print(f"  Already done (skip):  {stats['already_done']}")
+        console.print(f"  Catalog patched:      {stats.get('patched', 0)} markets")
+        console.print(f"    Local (gamma_events): {stats.get('local', 0)}")
+        console.print(f"    API lookup:           {stats.get('api', 0)}")
+        console.print(f"    Category fallback:    {stats.get('fallback', 0)}")
+
+    logger.info(
+        f"RECOVER-CATALOG completed: found={stats['found']}, "
+        f"populated={stats['populated']}, already_done={stats['already_done']}, "
+        f"patched={stats.get('patched', 0)}"
+    )
+
+
 @cli.command()
 @click.option("--verbose", "-v", is_flag=True, help="Enable debug logging")
 def score(verbose):

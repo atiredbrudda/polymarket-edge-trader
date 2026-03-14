@@ -27,9 +27,15 @@ Requirements for milestone v1.2: Market Resolution & Deep Classification. Fixes 
 - [ ] **E2E-01**: `score` command produces non-empty expertise scores on JBecker data after Gamma ingestion
 - [ ] **E2E-02**: Leaderboard shows correctly scored traders with win rates calculated from resolved outcomes
 
+### GAP — eSports Token Gap Recovery
+
+- [ ] **GAP-01**: All 156 null-token eSports markets have `markets.tokens` populated via Gamma Events API tag-based scan, enabling Tier 1 patcher to classify them
+- [ ] **GAP-02**: `ingest.py` populate-tokens block uses events endpoint (not broken `?conditionId=` param) to prevent recurrence of null-token gap
+- [ ] **GAP-03**: After recovery, all 3,633 affected trades are classifiable and trader eSports scores reflect the newly attributed activity
+
 ## Future Requirements
 
-None identified for v1.2 — milestone is intentionally scoped to closing the two known gaps.
+None identified for v1.2 beyond Phase 20.
 
 ## Out of Scope
 
@@ -56,6 +62,9 @@ Which phases cover which requirements. Updated during roadmap creation.
 | CLASS-02 | Phase 17 | Pending |
 | E2E-01 | Phase 18 | Pending |
 | E2E-02 | Phase 18 | Pending |
+| GAP-01 | Phase 20 | Pending |
+| GAP-02 | Phase 20 | Pending |
+| GAP-03 | Phase 20 | Pending |
 
 **Coverage:**
 - v1.2 requirements: 8 total

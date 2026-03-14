@@ -51,6 +51,7 @@ See `.planning/milestones/v1.1-ROADMAP.md` for full details.
 - [ ] **Phase 17: Deep Token Classification** — Enrich token catalog with game/tournament/team `node_path` from Gamma event tags
 - [ ] **Phase 18: End-to-End Validation** — Verify the scoring pipeline produces a real leaderboard on JBecker data
 - [ ] **Phase 19: Self-Healing Token Catalog** — Automatically detect and patch unclassifiable trades after every backfill run, ensuring no trade silently lacks game/category classification
+- [ ] **Phase 20: eSports Token Gap Recovery** — Recover the 156 null-token eSports markets (3,633 trades, 1,451 traders) by fetching token IDs from Gamma Events API and hardening the ingest path that caused the gap
 
 ## Phase Details
 
@@ -126,6 +127,53 @@ Plans:
 - [ ] 19-01-PLAN.md — 3-tier patch engine (TDD): src/catalog/patcher.py + 12 tests
 - [ ] 19-02-PLAN.md — CLI wiring: patch-catalog command + backfill auto-hook (both paths)
 
+### Phase 20: eSports Token Gap Recovery
+**Goal**: All 156 null-token eSports markets have token IDs populated and are fully classified in `token_catalog` with correct `node_path`, so 3,633 previously unclassifiable trades are properly attributed to traders' eSports specialization scores
+**Depends on**: Phase 19
+**Requirements**: GAP-01, GAP-02, GAP-03
+**Success Criteria** (what must be TRUE):
+  1. A recovery script/command fetches eSports events from Gamma API by tag and extracts per-market `conditionId` + `clobTokenIds` for the 156 null-token gaps
+  2. `markets.tokens` is populated for all recovered markets, enabling Tier 1 patcher to run
+  3. Patcher successfully classifies all recoverable markets in `token_catalog` with correct `node_path`
+  4. `ingest.py` populate-tokens block (~line 1777) is fixed to use events-based lookup instead of broken `?conditionId=` param — preventing recurrence
+  5. After recovery, `leaderboard` scores reflect the 3,633 newly classified trades (traders' eSports specialization scores update)
+  6. Zero eSports markets remain permanently stuck with `tokens=NULL` due to the broken ingest path
+**Plans**: 2 plans
+Plans:
+- [ ] 20-01-PLAN.md — Events-based token recovery: fetch by tag, populate markets.tokens, re-run patcher
+- [ ] 20-02-PLAN.md — Fix ingest.py populate-tokens block + re-score affected traders
+
+### Phase 21: Market Entity Extraction
+
+**Goal**: During `discover`, Claude API extracts {team_a, team_b, tournament, game, market_type} from each market's question text and stores entities per market in the `market_entities` table, normalized against taxonomy aliases
+**Depends on:** Phase 20
+**Requirements**: ENT-01, ENT-02, ENT-03, ENT-04, ENT-05
+**Plans:** 2 plans
+
+Plans:
+- [ ] 21-01-PLAN.md — MarketEntity ORM model + LLM extraction function (src/extraction/llm_extractor.py)
+- [ ] 21-02-PLAN.md — Taxonomy normalizer + wire extraction into discover command
+
+### Phase 22: Org-Team Mapping
+
+**Goal:** [To be planned]
+**Requirements**: TBD
+**Depends on:** Phase 21
+**Plans:** 0 plans
+
+Plans:
+- [ ] TBD (run /gsd:plan-phase 22 to break down)
+
+### Phase 23: Contextual Analyze Command
+
+**Goal:** [To be planned]
+**Requirements**: TBD
+**Depends on:** Phase 22
+**Plans:** 0 plans
+
+Plans:
+- [ ] TBD (run /gsd:plan-phase 23 to break down)
+
 ## Progress
 
 | Phase | Milestone | Plans Complete | Status | Completed |
@@ -149,3 +197,5 @@ Plans:
 | 17. Deep Token Classification | v1.2 | 0/2 | Planned | - |
 | 18. End-to-End Validation | v1.2 | 0/2 | Not started | - |
 | 19. Self-Healing Token Catalog | v1.2 | 0/2 | Planned | - |
+| 20. eSports Token Gap Recovery | v1.2 | 0/2 | Not started | - |
+| 21. Market Entity Extraction | v1.3 | 0/2 | Planned | - |
