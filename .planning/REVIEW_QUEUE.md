@@ -17,7 +17,24 @@ Read this section and the AGENTS.md file in project root before starting work. R
 
 ## Pending Review
 
-(empty — no pending reviews)
+### worker/23-01-contextual-analyze — 2026-03-14
+- **Plan:** 23-01
+- **Branch:** worker/23-01-contextual-analyze
+- **Commits:** 45b3956..971f8ba
+- **Files changed:**
+  - src/org_mapping/models.py (MODIFIED — EntityAlpha ORM model appended)
+  - src/org_mapping/queries.py (MODIFIED — get_entity_alpha_for_trader, upsert_entity_alpha, build_batch_trader_list)
+  - src/org_mapping/crawler.py (NEW — load_cursor, save_cursor, clear_cursor)
+  - tests/test_analyze.py (NEW — 6 unit tests ANALYZE-01..06)
+  - .planning/phases/23-contextual-analyze-command/23-01-SUMMARY.md (NEW)
+  - .planning/STATE.md (MODIFIED — current plan status)
+- **Worker notes:** All 6 tests pass (ANALYZE-01..06). Full org_mapping test suite passes (13/13). No regressions.
+- **Checklist:**
+  - [x] Tests pass (source .venv/bin/activate && pytest)
+  - [x] No debug artifacts
+  - [x] STATE.md updated — current phase, plan number, last activity date
+  - [x] SUMMARY.md written (23-01-SUMMARY.md)
+  - [x] No cosmetic changes outside scope
 
 ## Re-Review
 
