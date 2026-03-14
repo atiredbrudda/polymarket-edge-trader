@@ -9,12 +9,12 @@ See: .planning/PROJECT.md (updated 2026-02-21)
 
 ## Current Position
 
-Phase: 20 (eSports Token Gap Recovery — COMPLETE)
-Plan: 20-01 complete, 20-02 complete (2026-03-14)
-Status: Both plans complete, ready for merge. Phase 20 ready for review.
-Last activity: 2026-03-14 — 20-02 executed, both plans ready for merge.
+Phase: 21 (Market Entity Extraction — IN PROGRESS)
+Plan: 20-01 + 20-02 complete (merged 2026-03-14), 21-01 pending execution
+Status: Phase 20 complete. Starting Phase 21 Plan 01.
+Last activity: 2026-03-14 — Phase 21 Plan 01 execution started.
 
-Progress: [██████████] 100% (v1.2 — phase 20 complete, pending review)
+Progress: [█████████░] 90% (v1.2 — phase 21 in progress)
 
 ## Performance Metrics
 
