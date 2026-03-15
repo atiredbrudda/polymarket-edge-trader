@@ -31,10 +31,9 @@ from sqlalchemy import func, select
 
 from src.db.models import (
     ExpertiseScore,
-    MarketClassification,
+    MarketEntity,
     PerformanceSnapshot,
     Position,
-    TaxonomyNode,
 )
 from src.evaluation.concentration import (
     calculate_esports_concentration,
@@ -126,7 +125,7 @@ def _get_all_trader_positions(session: Session, trader_address: str) -> list[Any
 def _get_esports_positions(session: Session, trader_address: str) -> list[Any]:
     """Query all eSports positions for a trader.
 
-    Joins Position -> MarketClassification -> TaxonomyNode where slug LIKE 'esports%'.
+    Joins Position -> MarketEntity where game IS NOT NULL.
 
     Args:
         session: SQLAlchemy session
@@ -137,11 +136,8 @@ def _get_esports_positions(session: Session, trader_address: str) -> list[Any]:
     """
     query = (
         select(Position)
-        .join(
-            MarketClassification, Position.market_id == MarketClassification.market_id
-        )
-        .join(TaxonomyNode, MarketClassification.taxonomy_node_id == TaxonomyNode.id)
-        .where(TaxonomyNode.slug.like("esports%"))
+        .join(MarketEntity, Position.market_id == MarketEntity.condition_id)
+        .where(MarketEntity.game.isnot(None))
         .where(Position.trader_address == trader_address)
     )
     result = session.execute(query)
@@ -414,7 +410,7 @@ def _get_positions_for_depth(
 
     Args:
         session: SQLAlchemy session
-        slug: The taxonomy slug to query
+        slug: The entity name to query
         taxonomy_depth: Depth of the slug (1=game, 2=tournament, 3=team)
         trader_address: Optional trader filter
 
@@ -431,13 +427,35 @@ def _get_positions_for_depth(
     if taxonomy_depth <= 1:
         return positions, Decimal("0")
 
-    parent_slug = ".".join(slug.split(".")[:-1])
-    parent_positions = get_positions_for_slug(
-        session, parent_slug, trader_address=trader_address
-    )
-    parent_volume = sum(
-        (_compute_position_volume(p) for p in parent_positions), Decimal("0")
-    )
+    # For depth 2 (tournament): parent is the game
+    # For depth 3 (team): parent is the tournament
+    # Look up the parent entity from MarketEntity
+    if taxonomy_depth == 2:
+        # slug is a tournament name; find its game
+        parent_name = session.execute(
+            select(MarketEntity.game)
+            .where(MarketEntity.tournament == slug)
+            .where(MarketEntity.game.isnot(None))
+            .limit(1)
+        ).scalar_one_or_none()
+    else:
+        # slug is a team name; find its tournament
+        parent_name = session.execute(
+            select(MarketEntity.tournament)
+            .where((MarketEntity.team_a == slug) | (MarketEntity.team_b == slug))
+            .where(MarketEntity.tournament.isnot(None))
+            .limit(1)
+        ).scalar_one_or_none()
+
+    if parent_name:
+        parent_positions = get_positions_for_slug(
+            session, parent_name, trader_address=trader_address
+        )
+        parent_volume = sum(
+            (_compute_position_volume(p) for p in parent_positions), Decimal("0")
+        )
+    else:
+        parent_volume = Decimal("0")
 
     return positions, parent_volume
 
@@ -481,17 +499,19 @@ def compute_taxonomy_scores(
     positions_by_trader: dict[str, list[Any]] = {}
     trader_parent_volumes: dict[str, Decimal] = {}
 
+    # Determine which column to filter by based on depth
+    if taxonomy_depth == 1:
+        entity_filter = MarketEntity.game == slug
+    elif taxonomy_depth == 2:
+        entity_filter = MarketEntity.tournament == slug
+    else:
+        entity_filter = (MarketEntity.team_a == slug) | (MarketEntity.team_b == slug)
+
     trader_addresses = (
         session.execute(
             select(Position.trader_address)
-            .join(
-                MarketClassification,
-                Position.market_id == MarketClassification.market_id,
-            )
-            .join(
-                TaxonomyNode, MarketClassification.taxonomy_node_id == TaxonomyNode.id
-            )
-            .where(TaxonomyNode.slug.like(f"{slug}%"))
+            .join(MarketEntity, Position.market_id == MarketEntity.condition_id)
+            .where(entity_filter)
             .distinct()
         )
         .scalars()
@@ -744,6 +764,39 @@ def identify_hidden_specialists(
     hidden_specialists = []
 
     for game_score in game_results:
+        # Find tournaments for this game
+        tournament_slugs = (
+            session.execute(
+                select(MarketEntity.tournament)
+                .where(MarketEntity.game == game_slug)
+                .where(MarketEntity.tournament.isnot(None))
+                .distinct()
+            )
+            .scalars()
+            .all()
+        )
+
+        # Find teams for this game (via tournament association)
+        team_slugs = (
+            session.execute(
+                select(MarketEntity.team_a.label("team"))
+                .where(MarketEntity.game == game_slug)
+                .where(MarketEntity.team_a.isnot(None))
+                .union(
+                    select(MarketEntity.team_b.label("team"))
+                    .where(MarketEntity.game == game_slug)
+                    .where(MarketEntity.team_b.isnot(None))
+                )
+            )
+            .scalars()
+            .all()
+        )
+
+        deep_slugs = set(tournament_slugs) | set(team_slugs)
+
+        if not deep_slugs:
+            continue
+
         deep_subquery = (
             select(
                 ExpertiseScore.trader_address,
@@ -752,7 +805,7 @@ def identify_hidden_specialists(
                 ExpertiseScore.raw_score,
                 func.max(ExpertiseScore.computed_at).label("max_computed_at"),
             )
-            .where(ExpertiseScore.game_slug.like(f"{game_slug}.%"))
+            .where(ExpertiseScore.game_slug.in_(deep_slugs))
             .where(ExpertiseScore.taxonomy_depth.in_([2, 3]))
             .where(ExpertiseScore.raw_score >= deep_score_threshold)
             .group_by(
@@ -771,7 +824,7 @@ def identify_hidden_specialists(
                 (ExpertiseScore.trader_address == deep_subquery.c.trader_address)
                 & (ExpertiseScore.computed_at == deep_subquery.c.max_computed_at),
             )
-            .where(ExpertiseScore.game_slug.like(f"{game_slug}.%"))
+            .where(ExpertiseScore.game_slug.in_(deep_slugs))
             .where(ExpertiseScore.taxonomy_depth.in_([2, 3]))
             .where(ExpertiseScore.raw_score >= deep_score_threshold)
         )

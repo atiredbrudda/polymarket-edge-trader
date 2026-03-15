@@ -15,8 +15,7 @@ from src.db.models import (
     Base,
     Market,
     Trade,
-    TaxonomyNode,
-    MarketClassification,
+    MarketEntity,
     Position,
 )
 from src.discovery.trader_discovery import (
@@ -37,30 +36,26 @@ def in_memory_db():
 
 @pytest.fixture
 def seed_esports_data(in_memory_db):
-    """Seed database with eSports taxonomy and classified markets."""
+    """Seed database with eSports entities and markets."""
     with in_memory_db() as session:
-        # Create taxonomy nodes
-        root = TaxonomyNode(
-            name="eSports",
-            slug="esports",
-            parent_id=None,
-            depth=0,
-            node_type="root",
-            patterns_json="[]",
+        # Create market entities
+        entity1 = MarketEntity(
+            condition_id="market_cs2_1",
+            team_a="NaVi",
+            team_b="FaZe",
+            tournament="IEM Katowice",
+            game="CS2",
+            market_type="match",
         )
-        session.add(root)
-        session.flush()
-
-        game = TaxonomyNode(
-            name="CS2",
-            slug="esports.cs2",
-            parent_id=root.id,
-            depth=1,
-            node_type="game",
-            patterns_json='["CS2", "Counter-Strike"]',
+        entity2 = MarketEntity(
+            condition_id="market_cs2_2",
+            team_a="G2",
+            team_b="Vitality",
+            tournament="ESL Pro League",
+            game="CS2",
+            market_type="match",
         )
-        session.add(game)
-        session.flush()
+        session.add_all([entity1, entity2])
 
         # Create markets
         market1 = Market(
@@ -82,25 +77,7 @@ def seed_esports_data(in_memory_db):
             active=True,
         )
         session.add_all([market1, market2, market3])
-        session.flush()
-
-        # Create market classifications
-        classification1 = MarketClassification(
-            market_id="market_cs2_1",
-            taxonomy_node_id=game.id,
-            node_path="eSports.CS2",
-            market_type="match",
-            flagged_for_review=False,
-        )
-        classification2 = MarketClassification(
-            market_id="market_cs2_2",
-            taxonomy_node_id=game.id,
-            node_path="eSports.CS2",
-            market_type="match",
-            flagged_for_review=False,
-        )
-        # market3 not classified as eSports
-        session.add_all([classification1, classification2])
+        # market_politics has NO MarketEntity row (not esports)
         session.commit()
 
 
@@ -192,7 +169,9 @@ def seed_trader_data(in_memory_db, seed_esports_data):
 def test_discover_traders_above_threshold(in_memory_db, seed_trader_data):
     """Traders above both thresholds are discovered."""
     with in_memory_db() as session:
-        traders = discover_esports_traders(session, min_trades=5, min_volume=Decimal("500"))
+        traders = discover_esports_traders(
+            session, min_trades=5, min_volume=Decimal("500")
+        )
 
         # Should discover traders A and E
         assert len(traders) == 2
@@ -203,7 +182,9 @@ def test_discover_traders_above_threshold(in_memory_db, seed_trader_data):
 def test_discover_traders_below_trade_threshold(in_memory_db, seed_trader_data):
     """Trader with high volume but low trade count is NOT discovered."""
     with in_memory_db() as session:
-        traders = discover_esports_traders(session, min_trades=5, min_volume=Decimal("500"))
+        traders = discover_esports_traders(
+            session, min_trades=5, min_volume=Decimal("500")
+        )
 
         # Trader B has $1000 volume but only 3 trades
         assert "0xBBBB" not in traders
@@ -212,7 +193,9 @@ def test_discover_traders_below_trade_threshold(in_memory_db, seed_trader_data):
 def test_discover_traders_below_volume_threshold(in_memory_db, seed_trader_data):
     """Trader with many trades but low volume is NOT discovered."""
     with in_memory_db() as session:
-        traders = discover_esports_traders(session, min_trades=5, min_volume=Decimal("500"))
+        traders = discover_esports_traders(
+            session, min_trades=5, min_volume=Decimal("500")
+        )
 
         # Trader C has 10 trades but only $100 volume
         assert "0xCCCC" not in traders
@@ -221,7 +204,9 @@ def test_discover_traders_below_volume_threshold(in_memory_db, seed_trader_data)
 def test_discover_traders_esports_only(in_memory_db, seed_trader_data):
     """Trader active in non-eSports markets is NOT discovered."""
     with in_memory_db() as session:
-        traders = discover_esports_traders(session, min_trades=5, min_volume=Decimal("500"))
+        traders = discover_esports_traders(
+            session, min_trades=5, min_volume=Decimal("500")
+        )
 
         # Trader D has 10 trades and $1000 volume, but in Politics category
         assert "0xDDDD" not in traders

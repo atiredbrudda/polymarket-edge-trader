@@ -13,7 +13,7 @@ from typing import Optional
 from sqlalchemy import func
 from sqlalchemy.orm import Session
 
-from src.db.models import Trade, MarketClassification, Position, TaxonomyNode
+from src.db.models import Trade, MarketEntity, Position
 from src.discovery.position_tracker import calculate_position
 
 
@@ -38,22 +38,18 @@ def discover_esports_traders(
         List of trader addresses meeting thresholds
 
     Query joins:
-        trades -> market_classifications -> taxonomy_nodes
-    Filters for markets classified under eSports taxonomy.
+        trades -> market_entities
+    Filters for markets with game entity extracted (game IS NOT NULL).
     """
     # Query for traders with eSports activity
-    # Join trades -> market_classifications to filter eSports-only markets
+    # Join trades -> market_entities to filter eSports-only markets
     results = (
         session.query(Trade.trader_address)
         .join(
-            MarketClassification,
-            Trade.market_id == MarketClassification.market_id,
+            MarketEntity,
+            Trade.market_id == MarketEntity.condition_id,
         )
-        .join(
-            TaxonomyNode,
-            MarketClassification.taxonomy_node_id == TaxonomyNode.id,
-        )
-        .filter(TaxonomyNode.slug.like("esports%"))  # All eSports nodes start with "esports"
+        .filter(MarketEntity.game.isnot(None))
         .group_by(Trade.trader_address)
         .having(
             func.count(func.distinct(Trade.trade_id)) >= min_trades,
@@ -96,16 +92,12 @@ def compute_and_store_positions(
     market_ids = (
         session.query(Trade.market_id.distinct())
         .join(
-            MarketClassification,
-            Trade.market_id == MarketClassification.market_id,
-        )
-        .join(
-            TaxonomyNode,
-            MarketClassification.taxonomy_node_id == TaxonomyNode.id,
+            MarketEntity,
+            Trade.market_id == MarketEntity.condition_id,
         )
         .filter(
             Trade.trader_address == trader_address,
-            TaxonomyNode.slug.like("esports%"),
+            MarketEntity.game.isnot(None),
         )
         .all()
     )
@@ -139,7 +131,9 @@ def compute_and_store_positions(
             existing_position.direction = position_data.direction
             existing_position.avg_entry_price = position_data.avg_entry_price
             existing_position.entry_timestamp = position_data.entry_timestamp
-            existing_position.first_trade_timestamp = position_data.first_trade_timestamp
+            existing_position.first_trade_timestamp = (
+                position_data.first_trade_timestamp
+            )
             existing_position.last_trade_timestamp = position_data.last_trade_timestamp
             existing_position.trade_count = position_data.trade_count
             positions.append(existing_position)

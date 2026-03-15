@@ -16,10 +16,9 @@ from src.db.models import (
     Base,
     ExpertiseScore,
     Market,
-    MarketClassification,
+    MarketEntity,
     PerformanceSnapshot,
     Position,
-    TaxonomyNode,
 )
 from src.pipeline.scoring_pipeline import (
     compute_all_taxonomy_scores,
@@ -47,55 +46,42 @@ def test_session(in_memory_db):
 
 @pytest.fixture
 def taxonomy_hierarchy(test_session):
-    """Create a taxonomy hierarchy: esports -> cs2 -> iem-katowice -> navi."""
-    root = TaxonomyNode(
-        name="eSports", slug="esports", depth=0, node_type="root", patterns_json="[]"
+    """Create MarketEntity entries for test markets at different depths."""
+    # Create market entities for different entity levels
+    entity_game = MarketEntity(
+        condition_id="market-game",
+        game="CS2",
+        tournament=None,
+        team_a=None,
+        team_b=None,
+        market_type="match",
     )
-    test_session.add(root)
-    test_session.flush()
-
-    game = TaxonomyNode(
-        name="CS2",
-        slug="esports.cs2",
-        depth=1,
-        node_type="game",
-        parent_id=root.id,
-        patterns_json='["CS2"]',
+    entity_tournament = MarketEntity(
+        condition_id="market-tournament",
+        game="CS2",
+        tournament="IEM Katowice",
+        team_a=None,
+        team_b=None,
+        market_type="match",
     )
-    test_session.add(game)
-    test_session.flush()
-
-    tournament = TaxonomyNode(
-        name="IEM Katowice",
-        slug="esports.cs2.iem-katowice",
-        depth=2,
-        node_type="tournament",
-        parent_id=game.id,
-        patterns_json='["IEM Katowice"]',
+    entity_team = MarketEntity(
+        condition_id="market-team",
+        game="CS2",
+        tournament="IEM Katowice",
+        team_a="NaVi",
+        team_b="FaZe",
+        market_type="match",
     )
-    test_session.add(tournament)
-    test_session.flush()
-
-    team = TaxonomyNode(
-        name="NaVi",
-        slug="esports.cs2.iem-katowice.navi",
-        depth=3,
-        node_type="team",
-        parent_id=tournament.id,
-        patterns_json='["NaVi", "Natus Vincere"]',
-    )
-    test_session.add(team)
-    test_session.flush()
-
+    test_session.add_all([entity_game, entity_tournament, entity_team])
     test_session.commit()
 
-    return {"root": root, "game": game, "tournament": tournament, "team": team}
+    return {"game": entity_game, "tournament": entity_tournament, "team": entity_team}
 
 
 @pytest.fixture
 def positions_at_depth(test_session, taxonomy_hierarchy):
     """Create positions at different taxonomy depths."""
-    nodes = taxonomy_hierarchy
+    entities = taxonomy_hierarchy
 
     market_game = Market(
         condition_id="market-game",
@@ -117,17 +103,6 @@ def positions_at_depth(test_session, taxonomy_hierarchy):
     )
     test_session.add_all([market_game, market_tournament, market_team])
     test_session.flush()
-
-    class_game = MarketClassification(
-        market_id="market-game", taxonomy_node_id=nodes["game"].id
-    )
-    class_tournament = MarketClassification(
-        market_id="market-tournament", taxonomy_node_id=nodes["tournament"].id
-    )
-    class_team = MarketClassification(
-        market_id="market-team", taxonomy_node_id=nodes["team"].id
-    )
-    test_session.add_all([class_game, class_tournament, class_team])
 
     trader_a_positions = [
         Position(
@@ -239,15 +214,13 @@ class TestComputeTaxonomyScores:
     def test_function_signature(self, test_session):
         """Verify function can be called with expected parameters."""
         leaderboard = compute_taxonomy_scores(
-            test_session, "esports.cs2.iem-katowice", taxonomy_depth=2
+            test_session, "IEM Katowice", taxonomy_depth=2
         )
         assert isinstance(leaderboard, list)
 
     def test_function_signature_with_team_depth(self, test_session):
         """Verify function can be called at team depth."""
-        leaderboard = compute_taxonomy_scores(
-            test_session, "esports.cs2.iem-katowice.navi", taxonomy_depth=3
-        )
+        leaderboard = compute_taxonomy_scores(test_session, "NaVi", taxonomy_depth=3)
         assert isinstance(leaderboard, list)
 
 
@@ -260,7 +233,7 @@ class TestComputeAllTaxonomyScores:
         """Verify all slugs at a depth are discovered and scored."""
         results = compute_all_taxonomy_scores(test_session, depth=2)
 
-        assert "esports.cs2.iem-katowice" in results
+        assert "IEM Katowice" in results
 
 
 class TestIdentifyHiddenSpecialists:
@@ -268,9 +241,21 @@ class TestIdentifyHiddenSpecialists:
 
     def test_finds_hidden_specialist(self, test_session):
         """Verify hidden specialist found: low game score, high tournament score."""
+        # Create MarketEntity linking tournament to game
+        entity = MarketEntity(
+            condition_id="market1",
+            game="CS2",
+            tournament="IEM Katowice",
+            team_a=None,
+            team_b=None,
+            market_type="match",
+        )
+        test_session.add(entity)
+        test_session.commit()
+
         game_score = ExpertiseScore(
             trader_address="0xHidden",
-            game_slug="esports.cs2",
+            game_slug="CS2",
             taxonomy_depth=1,
             raw_score=Decimal("50"),
             win_rate_component=Decimal("0.5"),
@@ -285,7 +270,7 @@ class TestIdentifyHiddenSpecialists:
 
         deep_score = ExpertiseScore(
             trader_address="0xHidden",
-            game_slug="esports.cs2.iem-katowice",
+            game_slug="IEM Katowice",
             taxonomy_depth=2,
             raw_score=Decimal("80"),
             win_rate_component=Decimal("0.8"),
@@ -303,7 +288,7 @@ class TestIdentifyHiddenSpecialists:
 
         specialists = identify_hidden_specialists(
             test_session,
-            game_slug="esports.cs2",
+            game_slug="CS2",
             game_score_threshold=Decimal("60"),
             deep_score_threshold=Decimal("75"),
         )
@@ -317,7 +302,7 @@ class TestIdentifyHiddenSpecialists:
         """Verify non-specialist excluded: trader with game_score above threshold."""
         score = ExpertiseScore(
             trader_address="0xNotHidden",
-            game_slug="esports.cs2",
+            game_slug="CS2",
             taxonomy_depth=1,
             raw_score=Decimal("70"),
             win_rate_component=Decimal("0.7"),
@@ -334,7 +319,7 @@ class TestIdentifyHiddenSpecialists:
 
         specialists = identify_hidden_specialists(
             test_session,
-            game_slug="esports.cs2",
+            game_slug="CS2",
             game_score_threshold=Decimal("60"),
             deep_score_threshold=Decimal("75"),
         )
@@ -345,7 +330,7 @@ class TestIdentifyHiddenSpecialists:
         """Verify deep generalist excluded: both game and deep scores below threshold."""
         game_score = ExpertiseScore(
             trader_address="0xGeneralist",
-            game_slug="esports.cs2",
+            game_slug="CS2",
             taxonomy_depth=1,
             raw_score=Decimal("40"),
             win_rate_component=Decimal("0.4"),
@@ -360,7 +345,7 @@ class TestIdentifyHiddenSpecialists:
 
         deep_score = ExpertiseScore(
             trader_address="0xGeneralist",
-            game_slug="esports.cs2.iem-katowice",
+            game_slug="IEM Katowice",
             taxonomy_depth=2,
             raw_score=Decimal("40"),
             win_rate_component=Decimal("0.4"),
@@ -378,7 +363,7 @@ class TestIdentifyHiddenSpecialists:
 
         specialists = identify_hidden_specialists(
             test_session,
-            game_slug="esports.cs2",
+            game_slug="CS2",
             game_score_threshold=Decimal("60"),
             deep_score_threshold=Decimal("75"),
         )

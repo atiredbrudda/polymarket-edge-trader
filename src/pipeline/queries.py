@@ -20,9 +20,8 @@ from sqlalchemy.orm import Session
 from src.db.models import (
     ExpertiseScore,
     Market,
-    MarketClassification,
+    MarketEntity,
     Position,
-    TaxonomyNode,
     Trade,
     Trader,
     TraderCategorySummary,
@@ -94,10 +93,7 @@ def get_trades_by_resolution_status(
             trader_address="0xTrader1"
         )
     """
-    query = (
-        select(Trade)
-        .join(Market, Trade.market_id == Market.condition_id)
-    )
+    query = select(Trade).join(Market, Trade.market_id == Market.condition_id)
 
     if resolved:
         query = query.where(Market.outcome.is_not(None))
@@ -146,7 +142,9 @@ def get_trader_trades(
     return list(result.scalars().all())
 
 
-def get_trader_summary(session: Session, trader_address: str) -> list[TraderCategorySummary]:
+def get_trader_summary(
+    session: Session, trader_address: str
+) -> list[TraderCategorySummary]:
     """Query all category summaries for a trader.
 
     Returns aggregated data for non-detail categories.
@@ -295,16 +293,17 @@ def get_trader_unique_markets(session: Session, trader_address: str) -> int:
         # Get count of markets trader participated in
         count = get_trader_unique_markets(session, "0xTrader1")
     """
-    query = (
-        select(func.count(func.distinct(Position.market_id)))
-        .where(Position.trader_address == trader_address)
+    query = select(func.count(func.distinct(Position.market_id))).where(
+        Position.trader_address == trader_address
     )
 
     result = session.execute(query)
     return result.scalar() or 0
 
 
-def get_trader_outcomes_chronological(session: Session, trader_address: str) -> list[str]:
+def get_trader_outcomes_chronological(
+    session: Session, trader_address: str
+) -> list[str]:
     """Get trader's position outcomes in chronological order.
 
     Excludes void and flat outcomes for consistency analysis.
@@ -421,7 +420,9 @@ def get_trader_score_history(
         # Get trader's CS2 score history
         cs2_history = get_trader_score_history(session, "0xTrader1", game_slug="esports.cs2")
     """
-    query = select(ExpertiseScore).where(ExpertiseScore.trader_address == trader_address)
+    query = select(ExpertiseScore).where(
+        ExpertiseScore.trader_address == trader_address
+    )
 
     if game_slug is not None:
         query = query.where(ExpertiseScore.game_slug == game_slug)
@@ -433,23 +434,22 @@ def get_trader_score_history(
 
 
 def get_all_game_slugs_with_positions(session: Session) -> list[str]:
-    """Query distinct game slugs that have Position + MarketClassification data.
+    """Query distinct game names that have Position + MarketEntity data.
 
     Args:
         session: SQLAlchemy session
 
     Returns:
-        List of game slug strings (e.g., ["esports.cs2", "esports.dota2"])
+        List of game name strings (e.g., ["CS2", "Dota 2"])
 
     Example:
         # Get all games with positions
         games = get_all_game_slugs_with_positions(session)
     """
     query = (
-        select(TaxonomyNode.slug)
-        .join(MarketClassification, MarketClassification.taxonomy_node_id == TaxonomyNode.id)
-        .join(Position, Position.market_id == MarketClassification.market_id)
-        .where(TaxonomyNode.node_type == "game")
+        select(MarketEntity.game)
+        .join(Position, Position.market_id == MarketEntity.condition_id)
+        .where(MarketEntity.game.isnot(None))
         .distinct()
     )
 
@@ -460,14 +460,14 @@ def get_all_game_slugs_with_positions(session: Session) -> list[str]:
 def get_positions_for_game(
     session: Session, game_slug: str, trader_address: str | None = None
 ) -> list[Position]:
-    """Query positions in markets classified under a specific game slug.
+    """Query positions in markets with a specific game entity.
 
-    Joins Position -> MarketClassification -> TaxonomyNode to filter by game.
-    Uses slug LIKE pattern to capture game and sub-nodes (tournaments, teams).
+    Joins Position -> MarketEntity to filter by game name.
+    Parameter accepts game names like "CS2" instead of "esports.cs2".
 
     Args:
         session: SQLAlchemy session
-        game_slug: Game identifier (e.g., "esports.cs2")
+        game_slug: Game name (e.g., "CS2", "Dota 2")
         trader_address: Optional trader address filter
 
     Returns:
@@ -475,16 +475,15 @@ def get_positions_for_game(
 
     Example:
         # Get all positions for CS2
-        positions = get_positions_for_game(session, "esports.cs2")
+        positions = get_positions_for_game(session, "CS2")
 
         # Get trader's positions in CS2
-        trader_positions = get_positions_for_game(session, "esports.cs2", trader_address="0xTrader1")
+        trader_positions = get_positions_for_game(session, "CS2", trader_address="0xTrader1")
     """
     query = (
         select(Position)
-        .join(MarketClassification, Position.market_id == MarketClassification.market_id)
-        .join(TaxonomyNode, MarketClassification.taxonomy_node_id == TaxonomyNode.id)
-        .where(TaxonomyNode.slug.like(f"{game_slug}%"))
+        .join(MarketEntity, Position.market_id == MarketEntity.condition_id)
+        .where(MarketEntity.game == game_slug)
     )
 
     if trader_address is not None:
@@ -497,14 +496,13 @@ def get_positions_for_game(
 def get_positions_for_slug(
     session: Session, slug: str, trader_address: str | None = None
 ) -> list[Position]:
-    """Query positions in markets under any taxonomy slug (game, tournament, or team).
+    """Query positions in markets matching an entity name (game, tournament, or team).
 
-    Similar to get_positions_for_game but generalized to work at any taxonomy depth.
-    Uses slug LIKE pattern to capture the slug and all its descendants.
+    Detects entity level from the slug value and queries appropriate MarketEntity column.
 
     Args:
         session: SQLAlchemy session
-        slug: Taxonomy identifier (e.g., "esports.cs2", "esports.cs2.iem-katowice")
+        slug: Entity name (e.g., "CS2", "IEM Katowice", "NaVi")
         trader_address: Optional trader address filter
 
     Returns:
@@ -512,17 +510,36 @@ def get_positions_for_slug(
 
     Example:
         # Get all positions for tournament
-        positions = get_positions_for_slug(session, "esports.cs2.iem-katowice")
+        positions = get_positions_for_slug(session, "IEM Katowice")
 
         # Get trader's positions in tournament
-        trader_positions = get_positions_for_slug(session, "esports.cs2.iem-katowice", trader_address="0xTrader1")
+        trader_positions = get_positions_for_slug(session, "IEM Katowice", trader_address="0xTrader1")
     """
-    query = (
-        select(Position)
-        .join(MarketClassification, Position.market_id == MarketClassification.market_id)
-        .join(TaxonomyNode, MarketClassification.taxonomy_node_id == TaxonomyNode.id)
-        .where(TaxonomyNode.slug.like(f"{slug}%"))
+    # Check which entity level this slug matches
+    query = select(Position).join(
+        MarketEntity, Position.market_id == MarketEntity.condition_id
     )
+
+    # Check if slug matches a known game
+    game_match = session.execute(
+        select(MarketEntity.game).where(MarketEntity.game == slug).limit(1)
+    ).scalar_one_or_none()
+
+    if game_match:
+        query = query.where(MarketEntity.game == slug)
+    else:
+        tournament_match = session.execute(
+            select(MarketEntity.tournament)
+            .where(MarketEntity.tournament == slug)
+            .limit(1)
+        ).scalar_one_or_none()
+        if tournament_match:
+            query = query.where(MarketEntity.tournament == slug)
+        else:
+            # Assume team — check both team_a and team_b
+            query = query.where(
+                (MarketEntity.team_a == slug) | (MarketEntity.team_b == slug)
+            )
 
     if trader_address is not None:
         query = query.where(Position.trader_address == trader_address)
@@ -596,33 +613,47 @@ def get_taxonomy_leaderboard(
 
 
 def get_all_slugs_with_positions_at_depth(session: Session, depth: int) -> list[str]:
-    """Query distinct taxonomy slugs at a specific depth that have positions.
+    """Query distinct entity names at a specific depth that have positions.
 
     Args:
         session: SQLAlchemy session
-        depth: Taxonomy depth (0=root, 1=game, 2=tournament, 3=team)
+        depth: Entity depth (1=game, 2=tournament, 3=team)
 
     Returns:
-        List of slug strings (e.g., ["esports.cs2", "esports.dota2"])
+        List of entity name strings (e.g., ["CS2", "Dota 2"] for depth=1)
 
     Example:
-        # Get all tournament slugs with positions
+        # Get all tournament names with positions
         tournaments = get_all_slugs_with_positions_at_depth(session, depth=2)
 
-        # Get all team slugs with positions
+        # Get all team names with positions
         teams = get_all_slugs_with_positions_at_depth(session, depth=3)
     """
-    query = (
-        select(TaxonomyNode.slug)
-        .join(
-            MarketClassification,
-            MarketClassification.taxonomy_node_id == TaxonomyNode.id,
+    if depth == 1:
+        col = MarketEntity.game
+    elif depth == 2:
+        col = MarketEntity.tournament
+    else:
+        # depth 3: return distinct team names (union of team_a and team_b)
+        q_a = (
+            select(MarketEntity.team_a.label("name"))
+            .join(Position, Position.market_id == MarketEntity.condition_id)
+            .where(MarketEntity.team_a.isnot(None))
         )
-        .join(Position, Position.market_id == MarketClassification.market_id)
-        .where(TaxonomyNode.depth == depth)
+        q_b = (
+            select(MarketEntity.team_b.label("name"))
+            .join(Position, Position.market_id == MarketEntity.condition_id)
+            .where(MarketEntity.team_b.isnot(None))
+        )
+        result = session.execute(q_a.union(q_b))
+        return [s for s in result.scalars().all() if s is not None]
+
+    query = (
+        select(col)
+        .join(Position, Position.market_id == MarketEntity.condition_id)
+        .where(col.isnot(None))
         .distinct()
     )
-
     result = session.execute(query)
     return [s for s in result.scalars().all() if s is not None]
 
