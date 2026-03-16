@@ -861,38 +861,33 @@ class IngestionPipeline:
                     try:
                         market_response = self.client.get_market(market_id)
                         if market_response:
-                            market_metadata[market_id] = market_response.category
-                            # Only persist markets in detail categories
-                            if self.category_filter.requires_detail(
-                                market_response.category or ""
-                            ):
-                                new_market = Market(
-                                    condition_id=market_response.condition_id,
-                                    question=market_response.question,
-                                    category=market_response.category,
-                                    active=market_response.active,
-                                    outcome=market_response.outcome,
-                                )
+                            # Store new market in database
+                            new_market = Market(
+                                condition_id=market_response.condition_id,
+                                question=market_response.question,
+                                category=market_response.category,
+                                active=market_response.active,
+                                outcome=market_response.outcome,
+                            )
 
-                                if market_response.end_date_iso:
-                                    try:
-                                        new_market.end_date = datetime.fromisoformat(
-                                            market_response.end_date_iso.replace(
-                                                "Z", "+00:00"
-                                            )
+                            if market_response.end_date_iso:
+                                try:
+                                    new_market.end_date = datetime.fromisoformat(
+                                        market_response.end_date_iso.replace(
+                                            "Z", "+00:00"
                                         )
-                                    except Exception:
-                                        pass
-
-                                if market_response.tokens:
-                                    new_market.tokens = json.dumps(
-                                        market_response.tokens
                                     )
+                                except Exception:
+                                    pass
 
-                                session.add(new_market)
-                                logger.debug(
-                                    f"Discovered new market: {market_response.question[:40]}... ({market_response.category})"
-                                )
+                            if market_response.tokens:
+                                new_market.tokens = json.dumps(market_response.tokens)
+
+                            session.add(new_market)
+                            market_metadata[market_id] = market_response.category
+                            logger.debug(
+                                f"Discovered new market: {market_response.question[:40]}... ({market_response.category})"
+                            )
                     except Exception as e:
                         logger.warning(
                             f"Failed to fetch market {market_id[:8]}...: {e}"
@@ -1131,33 +1126,30 @@ class IngestionPipeline:
                         try:
                             market_response = self.client.get_market(condition_id)
                             if market_response:
-                                market_metadata[condition_id] = market_response.category
-                                # Only persist markets in detail categories
-                                if self.category_filter.requires_detail(
-                                    market_response.category or ""
-                                ):
-                                    new_market = Market(
-                                        condition_id=market_response.condition_id,
-                                        question=market_response.question,
-                                        category=market_response.category,
-                                        active=market_response.active,
-                                        outcome=market_response.outcome,
-                                    )
-                                    if market_response.end_date_iso:
-                                        try:
-                                            new_market.end_date = datetime.fromisoformat(
-                                                market_response.end_date_iso.replace(
-                                                    "Z", "+00:00"
-                                                )
+                                # Store new market
+                                new_market = Market(
+                                    condition_id=market_response.condition_id,
+                                    question=market_response.question,
+                                    category=market_response.category,
+                                    active=market_response.active,
+                                    outcome=market_response.outcome,
+                                )
+                                if market_response.end_date_iso:
+                                    try:
+                                        new_market.end_date = datetime.fromisoformat(
+                                            market_response.end_date_iso.replace(
+                                                "Z", "+00:00"
                                             )
-                                        except Exception:
-                                            pass
-                                    if market_response.tokens:
-                                        new_market.tokens = json.dumps(
-                                            market_response.tokens
                                         )
+                                    except Exception:
+                                        pass
+                                if market_response.tokens:
+                                    new_market.tokens = json.dumps(
+                                        market_response.tokens
+                                    )
 
-                                    session.add(new_market)
+                                session.add(new_market)
+                                market_metadata[condition_id] = market_response.category
                             else:
                                 market_metadata[condition_id] = None
                         except Exception as e:
@@ -1356,88 +1348,39 @@ class IngestionPipeline:
                 session.commit()
                 return stats
 
-            # Convert Graph trades to API format and categorize
+            # Convert Graph trades to API format
+            # Note: Graph gives us blockchain trades, we need to enrich with market metadata
             market_metadata = {}
-            all_trades_with_category: list[TradeWithCategory] = []
-            esports_market_ids = self._get_esports_market_ids(session)
+            all_trades_with_category = []
 
             for graph_trade in graph_trades:
+                # Extract asset IDs to find markets
+                # For now, we'll need to fetch market metadata from API
+                # The Graph gives us trades but not market details
+
+                # TODO: Map assetId to condition_id properly
+                # For now, skip market classification and store all as detail trades
+                # This is a temporary limitation - we could enhance Graph queries
+                # or maintain a local asset_id -> condition_id mapping
+
                 try:
+                    # Convert to API format
                     trade_response = graph_trade_to_api_response(
                         graph_trade, trader_address
                     )
 
-                    # Resolve market category (cached per market)
-                    market_id = trade_response.market
-                    if market_id not in market_metadata:
-                        existing_market = (
-                            session.query(Market)
-                            .filter_by(condition_id=market_id)
-                            .first()
-                        )
-                        if existing_market:
-                            market_metadata[market_id] = existing_market.category
-                        else:
-                            try:
-                                market_response = self.client.get_market(market_id)
-                                if market_response:
-                                    market_metadata[market_id] = (
-                                        market_response.category
-                                    )
-                                    if self.category_filter.requires_detail(
-                                        market_response.category or ""
-                                    ):
-                                        new_market = Market(
-                                            condition_id=market_response.condition_id,
-                                            question=market_response.question,
-                                            category=market_response.category,
-                                            active=market_response.active,
-                                            outcome=market_response.outcome,
-                                        )
-                                        if market_response.tokens:
-                                            new_market.tokens = json.dumps(
-                                                market_response.tokens
-                                            )
-                                        session.add(new_market)
-                                else:
-                                    market_metadata[market_id] = None
-                            except Exception as e:
-                                logger.debug(
-                                    f"Failed to fetch market {market_id[:8]}...: {e}"
-                                )
-                                market_metadata[market_id] = None
-
-                    category = market_metadata.get(market_id)
-                    if market_id in esports_market_ids:
-                        category = "eSports"
-
-                    if category:
-                        all_trades_with_category.append(
-                            TradeWithCategory(trade=trade_response, category=category)
-                        )
-                        stats["categories"].add(category)
-
-                except Exception as e:
-                    logger.warning(f"Failed to process Graph trade: {e}")
-                    continue
-
-            # Route trades using CategoryFilter
-            if all_trades_with_category:
-                detail_trades, summary_trades = self.category_filter.route_trades(
-                    all_trades_with_category
-                )
-
-                for trade_with_cat in detail_trades:
-                    trade_response = trade_with_cat.trade
+                    # Check if trade already exists (deduplication by trade ID)
                     existing = (
                         session.query(Trade)
                         .filter_by(trade_id=trade_response.id)
                         .first()
                     )
+
                     if existing:
                         stats["already_in_db"] += 1
                         continue
 
+                    # Store as detail trade (no categorization for now)
                     trade = Trade(
                         market_id=trade_response.market,
                         trader_address=trade_response.trader,
@@ -1451,27 +1394,9 @@ class IngestionPipeline:
                     session.add(trade)
                     stats["detail_count"] += 1
 
-                if summary_trades:
-                    summaries = group_and_aggregate(
-                        summary_trades, trader_address.lower()
-                    )
-                    for summary_dict in summaries:
-                        existing_summary = (
-                            session.query(TraderCategorySummary)
-                            .filter_by(
-                                trader_address=summary_dict["trader_address"],
-                                category=summary_dict["category"],
-                            )
-                            .first()
-                        )
-                        if existing_summary:
-                            existing_summary.total_volume += summary_dict[
-                                "total_volume"
-                            ]
-                            existing_summary.trade_count += summary_dict["trade_count"]
-                        else:
-                            session.add(TraderCategorySummary(**summary_dict))
-                        stats["summary_count"] += 1
+                except Exception as e:
+                    logger.warning(f"Failed to process Graph trade: {e}")
+                    continue
 
             # Mark trader as backfill complete
             trader = session.query(Trader).filter_by(address=trader_address).first()
@@ -1770,25 +1695,8 @@ class IngestionPipeline:
                                     )
                                     question = md.get("question", "")
                                     if cid:
-                                        resolved_cat = cat or "Unknown"
-                                        condition_to_category[cid] = resolved_cat
-                                        # Map token_ids regardless of category (needed for routing)
-                                        clob_tokens = md.get("clobTokenIds")
-                                        if clob_tokens:
-                                            token_list_inner = (
-                                                json.loads(clob_tokens)
-                                                if isinstance(clob_tokens, str)
-                                                else clob_tokens
-                                            )
-                                            for tid in token_list_inner:
-                                                token_to_condition[str(tid)] = cid
-                                        # Only persist markets in detail categories
-                                        if (
-                                            cid not in seen_conditions
-                                            and self.category_filter.requires_detail(
-                                                resolved_cat
-                                            )
-                                        ):
+                                        condition_to_category[cid] = cat or "Unknown"
+                                        if cid not in seen_conditions:
                                             seen_conditions.add(cid)
                                             existing_market = (
                                                 session.query(Market)
@@ -1799,10 +1707,16 @@ class IngestionPipeline:
                                                 new_market = Market(
                                                     condition_id=cid,
                                                     question=question,
-                                                    category=resolved_cat,
+                                                    category=cat or "Unknown",
                                                     active=md.get("active", False),
                                                 )
+                                                clob_tokens = md.get("clobTokenIds")
                                                 if clob_tokens:
+                                                    token_list_inner = (
+                                                        json.loads(clob_tokens)
+                                                        if isinstance(clob_tokens, str)
+                                                        else clob_tokens
+                                                    )
                                                     new_market.tokens = json.dumps(
                                                         [
                                                             {
@@ -1812,6 +1726,10 @@ class IngestionPipeline:
                                                             for tid in token_list_inner
                                                         ]
                                                     )
+                                                    for tid in token_list_inner:
+                                                        token_to_condition[str(tid)] = (
+                                                            cid
+                                                        )
                                                 sp = session.begin_nested()
                                                 try:
                                                     session.add(new_market)
@@ -1819,8 +1737,16 @@ class IngestionPipeline:
                                                 except IntegrityError:
                                                     sp.rollback()
                                         for t in batch:
-                                            if t in token_to_condition:
-                                                looked_up += 1
+                                            clob_tokens = md.get("clobTokenIds")
+                                            if clob_tokens:
+                                                token_ids = (
+                                                    json.loads(clob_tokens)
+                                                    if isinstance(clob_tokens, str)
+                                                    else clob_tokens
+                                                )
+                                                if t in [str(tid) for tid in token_ids]:
+                                                    token_to_condition[t] = cid
+                                                    looked_up += 1
                     except Exception as e:
                         logger.debug(f"Batch token lookup failed: {e}")
                         try:
@@ -2151,9 +2077,7 @@ class IngestionPipeline:
 
         return combined_stats
 
-    def resolve_trader_profiles(
-        self, limit: int | None = None, on_progress=None
-    ) -> int:
+    def resolve_trader_profiles(self, limit: int | None = None) -> int:
         """Resolve Polymarket profiles for traders with profile_resolved=False.
 
         For each unresolved trader:
@@ -2224,9 +2148,7 @@ class IngestionPipeline:
             total_pending = len(traders)
             logger.info(f"Resolving profiles for {total_pending} traders")
 
-            for idx, trader in enumerate(traders, 1):
-                if on_progress:
-                    on_progress(idx, total_pending)
+            for trader in traders:
                 try:
                     profile = self.gamma_client.get_public_profile(trader.address)
 

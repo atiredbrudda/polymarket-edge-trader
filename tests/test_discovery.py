@@ -169,9 +169,7 @@ def seed_trader_data(in_memory_db, seed_esports_data):
 def test_discover_traders_above_threshold(in_memory_db, seed_trader_data):
     """Traders above both thresholds are discovered."""
     with in_memory_db() as session:
-        traders = discover_esports_traders(
-            session, min_trades=5, min_volume=Decimal("500")
-        )
+        traders = discover_esports_traders(session, min_trades=5, min_volume=Decimal("500"))
 
         # Should discover traders A and E
         assert len(traders) == 2
@@ -182,9 +180,7 @@ def test_discover_traders_above_threshold(in_memory_db, seed_trader_data):
 def test_discover_traders_below_trade_threshold(in_memory_db, seed_trader_data):
     """Trader with high volume but low trade count is NOT discovered."""
     with in_memory_db() as session:
-        traders = discover_esports_traders(
-            session, min_trades=5, min_volume=Decimal("500")
-        )
+        traders = discover_esports_traders(session, min_trades=5, min_volume=Decimal("500"))
 
         # Trader B has $1000 volume but only 3 trades
         assert "0xBBBB" not in traders
@@ -193,9 +189,7 @@ def test_discover_traders_below_trade_threshold(in_memory_db, seed_trader_data):
 def test_discover_traders_below_volume_threshold(in_memory_db, seed_trader_data):
     """Trader with many trades but low volume is NOT discovered."""
     with in_memory_db() as session:
-        traders = discover_esports_traders(
-            session, min_trades=5, min_volume=Decimal("500")
-        )
+        traders = discover_esports_traders(session, min_trades=5, min_volume=Decimal("500"))
 
         # Trader C has 10 trades but only $100 volume
         assert "0xCCCC" not in traders
@@ -204,9 +198,7 @@ def test_discover_traders_below_volume_threshold(in_memory_db, seed_trader_data)
 def test_discover_traders_esports_only(in_memory_db, seed_trader_data):
     """Trader active in non-eSports markets is NOT discovered."""
     with in_memory_db() as session:
-        traders = discover_esports_traders(
-            session, min_trades=5, min_volume=Decimal("500")
-        )
+        traders = discover_esports_traders(session, min_trades=5, min_volume=Decimal("500"))
 
         # Trader D has 10 trades and $1000 volume, but in Politics category
         assert "0xDDDD" not in traders

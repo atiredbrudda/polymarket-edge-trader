@@ -131,9 +131,7 @@ def compute_and_store_positions(
             existing_position.direction = position_data.direction
             existing_position.avg_entry_price = position_data.avg_entry_price
             existing_position.entry_timestamp = position_data.entry_timestamp
-            existing_position.first_trade_timestamp = (
-                position_data.first_trade_timestamp
-            )
+            existing_position.first_trade_timestamp = position_data.first_trade_timestamp
             existing_position.last_trade_timestamp = position_data.last_trade_timestamp
             existing_position.trade_count = position_data.trade_count
             positions.append(existing_position)

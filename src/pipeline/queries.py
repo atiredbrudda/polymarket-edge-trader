@@ -93,7 +93,10 @@ def get_trades_by_resolution_status(
             trader_address="0xTrader1"
         )
     """
-    query = select(Trade).join(Market, Trade.market_id == Market.condition_id)
+    query = (
+        select(Trade)
+        .join(Market, Trade.market_id == Market.condition_id)
+    )
 
     if resolved:
         query = query.where(Market.outcome.is_not(None))
@@ -142,9 +145,7 @@ def get_trader_trades(
     return list(result.scalars().all())
 
 
-def get_trader_summary(
-    session: Session, trader_address: str
-) -> list[TraderCategorySummary]:
+def get_trader_summary(session: Session, trader_address: str) -> list[TraderCategorySummary]:
     """Query all category summaries for a trader.
 
     Returns aggregated data for non-detail categories.
@@ -293,17 +294,16 @@ def get_trader_unique_markets(session: Session, trader_address: str) -> int:
         # Get count of markets trader participated in
         count = get_trader_unique_markets(session, "0xTrader1")
     """
-    query = select(func.count(func.distinct(Position.market_id))).where(
-        Position.trader_address == trader_address
+    query = (
+        select(func.count(func.distinct(Position.market_id)))
+        .where(Position.trader_address == trader_address)
     )
 
     result = session.execute(query)
     return result.scalar() or 0
 
 
-def get_trader_outcomes_chronological(
-    session: Session, trader_address: str
-) -> list[str]:
+def get_trader_outcomes_chronological(session: Session, trader_address: str) -> list[str]:
     """Get trader's position outcomes in chronological order.
 
     Excludes void and flat outcomes for consistency analysis.
@@ -420,9 +420,7 @@ def get_trader_score_history(
         # Get trader's CS2 score history
         cs2_history = get_trader_score_history(session, "0xTrader1", game_slug="esports.cs2")
     """
-    query = select(ExpertiseScore).where(
-        ExpertiseScore.trader_address == trader_address
-    )
+    query = select(ExpertiseScore).where(ExpertiseScore.trader_address == trader_address)
 
     if game_slug is not None:
         query = query.where(ExpertiseScore.game_slug == game_slug)
