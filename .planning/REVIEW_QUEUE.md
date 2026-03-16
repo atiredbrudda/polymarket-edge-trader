@@ -18,7 +18,11 @@ Read this section and the AGENTS.md file in project root before starting work. R
 
 ## Pending Review
 
-### worker/24-01-scoring-rewire — 2026-03-15
+(empty)
+
+## Cleared (recent)
+
+### worker/24-01-scoring-rewire (24-01) — cleared 2026-03-16
 - **Plan:** 24-01
 - **Branch:** worker/24-01-scoring-rewire
 - **Commits:** initial..HEAD
