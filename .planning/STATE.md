@@ -2,8 +2,8 @@
 gsd_state_version: 1.0
 milestone: v1.2
 milestone_name: Market Resolution & Deep Classification
-status: Phase 24 plan 01 submitted for review. 13 functions rewired to MarketEntity, 26 tests pass.
-stopped_at: Phase 24 plan 01 implemented
+status: Phase 24 complete. Scoring pipeline rewired to MarketEntity.
+stopped_at: Phase 24 cleared
 last_updated: "2026-03-15T12:00:00.000Z"
 last_activity: "2026-03-15 — Phase 24 plan 01 complete: rewired 13 functions from MarketClassification/TaxonomyNode to MarketEntity in trader_discovery.py, queries.py, scoring_pipeline.py, ingest.py. All 26 modified tests pass. SUMMARY.md written."
 progress:
@@ -25,9 +25,9 @@ See: .planning/PROJECT.md (updated 2026-02-21)
 
 ## Current Position
 
-Phase: 24/24 (Scoring Rewire — PLAN 01 SUBMITTED)
+Phase: 24/24 (Scoring Rewire — CLEARED)
 Plan: 24-01 implemented (2026-03-15)
-Status: Pending Review. 13 functions rewired, 26 tests pass, SUMMARY.md written.
+Status: Complete. 13 functions rewired to MarketEntity, all tests pass.
 Last activity: 2026-03-15 — Phase 24 plan 01 complete: rewired 13 functions to MarketEntity, all tests pass.
 
 Progress: [███████████████████░] 95% (v1.2 — 23/24 phases complete)
@@ -81,6 +81,6 @@ None.
 ## Session Continuity
 
 Last session: 2026-03-15T12:00:00.000Z
-Stopped at: Phase 24 plan 01 submitted for review
+Stopped at: Phase 24 cleared
 Resume file: N/A
-Next: Reviewer to merge worker/24-01-scoring-rewire to main
+Next: Run polymarket compute-positions && polymarket score to validate full pipeline
