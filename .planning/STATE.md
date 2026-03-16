@@ -61,6 +61,7 @@ Recent decisions affecting v1.2:
 - Phase 22 added: Org-Team Mapping — data model for org→team relationships, cross-game org tracking, normalization layer
 - Phase 23 added: Contextual Analyze Command — query-time win rate per dimension per trader, replaces pre-computed scoring
 - Phase 24 added: Scoring Rewire — replace MarketClassification/TaxonomyNode joins with MarketEntity in 13 functions (trader_discovery, queries, scoring_pipeline, ingest). Unblocks scoring from 89 → 6,105 traders.
+- Phase 25 added: Lift-Based Scoring v2 — replace win_rate_component (40% weight, measures price preference not skill) with avg_lift (outcome − entry_price); add price-context to consensus signals (expert avg entry + live CLOB market line); add fade detection for reliably bad traders as contrarian signals.
 
 ### Known Limitations (carry to v1.2 work)
 

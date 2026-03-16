@@ -176,6 +176,26 @@ Plans:
 - [ ] 23-01-PLAN.md — EntityAlpha ORM model + query layer (get_entity_alpha_for_trader, upsert_entity_alpha, build_batch_trader_list) + crawler cursor module (TDD, ANALYZE-01..06)
 - [ ] 23-02-PLAN.md — polymarket analyze CLI command: batch mode + crawler mode wired + integration test (ANALYZE-07)
 
+### Phase 24: Scoring Rewire
+
+**Goal:** Rewire scoring pipeline and position queries from `market_classifications` (1% coverage) to `market_entities` (full coverage), so that `compute-positions` and `score` process all traders rather than 89/6,105.
+**Depends on:** Phase 23
+**Plans:** 1 plan
+
+Plans:
+- [x] 24-01-PLAN.md — Rewire all scoring queries from TaxonomyNode/market_classifications to MarketEntity
+
+### Phase 25: Lift-Based Scoring v2
+
+**Goal:** Replace raw win rate with avg lift (outcome − entry_price) as the core expertise metric; enrich consensus signals with price context (expert avg entry vs. live market line); add fade detection for reliably bad traders as contrarian signals.
+**Depends on:** Phase 24
+**Requirements**: LIFT-01, LIFT-02, LIFT-03
+**Plans:** 2 plans
+
+Plans:
+- [ ] 25-01-PLAN.md — Lift metric computation + replace win_rate_component with avg_lift_component in scoring (P0); fade detection query + FadeSignal model (P2)
+- [ ] 25-02-PLAN.md — Price-context enrichment on consensus signals: expert avg entry + live CLOB market price (P1)
+
 ## Progress
 
 | Phase | Milestone | Plans Complete | Status | Completed |
@@ -203,3 +223,5 @@ Plans:
 | 21. Market Entity Extraction | v1.3 | 0/2 | Planned | - |
 | 22. Org-Team Mapping | v1.3 | 0/2 | In Progress | - |
 | 23. Contextual Analyze Command | v1.3 | 0/2 | Planned | - |
+| 24. Scoring Rewire | v1.3 | 1/1 | Complete | 2026-03-16 |
+| 25. Lift-Based Scoring v2 | v1.3 | 0/2 | Planned | - |
