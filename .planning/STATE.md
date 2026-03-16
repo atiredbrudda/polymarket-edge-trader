@@ -2,16 +2,16 @@
 gsd_state_version: 1.0
 milestone: v1.2
 milestone_name: Market Resolution & Deep Classification
-status: Phase 23 complete. v1.2 milestone complete.
-stopped_at: Phase 23 cleared
-last_updated: "2026-03-14T17:00:00.000Z"
-last_activity: "2026-03-14 — Phase 23 cleared: polymarket analyze CLI command, batch + crawl modes, cursor resumption, alpha threshold. 14/14 tests passing."
+status: Phase 24 plan 01 submitted for review. 13 functions rewired to MarketEntity, 26 tests pass.
+stopped_at: Phase 24 plan 01 implemented
+last_updated: "2026-03-15T12:00:00.000Z"
+last_activity: "2026-03-15 — Phase 24 plan 01 complete: rewired 13 functions from MarketClassification/TaxonomyNode to MarketEntity in trader_discovery.py, queries.py, scoring_pipeline.py, ingest.py. All 26 modified tests pass. SUMMARY.md written."
 progress:
-  total_phases: 23
+  total_phases: 24
   completed_phases: 23
-  total_plans: 19
+  total_plans: 20
   completed_plans: 19
-  percent: 100
+  percent: 95
 ---
 
 # Project State
@@ -21,16 +21,16 @@ progress:
 See: .planning/PROJECT.md (updated 2026-02-21)
 
 **Core value:** Surface where smart money is moving in niche prediction markets so the user can see what informed traders are doing and factor that into their own thinking.
-**Current focus:** v1.2 — COMPLETE
+**Current focus:** Phase 24 — Scoring pipeline rewire from MarketClassification to MarketEntity
 
 ## Current Position
 
-Phase: 23/23 (Contextual Analyze Command — CLEARED)
-Plan: 23-02 cleared (2026-03-14)
-Status: Phase 23 complete. v1.2 milestone complete.
-Last activity: 2026-03-14 — Phase 23 cleared: polymarket analyze CLI command, batch + crawl modes, cursor resumption. 14/14 tests passing.
+Phase: 24/24 (Scoring Rewire — PLAN 01 SUBMITTED)
+Plan: 24-01 implemented (2026-03-15)
+Status: Pending Review. 13 functions rewired, 26 tests pass, SUMMARY.md written.
+Last activity: 2026-03-15 — Phase 24 plan 01 complete: rewired 13 functions to MarketEntity, all tests pass.
 
-Progress: [████████████████████] 100% (v1.2 — 23/23 phases complete)
+Progress: [███████████████████░] 95% (v1.2 — 23/24 phases complete)
 
 ## Performance Metrics
 
@@ -60,6 +60,7 @@ Recent decisions affecting v1.2:
 - Phase 21 added: Market Entity Extraction — LLM extracts team_a, team_b, tournament, game from market question text during discover
 - Phase 22 added: Org-Team Mapping — data model for org→team relationships, cross-game org tracking, normalization layer
 - Phase 23 added: Contextual Analyze Command — query-time win rate per dimension per trader, replaces pre-computed scoring
+- Phase 24 added: Scoring Rewire — replace MarketClassification/TaxonomyNode joins with MarketEntity in 13 functions (trader_discovery, queries, scoring_pipeline, ingest). Unblocks scoring from 89 → 6,105 traders.
 
 ### Known Limitations (carry to v1.2 work)
 
@@ -79,7 +80,7 @@ None.
 
 ## Session Continuity
 
-Last session: 2026-03-14T17:00:00.000Z
-Stopped at: Phase 23 cleared — v1.2 complete
+Last session: 2026-03-15T12:00:00.000Z
+Stopped at: Phase 24 plan 01 submitted for review
 Resume file: N/A
-Next: /gsd:complete-milestone to archive v1.2 and prepare for next milestone
+Next: Reviewer to merge worker/24-01-scoring-rewire to main

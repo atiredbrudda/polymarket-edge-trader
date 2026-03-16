@@ -16,9 +16,8 @@ from src.db.models import (
     Base,
     ExpertiseScore,
     Market,
-    MarketClassification,
+    MarketEntity,
     Position,
-    TaxonomyNode,
 )
 from src.evaluation.concentration import (
     calculate_team_concentration,
@@ -141,38 +140,16 @@ class TestGetPositionsForSlug:
     """Tests for get_positions_for_slug function."""
 
     def test_get_positions_for_tournament_slug(self, test_session):
-        """Verify positions can be queried for a tournament slug."""
-        root = TaxonomyNode(
-            name="eSports",
-            slug="esports",
-            depth=0,
-            node_type="root",
-            patterns_json="[]",
+        """Verify positions can be queried for a tournament entity name."""
+        entity = MarketEntity(
+            condition_id="test-market-1",
+            team_a="NaVi",
+            team_b="FaZe",
+            tournament="IEM Katowice",
+            game="CS2",
+            market_type="match",
         )
-        test_session.add(root)
-        test_session.flush()
-
-        game = TaxonomyNode(
-            name="CS2",
-            slug="esports.cs2",
-            depth=1,
-            node_type="game",
-            parent_id=root.id,
-            patterns_json='["CS2", "Counter-Strike"]',
-        )
-        test_session.add(game)
-        test_session.flush()
-
-        tournament = TaxonomyNode(
-            name="IEM Katowice",
-            slug="esports.cs2.iem-katowice",
-            depth=2,
-            node_type="tournament",
-            parent_id=game.id,
-            patterns_json='["IEM Katowice"]',
-        )
-        test_session.add(tournament)
-        test_session.flush()
+        test_session.add(entity)
 
         market = Market(
             condition_id="test-market-1",
@@ -181,13 +158,6 @@ class TestGetPositionsForSlug:
             active=True,
         )
         test_session.add(market)
-
-        classification = MarketClassification(
-            market_id="test-market-1",
-            taxonomy_node_id=tournament.id,
-            node_path="eSports.CS2.IEM Katowice",
-        )
-        test_session.add(classification)
 
         position = Position(
             market_id="test-market-1",
@@ -199,32 +169,15 @@ class TestGetPositionsForSlug:
         test_session.add(position)
         test_session.commit()
 
-        positions = get_positions_for_slug(test_session, "esports.cs2.iem-katowice")
+        positions = get_positions_for_slug(test_session, "IEM Katowice")
         assert len(positions) == 1
         assert positions[0].trader_address == "0xTrader1"
 
     def test_get_positions_for_slug_with_trader_filter(self, test_session):
         """Verify trader_address filter works."""
-        root = TaxonomyNode(
-            name="eSports",
-            slug="esports",
-            depth=0,
-            node_type="root",
-            patterns_json="[]",
-        )
-        test_session.add(root)
-        test_session.flush()
-
-        game = TaxonomyNode(
-            name="CS2",
-            slug="esports.cs2",
-            depth=1,
-            node_type="game",
-            parent_id=root.id,
-            patterns_json='["CS2"]',
-        )
-        test_session.add(game)
-        test_session.flush()
+        entity1 = MarketEntity(condition_id="test-market-2", game="CS2", market_type="match")
+        entity2 = MarketEntity(condition_id="test-market-3", game="CS2", market_type="match")
+        test_session.add_all([entity1, entity2])
 
         market1 = Market(
             condition_id="test-market-2",
@@ -239,14 +192,6 @@ class TestGetPositionsForSlug:
             active=True,
         )
         test_session.add_all([market1, market2])
-
-        class1 = MarketClassification(
-            market_id="test-market-2", taxonomy_node_id=game.id
-        )
-        class2 = MarketClassification(
-            market_id="test-market-3", taxonomy_node_id=game.id
-        )
-        test_session.add_all([class1, class2])
 
         pos1 = Position(
             market_id="test-market-2",
@@ -264,7 +209,7 @@ class TestGetPositionsForSlug:
         test_session.commit()
 
         positions = get_positions_for_slug(
-            test_session, "esports.cs2", trader_address="0xTraderA"
+            test_session, "CS2", trader_address="0xTraderA"
         )
         assert len(positions) == 1
         assert positions[0].trader_address == "0xTraderA"
@@ -360,38 +305,15 @@ class TestGetAllSlugsWithPositionsAtDepth:
     """Tests for get_all_slugs_with_positions_at_depth function."""
 
     def test_get_slugs_at_specific_depth(self, test_session):
-        """Verify slugs can be queried at specific taxonomy depth."""
-        root = TaxonomyNode(
-            name="eSports",
-            slug="esports",
-            depth=0,
-            node_type="root",
-            patterns_json="[]",
+        """Verify entity names can be queried at specific depth."""
+        # MarketEntity with tournament but no game — so depth=1 returns empty
+        entity = MarketEntity(
+            condition_id="test-market-depth",
+            tournament="IEM Katowice",
+            game=None,
+            market_type="match",
         )
-        test_session.add(root)
-        test_session.flush()
-
-        game = TaxonomyNode(
-            name="CS2",
-            slug="esports.cs2",
-            depth=1,
-            node_type="game",
-            parent_id=root.id,
-            patterns_json='["CS2"]',
-        )
-        test_session.add(game)
-        test_session.flush()
-
-        tournament = TaxonomyNode(
-            name="IEM Katowice",
-            slug="esports.cs2.iem-katowice",
-            depth=2,
-            node_type="tournament",
-            parent_id=game.id,
-            patterns_json='["IEM Katowice"]',
-        )
-        test_session.add(tournament)
-        test_session.flush()
+        test_session.add(entity)
 
         market = Market(
             condition_id="test-market-depth",
@@ -400,11 +322,6 @@ class TestGetAllSlugsWithPositionsAtDepth:
             active=True,
         )
         test_session.add(market)
-
-        classification = MarketClassification(
-            market_id="test-market-depth", taxonomy_node_id=tournament.id
-        )
-        test_session.add(classification)
 
         position = Position(
             market_id="test-market-depth",
@@ -416,7 +333,7 @@ class TestGetAllSlugsWithPositionsAtDepth:
         test_session.commit()
 
         depth2_slugs = get_all_slugs_with_positions_at_depth(test_session, depth=2)
-        assert "esports.cs2.iem-katowice" in depth2_slugs
+        assert "IEM Katowice" in depth2_slugs
 
         depth1_slugs = get_all_slugs_with_positions_at_depth(test_session, depth=1)
         assert len(depth1_slugs) == 0

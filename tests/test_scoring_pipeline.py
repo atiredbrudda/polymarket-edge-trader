@@ -13,10 +13,10 @@ from sqlalchemy.orm import sessionmaker, Session
 from src.db.models import (
     Base,
     ExpertiseScore,
-    MarketClassification,
+    Market,
+    MarketEntity,
     PerformanceSnapshot,
     Position,
-    TaxonomyNode,
 )
 from src.pipeline.queries import get_game_leaderboard, get_trader_score_history
 from src.pipeline.scoring_pipeline import compute_game_scores, compute_all_game_scores
@@ -36,8 +36,7 @@ def scoring_db(in_memory_db):
     """Create database with scoring test data.
 
     Creates:
-    - TaxonomyNode entries for "esports" (root) and "esports.cs2" (game)
-    - MarketClassification entries linking markets to taxonomy nodes
+    - MarketEntity entries for CS2 and Dota 2 markets
     - Position entries for multiple traders with varying win rates and activity
     - PerformanceSnapshot entries with consistency data for SOME traders
     - Some traders WITHOUT PerformanceSnapshot (to test default fallback)
@@ -48,63 +47,29 @@ def scoring_db(in_memory_db):
 
     now = datetime.utcnow()
 
-    # Create taxonomy nodes
-    esports_root = TaxonomyNode(
-        name="eSports",
-        slug="esports",
-        parent_id=None,
-        depth=0,
-        node_type="root",
-        patterns_json='["esports", "gaming"]',
-    )
-    session.add(esports_root)
-    session.flush()
-
-    cs2_game = TaxonomyNode(
-        name="Counter-Strike 2",
-        slug="esports.cs2",
-        parent_id=esports_root.id,
-        depth=1,
-        node_type="game",
-        patterns_json='["cs2", "counter-strike 2", "counter strike 2"]',
-    )
-    session.add(cs2_game)
-    session.flush()
-
-    dota2_game = TaxonomyNode(
-        name="Dota 2",
-        slug="esports.dota2",
-        parent_id=esports_root.id,
-        depth=1,
-        node_type="game",
-        patterns_json='["dota 2", "dota2"]',
-    )
-    session.add(dota2_game)
-    session.flush()
-
-    # Create market classifications
+    # Create market entities for CS2 markets
     for i in range(1, 11):
-        classification = MarketClassification(
-            market_id=f"market{i}",
-            taxonomy_node_id=cs2_game.id,
-            node_path="eSports.CS2",
+        entity = MarketEntity(
+            condition_id=f"market{i}",
+            game="CS2",
+            tournament=f"Tournament {i}",
+            team_a="Team A",
+            team_b="Team B",
             market_type="match",
-            matched_pattern="cs2",
-            flagged_for_review=False,
         )
-        session.add(classification)
+        session.add(entity)
 
-    # Create market classifications for Dota 2
+    # Create market entities for Dota 2 markets
     for i in range(11, 16):
-        classification = MarketClassification(
-            market_id=f"market{i}",
-            taxonomy_node_id=dota2_game.id,
-            node_path="eSports.Dota2",
+        entity = MarketEntity(
+            condition_id=f"market{i}",
+            game="Dota 2",
+            tournament=f"Dota Tournament {i}",
+            team_a="Team C",
+            team_b="Team D",
             market_type="match",
-            matched_pattern="dota2",
-            flagged_for_review=False,
         )
-        session.add(classification)
+        session.add(entity)
 
     session.commit()
 
@@ -285,7 +250,7 @@ def test_compute_game_scores_returns_sorted_leaderboard(scoring_db):
     """Test that compute_game_scores returns leaderboard sorted by percentile_rank."""
     session, now = scoring_db
 
-    leaderboard = compute_game_scores(session, "esports.cs2", now=now)
+    leaderboard = compute_game_scores(session, "CS2", now=now)
 
     # Should include Trader1, Trader2, Trader4 (all have >= 5 resolved markets)
     # Should exclude Trader3 (only 3 markets)
@@ -305,7 +270,7 @@ def test_compute_game_scores_excludes_low_sample_size(scoring_db):
     """Test that traders with < 5 resolved markets are excluded."""
     session, now = scoring_db
 
-    leaderboard = compute_game_scores(session, "esports.cs2", now=now)
+    leaderboard = compute_game_scores(session, "CS2", now=now)
 
     trader_addresses = [entry.trader_address for entry in leaderboard]
 
@@ -322,7 +287,7 @@ def test_leaderboard_entry_includes_all_required_fields(scoring_db):
     """Test that LeaderboardEntry includes all required fields."""
     session, now = scoring_db
 
-    leaderboard = compute_game_scores(session, "esports.cs2", now=now)
+    leaderboard = compute_game_scores(session, "CS2", now=now)
 
     entry = leaderboard[0]
 
@@ -345,12 +310,12 @@ def test_expertise_score_rows_persisted_to_database(scoring_db):
     session, now = scoring_db
 
     # Run scoring
-    compute_game_scores(session, "esports.cs2", now=now)
+    compute_game_scores(session, "CS2", now=now)
 
     # Query ExpertiseScore rows
     from sqlalchemy import select
 
-    query = select(ExpertiseScore).where(ExpertiseScore.game_slug == "esports.cs2")
+    query = select(ExpertiseScore).where(ExpertiseScore.game_slug == "CS2")
     result = session.execute(query)
     scores = list(result.scalars().all())
 
@@ -360,7 +325,7 @@ def test_expertise_score_rows_persisted_to_database(scoring_db):
     # Check fields are populated
     for score in scores:
         assert score.trader_address in ["0xTrader1", "0xTrader2", "0xTrader4"]
-        assert score.game_slug == "esports.cs2"
+        assert score.game_slug == "CS2"
         assert score.raw_score >= Decimal("0")
         assert score.percentile_rank is not None
         assert score.win_rate_component >= Decimal("0")
@@ -378,17 +343,19 @@ def test_second_scoring_run_creates_new_rows(scoring_db):
     session, now = scoring_db
 
     # First run
-    compute_game_scores(session, "esports.cs2", now=now)
+    compute_game_scores(session, "CS2", now=now)
 
     # Query count
     from sqlalchemy import select, func
 
-    query = select(func.count(ExpertiseScore.id)).where(ExpertiseScore.game_slug == "esports.cs2")
+    query = select(func.count(ExpertiseScore.id)).where(
+        ExpertiseScore.game_slug == "CS2"
+    )
     first_count = session.execute(query).scalar()
 
     # Second run (1 day later)
     later = now + timedelta(days=1)
-    compute_game_scores(session, "esports.cs2", now=later)
+    compute_game_scores(session, "CS2", now=later)
 
     # Query count again
     second_count = session.execute(query).scalar()
@@ -402,7 +369,7 @@ def test_empty_game_returns_empty_leaderboard(scoring_db):
     session, now = scoring_db
 
     # Query for a game with no positions
-    leaderboard = compute_game_scores(session, "esports.valorant", now=now)
+    leaderboard = compute_game_scores(session, "Valorant", now=now)
 
     assert len(leaderboard) == 0
 
@@ -412,7 +379,7 @@ def test_volume_proxy_handles_none_avg_entry_price(scoring_db):
     session, now = scoring_db
 
     # Trader4 has positions with avg_entry_price=None
-    leaderboard = compute_game_scores(session, "esports.cs2", now=now)
+    leaderboard = compute_game_scores(session, "CS2", now=now)
 
     trader4_entry = next(
         (entry for entry in leaderboard if entry.trader_address == "0xTrader4"), None
@@ -429,12 +396,12 @@ def test_get_game_leaderboard_retrieves_latest_scores(scoring_db):
     session, now = scoring_db
 
     # Run scoring twice
-    compute_game_scores(session, "esports.cs2", now=now)
+    compute_game_scores(session, "CS2", now=now)
     later = now + timedelta(days=1)
-    compute_game_scores(session, "esports.cs2", now=later)
+    compute_game_scores(session, "CS2", now=later)
 
     # Query latest scores
-    latest = get_game_leaderboard(session, "esports.cs2", top_n=10)
+    latest = get_game_leaderboard(session, "CS2", top_n=10)
 
     # Should get 3 scores (one per trader)
     assert len(latest) == 3
@@ -449,10 +416,10 @@ def test_get_game_leaderboard_with_min_score_filters(scoring_db):
     session, now = scoring_db
 
     # Run scoring
-    compute_game_scores(session, "esports.cs2", now=now)
+    compute_game_scores(session, "CS2", now=now)
 
     # Get all scores to find a reasonable threshold
-    all_scores = get_game_leaderboard(session, "esports.cs2", top_n=10)
+    all_scores = get_game_leaderboard(session, "CS2", top_n=10)
     assert len(all_scores) == 3
 
     # Find median score
@@ -460,7 +427,7 @@ def test_get_game_leaderboard_with_min_score_filters(scoring_db):
     median_score = scores_list[1]
 
     # Filter by score > median
-    filtered = get_game_leaderboard(session, "esports.cs2", top_n=10, min_score=median_score)
+    filtered = get_game_leaderboard(session, "CS2", top_n=10, min_score=median_score)
 
     # Should get <= 2 results (median and above)
     assert len(filtered) <= 2
@@ -474,10 +441,10 @@ def test_get_trader_score_history_returns_chronological(scoring_db):
     # Run scoring three times
     timestamps = [now, now + timedelta(days=1), now + timedelta(days=2)]
     for ts in timestamps:
-        compute_game_scores(session, "esports.cs2", now=ts)
+        compute_game_scores(session, "CS2", now=ts)
 
     # Get Trader1's history
-    history = get_trader_score_history(session, "0xTrader1", game_slug="esports.cs2")
+    history = get_trader_score_history(session, "0xTrader1", game_slug="CS2")
 
     # Should have 3 snapshots
     assert len(history) == 3
@@ -493,7 +460,7 @@ def test_trader_with_performance_snapshot_uses_stored_consistency(scoring_db):
 
     # Trader1 has PerformanceSnapshot with consistency_score=85, signal="stable"
     # This should trigger 1.05x multiplier (score >= 80 AND signal == "stable")
-    leaderboard = compute_game_scores(session, "esports.cs2", now=now)
+    leaderboard = compute_game_scores(session, "CS2", now=now)
 
     trader1_entry = next(
         (entry for entry in leaderboard if entry.trader_address == "0xTrader1"), None
@@ -507,7 +474,7 @@ def test_trader_with_performance_snapshot_uses_stored_consistency(scoring_db):
     query = (
         select(ExpertiseScore)
         .where(ExpertiseScore.trader_address == "0xTrader1")
-        .where(ExpertiseScore.game_slug == "esports.cs2")
+        .where(ExpertiseScore.game_slug == "CS2")
         .order_by(ExpertiseScore.computed_at.desc())
     )
     result = session.execute(query)
@@ -524,7 +491,7 @@ def test_trader_without_performance_snapshot_gets_defaults(scoring_db):
     # Trader2 has NO PerformanceSnapshot
     # Should get defaults: consistency_score=50, signal="insufficient_data"
     # This gives 1.0x multiplier (no bonus)
-    leaderboard = compute_game_scores(session, "esports.cs2", now=now)
+    leaderboard = compute_game_scores(session, "CS2", now=now)
 
     trader2_entry = next(
         (entry for entry in leaderboard if entry.trader_address == "0xTrader2"), None
@@ -538,7 +505,7 @@ def test_trader_without_performance_snapshot_gets_defaults(scoring_db):
     query = (
         select(ExpertiseScore)
         .where(ExpertiseScore.trader_address == "0xTrader2")
-        .where(ExpertiseScore.game_slug == "esports.cs2")
+        .where(ExpertiseScore.game_slug == "CS2")
         .order_by(ExpertiseScore.computed_at.desc())
     )
     result = session.execute(query)
@@ -555,13 +522,13 @@ def test_compute_all_game_scores_processes_multiple_games(scoring_db):
     # Run scoring for all games
     results = compute_all_game_scores(session, now=now)
 
-    # Should have 2 games (esports.cs2 and esports.dota2)
+    # Should have 2 games (CS2 and Dota 2)
     assert len(results) == 2
-    assert "esports.cs2" in results
-    assert "esports.dota2" in results
+    assert "CS2" in results
+    assert "Dota 2" in results
 
     # CS2 should have 3 traders
-    assert len(results["esports.cs2"]) == 3
+    assert len(results["CS2"]) == 3
 
     # Dota 2 should have 1 trader
-    assert len(results["esports.dota2"]) == 1
+    assert len(results["Dota 2"]) == 1

@@ -18,7 +18,26 @@ Read this section and the AGENTS.md file in project root before starting work. R
 
 ## Pending Review
 
-(empty)
+### worker/24-01-scoring-rewire — 2026-03-15
+- **Plan:** 24-01
+- **Branch:** worker/24-01-scoring-rewire
+- **Commits:** initial..HEAD
+- **Files changed:**
+  - src/discovery/trader_discovery.py (MODIFIED — rewired to MarketEntity)
+  - src/pipeline/queries.py (MODIFIED — 4 query functions rewired)
+  - src/pipeline/scoring_pipeline.py (MODIFIED — 5 scoring functions rewired)
+  - src/pipeline/ingest.py (MODIFIED — _get_esports_market_ids rewired)
+  - tests/test_discovery.py (MODIFIED — fixture uses MarketEntity)
+  - tests/test_scoring_pipeline.py (MODIFIED — fixture/asserts updated)
+  - tests/test_scoring_pipeline_deep.py (MODIFIED — fixture/asserts updated)
+  - .planning/phases/24-scoring-rewire/24-01-SUMMARY.md (NEW)
+  - .planning/STATE.md (MODIFIED — updated plan status)
+- **Worker notes:** All 13 functions rewired from MarketClassification/TaxonomyNode to MarketEntity. Game slug format changed from "esports.cs2" to "CS2". `identify_hidden_specialists()` rewritten to use MarketEntity lookups instead of LIKE pattern. 26/26 tests pass. ingest.py retains 9 taxonomy references in functions outside this task's scope (discover_traders_from_market, taxonomy classification creation).
+- **Checklist:**
+  - [x] All tests pass (pytest tests/test_discovery.py tests/test_scoring_pipeline.py tests/test_scoring_pipeline_deep.py: 26 passed)
+  - [x] No debug artifacts
+  - [x] STATE.md updated — current phase, plan number, last activity date
+  - [x] SUMMARY.md written (24-01-SUMMARY.md)
 
 ## Re-Review
 

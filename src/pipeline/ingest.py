@@ -28,6 +28,7 @@ from src.db.models import (
     BlockchainSyncState,
     Market,
     MarketClassification,
+    MarketEntity,
     TaxonomyNode,
     Trader,
     Trade,
@@ -322,32 +323,28 @@ class IngestionPipeline:
         self._catalog_built: bool = False
 
     def _get_esports_market_ids(self, session) -> set[str]:
-        """Query market IDs classified as eSports in taxonomy.
+        """Query market IDs with extracted game entities.
 
         Args:
             session: SQLAlchemy session
 
         Returns:
-            Set of market IDs that are classified as eSports in the taxonomy
+            Set of market IDs (condition_ids) that have a game in market_entities
         """
         esports_market_ids: set[str] = set()
         try:
-            esports_classifications = (
-                session.query(MarketClassification.market_id)
-                .join(
-                    TaxonomyNode,
-                    MarketClassification.taxonomy_node_id == TaxonomyNode.id,
-                )
-                .filter(TaxonomyNode.slug.like("esports%"))
+            entity_rows = (
+                session.query(MarketEntity.condition_id)
+                .filter(MarketEntity.game.isnot(None))
                 .all()
             )
-            esports_market_ids = {row[0] for row in esports_classifications}
+            esports_market_ids = {row[0] for row in entity_rows}
             if esports_market_ids:
                 logger.debug(
-                    f"Found {len(esports_market_ids)} eSports markets in taxonomy"
+                    f"Found {len(esports_market_ids)} eSports markets via market_entities"
                 )
         except Exception as e:
-            logger.warning(f"Failed to query taxonomy classifications: {e}")
+            logger.warning(f"Failed to query market_entities: {e}")
         return esports_market_ids
 
     def ingest_active_markets(self) -> int:
