@@ -19,6 +19,7 @@ from sqlalchemy.orm import Session
 
 from src.db.models import (
     ExpertiseScore,
+    LiftScore,
     Market,
     MarketEntity,
     Position,
@@ -711,3 +712,142 @@ def get_trader_counts_by_status(session: Session) -> dict[str, int]:
         "backfilled": backfilled,
         "total": total,
     }
+
+
+# ---------------------------------------------------------------------------
+# Lift-based scoring queries (Phase 25)
+# ---------------------------------------------------------------------------
+
+def get_market_avg_entries(
+    session: Session,
+    category: str,
+    window_start: datetime,
+) -> dict[str, Decimal]:
+    """Compute market average entry price for all markets in a category within window.
+
+    Used to compute Closing Line Value (CLV) = trader_entry vs crowd_entry.
+    Single SQL aggregate — O(1) query regardless of trader count.
+
+    Category matching: joins Position -> Market on market_id/condition_id,
+    then filters by Market.category (case-insensitive via LOWER()).
+
+    Args:
+        session: SQLAlchemy session
+        category: Category name (e.g., "esports"). Matched case-insensitively
+                  against Market.category (which may be "eSports" in DB).
+        window_start: Only include positions with last_trade_timestamp >= window_start.
+
+    Returns:
+        Dict of {market_id: avg_entry_price} for markets with data in window.
+    """
+    from sqlalchemy import func
+
+    query = (
+        select(
+            Position.market_id,
+            func.avg(Position.avg_entry_price).label("avg_entry"),
+        )
+        .join(Market, Position.market_id == Market.condition_id)
+        .where(func.lower(Market.category) == category.lower())
+        .where(Position.direction.in_(["LONG", "SHORT"]))
+        .where(Position.last_trade_timestamp >= window_start)
+        .where(Position.avg_entry_price.isnot(None))
+        .group_by(Position.market_id)
+    )
+
+    results = session.execute(query).all()
+    return {row.market_id: Decimal(str(row.avg_entry)) for row in results}
+
+
+def get_positions_for_category(
+    session: Session,
+    category: str,
+    window_start: datetime,
+    min_positions: int,
+) -> dict[str, list]:
+    """Query resolved positions per trader for a category, applying min_positions filter.
+
+    Returns traders who have >= min_positions resolved, non-void positions in the
+    category within the 30-day window.
+
+    Category matching: joins Position -> Market on market_id/condition_id,
+    case-insensitive match on Market.category.
+
+    Args:
+        session: SQLAlchemy session
+        category: Category name (e.g., "esports").
+        window_start: Only include positions with last_trade_timestamp >= window_start.
+        min_positions: Minimum number of qualifying positions required per trader.
+
+    Returns:
+        Dict of {trader_address: [Position, ...]} for qualifying traders.
+    """
+    query = (
+        select(Position)
+        .join(Market, Position.market_id == Market.condition_id)
+        .where(func.lower(Market.category) == category.lower())
+        .where(Position.direction.in_(["LONG", "SHORT"]))
+        .where(Position.last_trade_timestamp >= window_start)
+        .where(Position.resolved == True)
+        .where(Position.outcome != "void")
+        .where(Position.outcome.isnot(None))
+    )
+
+    rows = session.execute(query).scalars().all()
+
+    # Group by trader
+    by_trader: dict[str, list] = {}
+    for pos in rows:
+        by_trader.setdefault(pos.trader_address, []).append(pos)
+
+    # Apply min_positions threshold
+    return {
+        addr: positions
+        for addr, positions in by_trader.items()
+        if len(positions) >= min_positions
+    }
+
+
+def get_lift_leaderboard(
+    session: Session,
+    category: str,
+    top_n: int = 20,
+) -> list:
+    """Query the latest LiftScore records for a category, sorted by composite_score DESC.
+
+    Returns the most recent scoring snapshot for each trader in the category.
+    Used by the leaderboard CLI command.
+
+    Args:
+        session: SQLAlchemy session
+        category: Category name (e.g., "esports").
+        top_n: Maximum number of results to return (default: 20).
+
+    Returns:
+        List of LiftScore ORM objects ordered by composite_score DESC.
+    """
+    # Subquery: most recent computed_at per trader per category
+    subquery = (
+        select(
+            LiftScore.trader_address,
+            func.max(LiftScore.computed_at).label("max_computed_at"),
+        )
+        .where(LiftScore.category == category)
+        .group_by(LiftScore.trader_address)
+        .subquery()
+    )
+
+    query = (
+        select(LiftScore)
+        .join(
+            subquery,
+            (LiftScore.trader_address == subquery.c.trader_address)
+            & (LiftScore.computed_at == subquery.c.max_computed_at),
+        )
+        .where(LiftScore.category == category)
+        .order_by(LiftScore.composite_score.desc())
+        .limit(top_n)
+    )
+
+    result = session.execute(query)
+    return list(result.scalars().all())

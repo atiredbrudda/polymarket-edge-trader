@@ -436,103 +436,106 @@ def signals(window, min_confidence, verbose):
 
 
 @cli.command()
-@click.argument("slug")
-@click.option("--top-n", "-n", default=20, help="Number of entries to display")
 @click.option(
-    "--depth",
-    "-d",
-    type=click.Choice(["game", "tournament", "team"]),
-    default="game",
-    help="Taxonomy depth: game (default), tournament, or team",
+    "--category",
+    "-c",
+    default="esports",
+    help="Market category to display (default: esports)",
 )
+@click.option("--top-n", "-n", default=20, help="Number of entries to display")
 @click.option("--verbose", "-v", is_flag=True, help="Enable debug logging")
-def leaderboard(slug, top_n, depth, verbose):
-    """Display rankings at game, tournament, or team level.
+def leaderboard(category, top_n, verbose):
+    """Display lift-based trader rankings by category.
 
-    SLUG is the taxonomy identifier (game, tournament, or team slug).
-    Use --depth to specify the taxonomy level.
+    Shows Q1-Q5 ranked traders with CLV/ROI/Sharpe breakdown.
+    Run 'polymarket score' first to compute lift scores.
 
+    \b
     Examples:
-        polymarket leaderboard esports.cs2
-        polymarket leaderboard esports.cs2.iem-katowice --depth tournament
-        polymarket leaderboard esports.cs2.iem-katowice.navi --depth team
+        polymarket leaderboard
+        polymarket leaderboard --category esports --top-n 10
+        polymarket leaderboard --category epl
     """
     logger.info(
-        f"LEADERBOARD command started (slug={slug}, top_n={top_n}, depth={depth}, verbose={verbose})"
+        f"LEADERBOARD command started (category={category}, top_n={top_n}, verbose={verbose})"
     )
 
     if verbose:
         logger.remove()
         logger.add(sys.stderr, level="DEBUG")
 
-    depth_map = {"game": 1, "tournament": 2, "team": 3}
-    depth_int = depth_map[depth]
-
     console = Console()
 
+    from src.config.market_config import get_market_config
+
+    config = get_market_config(category)
+    if config is None:
+        console.print(
+            f"[bold red]Error: Category '{category}' is not scorable.[/bold red]"
+        )
+        console.print(
+            "\n[bold]Scorable categories:[/bold] esports, epl, politics, la-liga, ligue-1"
+        )
+        return
+
+    leaderboard_entries = []
     with console.status("[bold green]Fetching leaderboard...", spinner="dots"):
         session_factory, _, _, _, _ = _get_dependencies()
 
         with get_session(session_factory) as session:
-            from src.pipeline.queries import (
-                get_game_leaderboard,
-                get_taxonomy_leaderboard,
-            )
+            from src.pipeline.queries import get_lift_leaderboard
 
-            if depth == "game":
-                query = select(TaxonomyNode.slug).where(
-                    TaxonomyNode.slug.like("esports.%"),
-                    TaxonomyNode.node_type == "game",
-                )
-                result = session.execute(query)
-                valid_slugs = result.scalars().all()
+            leaderboard_entries = get_lift_leaderboard(session, category, top_n=top_n)
 
-                if slug not in valid_slugs:
-                    logger.error(
-                        f"Invalid game slug: {slug}. Valid games: {valid_slugs}"
-                    )
-                    console.print(
-                        f"[bold red]Error: Game '{slug}' not found.[/bold red]"
-                    )
-                    console.print("\n[bold]Available games:[/bold]")
-                    for game in sorted(valid_slugs):
-                        console.print(f"  - {game}")
-                    return
+    logger.info(
+        f"Leaderboard loaded: {len(leaderboard_entries)} entries for {category}"
+    )
 
-                leaderboard_entries = get_game_leaderboard(session, slug, top_n=top_n)
-            else:
-                query = select(TaxonomyNode.slug).where(
-                    TaxonomyNode.slug == slug, TaxonomyNode.depth == depth_int
-                )
-                result = session.execute(query)
-                valid_slugs = result.scalars().all()
+    if not leaderboard_entries:
+        console.print(
+            f"[yellow]No scores found for category '{category}'.[/yellow]"
+        )
+        console.print(
+            "[dim]Run 'polymarket score' to compute lift-based scores first.[/dim]"
+        )
+        return
 
-                if slug not in valid_slugs:
-                    logger.error(f"Invalid {depth} slug: {slug}")
-                    console.print(
-                        f"[bold red]Error: {depth.title()} '{slug}' not found.[/bold red]"
-                    )
-                    return
+    # Build Rich table
+    table = Table(title=f"Lift-Based Leaderboard: {category.title()} (Top {top_n})")
+    table.add_column("Rank", style="bold", justify="right", width=4)
+    table.add_column("Trader", style="cyan", width=12)
+    table.add_column("Composite", justify="right", width=9)
+    table.add_column("CLV(z)", justify="right", width=7)
+    table.add_column("ROI(z)", justify="right", width=7)
+    table.add_column("Sharpe(z)", justify="right", width=9)
+    table.add_column("Q", justify="center", width=3)
+    table.add_column("Positions", justify="right", width=9)
+    table.add_column("PnL", justify="right", width=10)
 
-                leaderboard_entries = get_taxonomy_leaderboard(
-                    session, slug, depth_int, top_n=top_n
-                )
+    actionable_label = "[green]ACTIONABLE[/green]" if config.actionable else "[yellow]SIGNAL WEAK[/yellow]"
+    console.print(f"\nCategory: [bold]{category}[/bold]  Status: {actionable_label}")
 
-            entries_data = [
-                {
-                    "rank": idx + 1,
-                    "trader_address": entry.trader_address,
-                    "score": entry.raw_score,
-                    "win_rate": entry.win_rate_component or Decimal("0"),
-                }
-                for idx, entry in enumerate(leaderboard_entries)
-            ]
+    for rank, entry in enumerate(leaderboard_entries, 1):
+        addr_display = entry.trader_address[:8] + "..."
+        q_style = "green" if entry.quintile == 5 else ("red" if entry.quintile == 1 else "white")
+        table.add_row(
+            str(rank),
+            addr_display,
+            f"{float(entry.composite_score):+.3f}",
+            f"{float(entry.clv_zscore):+.3f}",
+            f"{float(entry.roi_zscore):+.3f}",
+            f"{float(entry.sharpe_zscore):+.3f}",
+            f"[{q_style}]Q{entry.quintile}[/{q_style}]",
+            str(entry.position_count),
+            f"{float(entry.total_pnl):+.1f}",
+        )
 
-    logger.info(f"Leaderboard loaded: {len(entries_data)} entries for {slug}")
-
-    depth_label = depth.title() if depth != "game" else "Game"
-    table = format_leaderboard_table(entries_data, slug, depth_label=depth_label)
     console.print(table)
+    q5_count = sum(1 for e in leaderboard_entries if e.quintile == 5)
+    console.print(f"\n  Q5 traders (top 20%): [bold green]{q5_count}[/bold green]")
+    console.print(
+        "[dim]Run 'polymarket leaderboard --category epl' to see other categories.[/dim]"
+    )
     logger.info("LEADERBOARD command completed")
 
 
@@ -1567,10 +1570,12 @@ def recover_catalog_cmd(verbose):
 @cli.command()
 @click.option("--verbose", "-v", is_flag=True, help="Enable debug logging")
 def score(verbose):
-    """Compute expertise scores for all traders.
+    """Compute lift-based scores for all traders.
 
-    Calculates game-level expertise scores across all traders with trade history.
-    Scores are stored in the expertise_scores table and used for signal detection.
+    Calculates z(CLV) + z(ROI) + z(Sharpe) composite scores for all traders
+    meeting per-category min_positions threshold within the 30-day rolling window.
+    Scores are stored in the lift_scores table. Q5 traders (top 20%) are the
+    primary signal source for position tracking.
 
     \b
     Examples:
@@ -1590,36 +1595,33 @@ def score(verbose):
 
     session_factory, _, _, _, _ = _get_dependencies()
 
-    with console.status(
-        "[bold green]Computing positions from trades...", spinner="dots"
-    ):
-        from src.discovery.trader_discovery import refresh_all_positions
+    with console.status("[bold green]Computing lift-based scores...", spinner="dots"):
+        from src.pipeline.scoring_pipeline import compute_all_category_scores
 
         with get_session(session_factory) as session:
-            pos_stats = refresh_all_positions(session)
-
-    console.print(
-        f"  Positions computed: {pos_stats['positions_computed']} ({pos_stats['traders_processed']} traders)"
-    )
-
-    with console.status("[bold green]Computing expertise scores...", spinner="dots"):
-        from src.pipeline.scoring_pipeline import compute_all_game_scores
-
-        with get_session(session_factory) as session:
-            leaderboards = compute_all_game_scores(session)
-            session.commit()
+            leaderboards = compute_all_category_scores(session)
 
     elapsed = time.time() - start_time
     total_entries = sum(len(entries) for entries in leaderboards.values())
 
     console.print(f"\n[bold green]Scoring complete[/bold green] ({elapsed:.1f}s)")
-    console.print(f"  Games scored:    {len(leaderboards)}")
-    console.print(f"  Total entries:   {total_entries}")
+    console.print(f"  Categories scored: {len(leaderboards)}")
+    console.print(f"  Total traders:     {total_entries}")
+
+    # Show per-category breakdown
+    for category, entries in leaderboards.items():
+        if not entries:
+            continue
+        q5_count = sum(1 for e in entries if e.quintile == 5)
+        console.print(
+            f"  {category:12s}: {len(entries):3d} traders, {q5_count} Q5"
+        )
+
     console.print(
-        "\n[dim]Run 'polymarket detect' to refresh signals, or 'polymarket signals' to view existing signals.[/dim]"
+        "\n[dim]Run 'polymarket leaderboard --category esports' to view Q5 traders.[/dim]"
     )
     logger.info(
-        f"SCORE completed: {len(leaderboards)} games, {total_entries} entries ({elapsed:.1f}s)"
+        f"SCORE completed: {len(leaderboards)} categories, {total_entries} entries ({elapsed:.1f}s)"
     )
 
 

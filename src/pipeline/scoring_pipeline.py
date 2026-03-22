@@ -21,7 +21,7 @@ Design principles:
 """
 
 from dataclasses import dataclass
-from datetime import datetime, UTC
+from datetime import datetime, timedelta, UTC
 from decimal import Decimal
 from typing import Any
 
@@ -847,3 +847,236 @@ def identify_hidden_specialists(
     hidden_specialists.sort(key=lambda x: x["score_delta"], reverse=True)
 
     return hidden_specialists
+
+
+# ---------------------------------------------------------------------------
+# Lift-based scoring pipeline (Phase 25)
+# Replaces compute_game_scores / compute_all_game_scores as the active engine.
+# ---------------------------------------------------------------------------
+
+
+@dataclass(frozen=True)
+class LiftLeaderboardEntry:
+    """Immutable leaderboard entry from lift-based scoring.
+
+    Attributes:
+        trader_address: Trader Ethereum address.
+        composite_score: z(CLV) + z(ROI) + z(Sharpe) sum.
+        clv_raw: Raw CLV value (price advantage over crowd).
+        clv_zscore: Z-normalized CLV across population.
+        roi_raw: Raw ROI value (total_pnl / capital_deployed).
+        roi_zscore: Z-normalized ROI across population.
+        sharpe_raw: Raw Sharpe ratio (avg_pnl / stddev_pnl).
+        sharpe_zscore: Z-normalized Sharpe across population.
+        quintile: Quintile rank 1-5 (Q5 = top 20%).
+        position_count: Number of qualifying positions used.
+        total_pnl: Sum of PnL across qualifying positions.
+        capital_deployed: Sum of capital deployed.
+    """
+
+    trader_address: str
+    composite_score: Decimal
+    clv_raw: Decimal
+    clv_zscore: Decimal
+    roi_raw: Decimal
+    roi_zscore: Decimal
+    sharpe_raw: Decimal
+    sharpe_zscore: Decimal
+    quintile: int
+    position_count: int
+    total_pnl: Decimal
+    capital_deployed: Decimal
+
+
+def compute_category_scores(
+    session: Session,
+    category: str,
+    window_days: int = 30,
+    now: datetime | None = None,
+) -> list[LiftLeaderboardEntry]:
+    """Compute lift-based scores for all traders in a category.
+
+    Pipeline:
+    1. Validate category against MARKET_CONFIGS (return [] for unknown/NBA)
+    2. Define 30-day rolling window
+    3. Compute market avg entry prices (one SQL aggregate)
+    4. Get qualified traders (>= min_positions resolved, non-void positions)
+    5. Compute CLV, ROI, Sharpe per trader (pure functions)
+    6. Z-score normalize across population
+    7. Compute composite, assign quintiles
+    8. Persist LiftScore rows (DELETE old, INSERT new)
+    9. Return sorted LiftLeaderboardEntry list
+
+    Args:
+        session: SQLAlchemy session.
+        category: Category name (e.g., "esports"). Case-insensitive.
+        window_days: Rolling window in days (default: 30).
+        now: Optional current timestamp for testing (default: datetime.now(UTC)).
+
+    Returns:
+        List of LiftLeaderboardEntry sorted by composite_score DESC.
+    """
+    from src.config.market_config import get_market_config, MARKET_CONFIGS
+    from src.db.models import LiftScore
+    from src.evaluation.lift_metrics import (
+        compute_clv,
+        compute_roi,
+        compute_sharpe,
+        compute_z_scores,
+        compute_composite,
+        assign_quintiles,
+        LiftMetrics,
+    )
+    from src.pipeline.queries import get_market_avg_entries, get_positions_for_category
+    from sqlalchemy import delete
+
+    # Step 1: Validate category
+    config = get_market_config(category)
+    if config is None:
+        return []
+
+    # Step 2: Define window
+    if now is None:
+        now = datetime.now(UTC)
+    window_start = now - timedelta(days=window_days)
+
+    # Step 3: Market average entry prices
+    market_avgs = get_market_avg_entries(session, category, window_start)
+
+    # Step 4: Get qualified traders
+    positions_by_trader = get_positions_for_category(
+        session, category, window_start, config.min_positions
+    )
+
+    if not positions_by_trader:
+        return []
+
+    # Step 5: Compute raw metrics per trader
+    metrics_by_trader: dict[str, LiftMetrics] = {}
+    clv_raw_by_trader: dict[str, Decimal] = {}
+    roi_raw_by_trader: dict[str, Decimal] = {}
+    sharpe_raw_by_trader: dict[str, Decimal] = {}
+    total_pnl_by_trader: dict[str, Decimal] = {}
+    capital_by_trader: dict[str, Decimal] = {}
+
+    for trader_address, positions in positions_by_trader.items():
+        clv = compute_clv(positions, market_avgs)
+        roi = compute_roi(positions)
+        sharpe = compute_sharpe(positions)
+
+        total_pnl = sum(
+            (p.pnl for p in positions if p.pnl is not None),
+            Decimal("0"),
+        )
+
+        # Capital deployed: LONG = size*price, SHORT = size*(1-price)
+        capital = Decimal("0")
+        for pos in positions:
+            if pos.avg_entry_price is None:
+                continue
+            if pos.direction == "LONG":
+                capital += pos.size * pos.avg_entry_price
+            elif pos.direction == "SHORT":
+                capital += pos.size * (Decimal("1") - pos.avg_entry_price)
+
+        metrics_by_trader[trader_address] = LiftMetrics(
+            clv=clv, roi=roi, sharpe=sharpe, position_count=len(positions)
+        )
+        clv_raw_by_trader[trader_address] = clv
+        roi_raw_by_trader[trader_address] = roi
+        sharpe_raw_by_trader[trader_address] = sharpe
+        total_pnl_by_trader[trader_address] = total_pnl
+        capital_by_trader[trader_address] = capital
+
+    # Step 6: Z-score normalize
+    clv_z = compute_z_scores(clv_raw_by_trader)
+    roi_z = compute_z_scores(roi_raw_by_trader)
+    sharpe_z = compute_z_scores(sharpe_raw_by_trader)
+
+    # Step 7: Composite and quintiles
+    composite = compute_composite(clv_z, roi_z, sharpe_z)
+    quintiles = assign_quintiles(composite)
+
+    # Step 8: Persist LiftScore (DELETE old rows for category, INSERT new)
+    session.execute(
+        delete(LiftScore).where(LiftScore.category == category)
+    )
+
+    for trader_address, composite_score in composite.items():
+        metrics = metrics_by_trader[trader_address]
+        lift_score = LiftScore(
+            trader_address=trader_address,
+            category=category,
+            composite_score=composite_score,
+            clv_raw=clv_raw_by_trader[trader_address],
+            clv_zscore=clv_z[trader_address],
+            roi_raw=roi_raw_by_trader[trader_address],
+            roi_zscore=roi_z[trader_address],
+            sharpe_raw=sharpe_raw_by_trader[trader_address],
+            sharpe_zscore=sharpe_z[trader_address],
+            quintile=quintiles[trader_address],
+            position_count=metrics.position_count,
+            total_pnl=total_pnl_by_trader[trader_address],
+            capital_deployed=capital_by_trader[trader_address],
+            window_start=window_start,
+            window_end=now,
+            computed_at=now,
+        )
+        session.add(lift_score)
+
+    session.commit()
+
+    # Step 9: Build and return sorted LiftLeaderboardEntry list
+    entries: list[LiftLeaderboardEntry] = []
+    for trader_address, composite_score in composite.items():
+        metrics = metrics_by_trader[trader_address]
+        entries.append(
+            LiftLeaderboardEntry(
+                trader_address=trader_address,
+                composite_score=composite_score,
+                clv_raw=clv_raw_by_trader[trader_address],
+                clv_zscore=clv_z[trader_address],
+                roi_raw=roi_raw_by_trader[trader_address],
+                roi_zscore=roi_z[trader_address],
+                sharpe_raw=sharpe_raw_by_trader[trader_address],
+                sharpe_zscore=sharpe_z[trader_address],
+                quintile=quintiles[trader_address],
+                position_count=metrics.position_count,
+                total_pnl=total_pnl_by_trader[trader_address],
+                capital_deployed=capital_by_trader[trader_address],
+            )
+        )
+
+    entries.sort(key=lambda x: x.composite_score, reverse=True)
+    return entries
+
+
+def compute_all_category_scores(
+    session: Session,
+    window_days: int = 30,
+    now: datetime | None = None,
+) -> dict[str, list[LiftLeaderboardEntry]]:
+    """Compute lift-based scores for all configured categories.
+
+    Iterates over all categories in MARKET_CONFIGS and calls
+    compute_category_scores for each. Returns empty list for categories
+    with no qualifying data.
+
+    Args:
+        session: SQLAlchemy session.
+        window_days: Rolling window in days (default: 30).
+        now: Optional current timestamp for testing.
+
+    Returns:
+        Dict of {category: list[LiftLeaderboardEntry]}.
+    """
+    from src.config.market_config import MARKET_CONFIGS
+
+    results: dict[str, list[LiftLeaderboardEntry]] = {}
+    for category in MARKET_CONFIGS:
+        leaderboard = compute_category_scores(
+            session, category, window_days=window_days, now=now
+        )
+        results[category] = leaderboard
+
+    return results
