@@ -190,7 +190,7 @@ Plans:
 **Goal:** Replace the entire old scoring engine (WR/concentration/recency/sample_size composite) with backtest-validated z(CLV) + z(ROI) + z(Sharpe) formula; rewire score/leaderboard/analyze CLI commands; rewire signal detection from ExpertiseScore to LiftScore Q5
 **Depends on:** Phase 24
 **Requirements**: LIFT-01, LIFT-02, LIFT-03
-**Plans:** 1/2 plans executed
+**Plans:** 2/2 plans complete
 
 Plans:
 - [ ] 25-01-PLAN.md — LiftScore model + lift_metrics pure functions + scoring pipeline rewire + score/leaderboard CLI rewire
@@ -224,4 +224,4 @@ Plans:
 | 22. Org-Team Mapping | v1.3 | 0/2 | In Progress | - |
 | 23. Contextual Analyze Command | v1.3 | 0/2 | Planned | - |
 | 24. Scoring Rewire | v1.3 | 1/1 | Complete | 2026-03-16 |
-| 25. Lift-Based Scoring v2 | 1/2 | In Progress|  | - |
+| 25. Lift-Based Scoring v2 | 2/2 | Complete   | 2026-03-22 | - |

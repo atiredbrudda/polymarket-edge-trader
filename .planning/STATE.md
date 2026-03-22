@@ -3,14 +3,14 @@ gsd_state_version: 1.0
 milestone: v1.2
 milestone_name: Market Resolution & Deep Classification
 status: completed
-stopped_at: Completed 25-01-PLAN.md
-last_updated: "2026-03-22T13:14:13.334Z"
+stopped_at: Completed 25-02-PLAN.md
+last_updated: "2026-03-22T13:46:55.873Z"
 last_activity: "2026-03-15 — Phase 24 plan 01 complete: rewired 13 functions to MarketEntity, all tests pass."
 progress:
   total_phases: 11
-  completed_phases: 10
+  completed_phases: 11
   total_plans: 21
-  completed_plans: 20
+  completed_plans: 21
   percent: 95
 ---
 
@@ -51,6 +51,8 @@ Recent decisions affecting v1.2:
 - Phase 17 (classification) depends on Phase 15 but not Phase 16 — can potentially parallelize 16+17
 - [Phase 25-01]: Equal-weight z(CLV)+z(ROI)+z(Sharpe) formula — no tuning needed per 348-experiment backtest
 - [Phase 25-01]: DELETE-then-INSERT LiftScore pattern (not append-only): leaderboard only needs latest snapshot
+- [Phase 25-02]: Q5 pre-filtering in query layer; detect_consensus trusts dict membership — cleaner separation
+- [Phase 25-02]: Settings.extra='ignore' added; analyze command replaces entity-alpha batch/crawl mode
 
 ### Roadmap Evolution
 
@@ -83,7 +85,7 @@ None.
 
 ## Session Continuity
 
-Last session: 2026-03-22T13:14:13.331Z
-Stopped at: Completed 25-01-PLAN.md
+Last session: 2026-03-22T13:46:55.870Z
+Stopped at: Completed 25-02-PLAN.md
 Resume file: None
 Next: Run polymarket compute-positions && polymarket score to validate full pipeline
