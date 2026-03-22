@@ -4,7 +4,7 @@ milestone: v1.2
 milestone_name: Market Resolution & Deep Classification
 status: completed
 stopped_at: Completed 25-02-PLAN.md
-last_updated: "2026-03-22T13:46:55.873Z"
+last_updated: "2026-03-22T14:07:42.735Z"
 last_activity: "2026-03-15 — Phase 24 plan 01 complete: rewired 13 functions to MarketEntity, all tests pass."
 progress:
   total_phases: 11

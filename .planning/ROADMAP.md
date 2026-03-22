@@ -224,4 +224,4 @@ Plans:
 | 22. Org-Team Mapping | v1.3 | 0/2 | In Progress | - |
 | 23. Contextual Analyze Command | v1.3 | 0/2 | Planned | - |
 | 24. Scoring Rewire | v1.3 | 1/1 | Complete | 2026-03-16 |
-| 25. Lift-Based Scoring v2 | 2/2 | Complete   | 2026-03-22 | - |
+| 25. Lift-Based Scoring v2 | 2/2 | Complete    | 2026-03-22 | - |
