@@ -76,10 +76,14 @@ class Settings(BaseSettings):
     jbecker_enabled: bool = True  # Enable/disable JBecker tier
     jbecker_batch_size: int = 1000  # Trades per batch insert
 
+    # LLM Configuration (Phase 21 — entity extraction)
+    anthropic_api_key: str | None = None  # Anthropic API key for LLM entity extraction
+
     # Pydantic v2 configuration
     model_config = SettingsConfigDict(
         env_file=".env",
         env_file_encoding="utf-8",
+        extra="ignore",
     )
 
 

@@ -53,6 +53,7 @@ from src.alerts.telegram import TelegramAlerter
 from src.gamma.persist import upsert_gamma_events
 from src.extraction.llm_extractor import extract_entities, EntityResult
 from src.extraction.normalizer import normalize_entities
+from src.extraction.pattern_matcher import PatternMatcher
 from src.db.models import MarketEntity
 from src.gamma.resolution import resolve_market_outcomes
 from src.gamma.classification import (
@@ -63,11 +64,7 @@ from src.gamma.position_resolver import resolve_positions
 from src.org_mapping.queries import (
     get_team_stats_for_trader,
     compute_and_upsert_team_stats,
-    get_entity_alpha_for_trader,
-    upsert_entity_alpha,
-    build_batch_trader_list,
 )
-from src.org_mapping.crawler import load_cursor, save_cursor, clear_cursor
 
 
 def _get_dependencies(settings=None):
@@ -436,103 +433,106 @@ def signals(window, min_confidence, verbose):
 
 
 @cli.command()
-@click.argument("slug")
-@click.option("--top-n", "-n", default=20, help="Number of entries to display")
 @click.option(
-    "--depth",
-    "-d",
-    type=click.Choice(["game", "tournament", "team"]),
-    default="game",
-    help="Taxonomy depth: game (default), tournament, or team",
+    "--category",
+    "-c",
+    default="esports",
+    help="Market category to display (default: esports)",
 )
+@click.option("--top-n", "-n", default=20, help="Number of entries to display")
 @click.option("--verbose", "-v", is_flag=True, help="Enable debug logging")
-def leaderboard(slug, top_n, depth, verbose):
-    """Display rankings at game, tournament, or team level.
+def leaderboard(category, top_n, verbose):
+    """Display lift-based trader rankings by category.
 
-    SLUG is the taxonomy identifier (game, tournament, or team slug).
-    Use --depth to specify the taxonomy level.
+    Shows Q1-Q5 ranked traders with CLV/ROI/Sharpe breakdown.
+    Run 'polymarket score' first to compute lift scores.
 
+    \b
     Examples:
-        polymarket leaderboard esports.cs2
-        polymarket leaderboard esports.cs2.iem-katowice --depth tournament
-        polymarket leaderboard esports.cs2.iem-katowice.navi --depth team
+        polymarket leaderboard
+        polymarket leaderboard --category esports --top-n 10
+        polymarket leaderboard --category epl
     """
     logger.info(
-        f"LEADERBOARD command started (slug={slug}, top_n={top_n}, depth={depth}, verbose={verbose})"
+        f"LEADERBOARD command started (category={category}, top_n={top_n}, verbose={verbose})"
     )
 
     if verbose:
         logger.remove()
         logger.add(sys.stderr, level="DEBUG")
 
-    depth_map = {"game": 1, "tournament": 2, "team": 3}
-    depth_int = depth_map[depth]
-
     console = Console()
 
+    from src.config.market_config import get_market_config
+
+    config = get_market_config(category)
+    if config is None:
+        console.print(
+            f"[bold red]Error: Category '{category}' is not scorable.[/bold red]"
+        )
+        console.print(
+            "\n[bold]Scorable categories:[/bold] esports, epl, politics, la-liga, ligue-1"
+        )
+        return
+
+    leaderboard_entries = []
     with console.status("[bold green]Fetching leaderboard...", spinner="dots"):
         session_factory, _, _, _, _ = _get_dependencies()
 
         with get_session(session_factory) as session:
-            from src.pipeline.queries import (
-                get_game_leaderboard,
-                get_taxonomy_leaderboard,
-            )
+            from src.pipeline.queries import get_lift_leaderboard
 
-            if depth == "game":
-                query = select(TaxonomyNode.slug).where(
-                    TaxonomyNode.slug.like("esports.%"),
-                    TaxonomyNode.node_type == "game",
-                )
-                result = session.execute(query)
-                valid_slugs = result.scalars().all()
+            leaderboard_entries = get_lift_leaderboard(session, category, top_n=top_n)
 
-                if slug not in valid_slugs:
-                    logger.error(
-                        f"Invalid game slug: {slug}. Valid games: {valid_slugs}"
-                    )
-                    console.print(
-                        f"[bold red]Error: Game '{slug}' not found.[/bold red]"
-                    )
-                    console.print("\n[bold]Available games:[/bold]")
-                    for game in sorted(valid_slugs):
-                        console.print(f"  - {game}")
-                    return
+    logger.info(
+        f"Leaderboard loaded: {len(leaderboard_entries)} entries for {category}"
+    )
 
-                leaderboard_entries = get_game_leaderboard(session, slug, top_n=top_n)
-            else:
-                query = select(TaxonomyNode.slug).where(
-                    TaxonomyNode.slug == slug, TaxonomyNode.depth == depth_int
-                )
-                result = session.execute(query)
-                valid_slugs = result.scalars().all()
+    if not leaderboard_entries:
+        console.print(
+            f"[yellow]No scores found for category '{category}'.[/yellow]"
+        )
+        console.print(
+            "[dim]Run 'polymarket score' to compute lift-based scores first.[/dim]"
+        )
+        return
 
-                if slug not in valid_slugs:
-                    logger.error(f"Invalid {depth} slug: {slug}")
-                    console.print(
-                        f"[bold red]Error: {depth.title()} '{slug}' not found.[/bold red]"
-                    )
-                    return
+    # Build Rich table
+    table = Table(title=f"Lift-Based Leaderboard: {category.title()} (Top {top_n})")
+    table.add_column("Rank", style="bold", justify="right", width=4)
+    table.add_column("Trader", style="cyan", width=12)
+    table.add_column("Composite", justify="right", width=9)
+    table.add_column("CLV(z)", justify="right", width=7)
+    table.add_column("ROI(z)", justify="right", width=7)
+    table.add_column("Sharpe(z)", justify="right", width=9)
+    table.add_column("Q", justify="center", width=3)
+    table.add_column("Positions", justify="right", width=9)
+    table.add_column("PnL", justify="right", width=10)
 
-                leaderboard_entries = get_taxonomy_leaderboard(
-                    session, slug, depth_int, top_n=top_n
-                )
+    actionable_label = "[green]ACTIONABLE[/green]" if config.actionable else "[yellow]SIGNAL WEAK[/yellow]"
+    console.print(f"\nCategory: [bold]{category}[/bold]  Status: {actionable_label}")
 
-            entries_data = [
-                {
-                    "rank": idx + 1,
-                    "trader_address": entry.trader_address,
-                    "score": entry.raw_score,
-                    "win_rate": entry.win_rate_component or Decimal("0"),
-                }
-                for idx, entry in enumerate(leaderboard_entries)
-            ]
+    for rank, entry in enumerate(leaderboard_entries, 1):
+        addr_display = entry.trader_address[:8] + "..."
+        q_style = "green" if entry.quintile == 5 else ("red" if entry.quintile == 1 else "white")
+        table.add_row(
+            str(rank),
+            addr_display,
+            f"{float(entry.composite_score):+.3f}",
+            f"{float(entry.clv_zscore):+.3f}",
+            f"{float(entry.roi_zscore):+.3f}",
+            f"{float(entry.sharpe_zscore):+.3f}",
+            f"[{q_style}]Q{entry.quintile}[/{q_style}]",
+            str(entry.position_count),
+            f"{float(entry.total_pnl):+.1f}",
+        )
 
-    logger.info(f"Leaderboard loaded: {len(entries_data)} entries for {slug}")
-
-    depth_label = depth.title() if depth != "game" else "Game"
-    table = format_leaderboard_table(entries_data, slug, depth_label=depth_label)
     console.print(table)
+    q5_count = sum(1 for e in leaderboard_entries if e.quintile == 5)
+    console.print(f"\n  Q5 traders (top 20%): [bold green]{q5_count}[/bold green]")
+    console.print(
+        "[dim]Run 'polymarket leaderboard --category epl' to see other categories.[/dim]"
+    )
     logger.info("LEADERBOARD command completed")
 
 
@@ -1087,7 +1087,10 @@ def discover(niche, closing_within, verbose):
 
         traders_discovered = 0
         entities_extracted = 0
+        pattern_matches = 0
         with get_session(session_factory) as session:
+            matcher = PatternMatcher()
+            matcher.load_from_db(session)
             query = session.query(Market).filter_by(active=True)
             if niche:
                 from sqlalchemy import or_
@@ -1109,8 +1112,13 @@ def discover(niche, closing_within, verbose):
                     )
                     traders_discovered += len(new_traders)
 
-                    raw_result = extract_entities(market.question)
-                    normalized = normalize_entities(raw_result)
+                    raw_result = matcher.match(market.question)
+                    if raw_result:
+                        pattern_matches += 1
+                        normalized = normalize_entities(raw_result)
+                    else:
+                        raw_result = extract_entities(market.question)
+                        normalized = normalize_entities(raw_result)
                     existing = (
                         session.query(MarketEntity)
                         .filter_by(condition_id=market.condition_id)
@@ -1150,6 +1158,7 @@ def discover(niche, closing_within, verbose):
     console.print(f"  Detail markets:  {len(detail_markets)}")
     console.print(f"  New traders:     [green]{traders_discovered}[/green]")
     console.print(f"  Entities stored: [cyan]{entities_extracted}[/cyan]")
+    console.print(f"  Pattern matched: [green]{pattern_matches}[/green]  LLM calls: [yellow]{entities_extracted - pattern_matches}[/yellow]")
     console.print(
         "\n[dim]Run 'polymarket backfill' to fetch history for discovered traders.[/dim]"
     )
@@ -1567,10 +1576,12 @@ def recover_catalog_cmd(verbose):
 @cli.command()
 @click.option("--verbose", "-v", is_flag=True, help="Enable debug logging")
 def score(verbose):
-    """Compute expertise scores for all traders.
+    """Compute lift-based scores for all traders.
 
-    Calculates game-level expertise scores across all traders with trade history.
-    Scores are stored in the expertise_scores table and used for signal detection.
+    Calculates z(CLV) + z(ROI) + z(Sharpe) composite scores for all traders
+    meeting per-category min_positions threshold within the 30-day rolling window.
+    Scores are stored in the lift_scores table. Q5 traders (top 20%) are the
+    primary signal source for position tracking.
 
     \b
     Examples:
@@ -1590,36 +1601,33 @@ def score(verbose):
 
     session_factory, _, _, _, _ = _get_dependencies()
 
-    with console.status(
-        "[bold green]Computing positions from trades...", spinner="dots"
-    ):
-        from src.discovery.trader_discovery import refresh_all_positions
+    with console.status("[bold green]Computing lift-based scores...", spinner="dots"):
+        from src.pipeline.scoring_pipeline import compute_all_category_scores
 
         with get_session(session_factory) as session:
-            pos_stats = refresh_all_positions(session)
-
-    console.print(
-        f"  Positions computed: {pos_stats['positions_computed']} ({pos_stats['traders_processed']} traders)"
-    )
-
-    with console.status("[bold green]Computing expertise scores...", spinner="dots"):
-        from src.pipeline.scoring_pipeline import compute_all_game_scores
-
-        with get_session(session_factory) as session:
-            leaderboards = compute_all_game_scores(session)
-            session.commit()
+            leaderboards = compute_all_category_scores(session)
 
     elapsed = time.time() - start_time
     total_entries = sum(len(entries) for entries in leaderboards.values())
 
     console.print(f"\n[bold green]Scoring complete[/bold green] ({elapsed:.1f}s)")
-    console.print(f"  Games scored:    {len(leaderboards)}")
-    console.print(f"  Total entries:   {total_entries}")
+    console.print(f"  Categories scored: {len(leaderboards)}")
+    console.print(f"  Total traders:     {total_entries}")
+
+    # Show per-category breakdown
+    for category, entries in leaderboards.items():
+        if not entries:
+            continue
+        q5_count = sum(1 for e in entries if e.quintile == 5)
+        console.print(
+            f"  {category:12s}: {len(entries):3d} traders, {q5_count} Q5"
+        )
+
     console.print(
-        "\n[dim]Run 'polymarket detect' to refresh signals, or 'polymarket signals' to view existing signals.[/dim]"
+        "\n[dim]Run 'polymarket leaderboard --category esports' to view Q5 traders.[/dim]"
     )
     logger.info(
-        f"SCORE completed: {len(leaderboards)} games, {total_entries} entries ({elapsed:.1f}s)"
+        f"SCORE completed: {len(leaderboards)} categories, {total_entries} entries ({elapsed:.1f}s)"
     )
 
 
@@ -2474,20 +2482,31 @@ def team_stats(address, verbose):
 
 @cli.command("analyze")
 @click.option(
-    "--crawl", is_flag=True, help="Exhaust all known entities across all traders"
+    "--category",
+    "-c",
+    default="esports",
+    help="Market category to display (default: esports)",
+)
+@click.option(
+    "--signals",
+    is_flag=True,
+    help="Show active Q5 consensus signals with price context instead of leaderboard",
 )
 @click.option("--verbose", "-v", is_flag=True, help="Enable debug logging")
-def analyze(crawl, verbose):
-    """Compute entity-level alpha for traders.
+def analyze(category, signals, verbose):
+    """Show Q5 trader leaderboard or active consensus signals.
 
-    Batch mode (no flags): processes traders from the most recent discover run.
-    Crawler mode (--crawl): exhausts all market_entities across all traders.
+    Default mode: display Q5 leaderboard for the given category with
+    composite score, CLV, ROI, and Sharpe z-score breakdown.
 
-    Alpha threshold: >= 5 resolved positions AND >= 60% win rate on an entity.
+    Signals mode (--signals): show active Q5 consensus signals with
+    expert avg entry price context and sizing guidance.
 
+    \b
     Examples:
         polymarket analyze
-        polymarket analyze --crawl
+        polymarket analyze --category epl
+        polymarket analyze --signals
     """
     if verbose:
         logger.remove()
@@ -2496,91 +2515,145 @@ def analyze(crawl, verbose):
     console = Console()
     session_factory, _, _, _, _ = _get_dependencies()
 
-    if crawl:
-        _run_crawl_mode(console, session_factory)
+    from src.config.market_config import get_market_config
+
+    if signals:
+        _run_analyze_signals_mode(console, session_factory, category)
     else:
-        _run_batch_mode(console, session_factory)
+        _run_analyze_leaderboard_mode(console, session_factory, category)
 
 
-def _run_batch_mode(console, session_factory):
-    """Run batch mode: process latest discover batch traders."""
-    with get_session(session_factory) as session:
-        trader_addresses = build_batch_trader_list(session)
+def _run_analyze_leaderboard_mode(console, session_factory, category):
+    """Show Q5 leaderboard for the given category."""
+    from src.config.market_config import get_market_config
+    from src.pipeline.queries import get_lift_leaderboard
 
-        if not trader_addresses:
-            console.print("[yellow]No new traders in latest discover batch.[/yellow]")
-            return
-
-        alpha_count = 0
-        with console.status("[bold green]Analyzing batch...", spinner="dots") as status:
-            for idx, addr in enumerate(trader_addresses, 1):
-                status.update(
-                    f"[bold green]Processing {idx}/{len(trader_addresses)}: {addr[:10]}..."
-                )
-                upsert_entity_alpha(session, addr)
-                stats = get_entity_alpha_for_trader(session, addr)
-                has_alpha = any(
-                    s["total_resolved"] >= 5
-                    and s["win_rate"] is not None
-                    and s["win_rate"] >= Decimal("60.0")
-                    for s in stats
-                )
-                if has_alpha:
-                    alpha_count += 1
-                label = "1 alpha found" if has_alpha else "no alpha"
-                console.print(f"  {addr[:10]}... — {label}")
-
+    config = get_market_config(category)
+    if config is None:
         console.print(
-            f"[bold]Batch complete: {alpha_count}/{len(trader_addresses)} traders with alpha[/bold]"
+            f"[bold red]Error: Category '{category}' is not scorable.[/bold red]"
         )
+        console.print(
+            "\n[bold]Scorable categories:[/bold] esports, epl, politics, la-liga, ligue-1"
+        )
+        return
 
-
-def _run_crawl_mode(console, session_factory):
-    """Run crawler mode: process all traders with cursor-based resumption."""
     with get_session(session_factory) as session:
-        all_traders = (
-            session.execute(select(Trader.address).order_by(Trader.address))
-            .scalars()
-            .all()
-        )
+        entries = get_lift_leaderboard(session, category, top_n=20)
 
-        if not all_traders:
-            console.print("[yellow]No traders in database.[/yellow]")
+        if not entries:
+            console.print(f"[yellow]No scores computed for '{category}'.[/yellow]")
+            console.print("[dim]Run 'polymarket score' first to compute lift scores.[/dim]")
             return
 
-        cursor = load_cursor()
-        if cursor:
-            console.print(
-                f"[dim]Resuming from cursor: last trader {cursor['last_trader'][:10]}...[/dim]"
+        actionable_label = (
+            "[green]ACTIONABLE[/green]" if config.actionable else "[yellow]SIGNAL WEAK[/yellow]"
+        )
+        console.print(f"\nQ5 Traders — [bold]{category}[/bold]  Status: {actionable_label}")
+
+        table = Table(title=f"Q5 Leaderboard: {category.title()} (Top 20)")
+        table.add_column("Rank", style="bold", justify="right", width=4)
+        table.add_column("Trader", style="cyan", width=12)
+        table.add_column("Composite", justify="right", width=9)
+        table.add_column("CLV(z)", justify="right", width=7)
+        table.add_column("ROI(z)", justify="right", width=7)
+        table.add_column("Sharpe(z)", justify="right", width=9)
+        table.add_column("Q", justify="center", width=3)
+        table.add_column("Positions", justify="right", width=9)
+        table.add_column("PnL", justify="right", width=10)
+
+        for rank, entry in enumerate(entries, 1):
+            addr_display = entry.trader_address[:8] + "..."
+            q_style = "green" if entry.quintile == 5 else ("red" if entry.quintile == 1 else "white")
+            table.add_row(
+                str(rank),
+                addr_display,
+                f"{float(entry.composite_score):+.3f}",
+                f"{float(entry.clv_zscore):+.3f}",
+                f"{float(entry.roi_zscore):+.3f}",
+                f"{float(entry.sharpe_zscore):+.3f}",
+                f"[{q_style}]Q{entry.quintile}[/{q_style}]",
+                str(entry.position_count),
+                f"{float(entry.total_pnl):+.1f}",
             )
-            remaining = [a for a in all_traders if a > cursor["last_trader"]]
-        else:
-            remaining = all_traders
 
-        if not remaining:
-            console.print("[green]All traders already processed.[/green]")
-            clear_cursor()
+        console.print(table)
+        q5_count = sum(1 for e in entries if e.quintile == 5)
+        console.print(f"\n  Q5 traders shown: [bold green]{q5_count}[/bold green]")
+        console.print(
+            "[dim]Use 'polymarket analyze --signals' to see active consensus signals.[/dim]"
+        )
+
+
+def _run_analyze_signals_mode(console, session_factory, category):
+    """Show active Q5 consensus signals with price context."""
+    from src.signals.queries import get_markets_by_expert_activity
+    from src.signals.pipeline import refresh_market_signal
+    from src.config.market_config import get_market_config
+
+    config = get_market_config(category)
+
+    with get_session(session_factory) as session:
+        markets = get_markets_by_expert_activity(session, window_hours=24, min_experts=1)
+
+        if not markets:
+            console.print("[yellow]No Q5 expert activity in last 24 hours.[/yellow]")
+            console.print("[dim]Run 'polymarket score' first to compute lift scores.[/dim]")
             return
 
-        total_upserted = 0
-        with console.status(
-            "[bold green]Crawling entities...", spinner="dots"
-        ) as status:
-            for idx, addr in enumerate(remaining, 1):
-                status.update(
-                    f"[bold green]Processing {idx}/{len(remaining)}: {addr[:10]}..."
-                )
-                count = upsert_entity_alpha(session, addr)
-                total_upserted += count
-                stats = get_entity_alpha_for_trader(session, addr)
-                last_entity = stats[0]["entity_type"] if stats else ""
-                last_game = stats[0]["game"] if stats else None
-                save_cursor(addr, last_entity, last_game, idx)
+        all_signals = []
+        for market_id, expert_count, latest_activity in markets:
+            results = refresh_market_signal(
+                session, market_id,
+                min_experts=3,
+                min_agreement_pct=Decimal("75"),
+            )
+            all_signals.extend(results)
 
-        clear_cursor()
-        console.print(
-            f"[bold]Crawl complete: {total_upserted} entities upserted across {len(remaining)} traders[/bold]"
+    if not all_signals:
+        console.print("[yellow]No active Q5 consensus signals detected.[/yellow]")
+        console.print("[dim]Q5 consensus requires: 3+ experts, 75%+ agreement.[/dim]")
+        return
+
+    actionable_label = (
+        "[green]ACTIONABLE[/green]"
+        if config and config.actionable
+        else "[yellow]SIGNAL WEAK[/yellow]"
+    )
+    console.print(f"\nActive Q5 Consensus Signals  Status: {actionable_label}")
+
+    table = Table(title="Active Q5 Consensus Signals")
+    table.add_column("Market", style="cyan", width=16)
+    table.add_column("Direction", justify="center", width=9)
+    table.add_column("Q5 Count", justify="right", width=8)
+    table.add_column("Expert Avg Entry", justify="right", width=15)
+    table.add_column("Confidence", justify="right", width=10)
+    table.add_column("Actionable", justify="center", width=10)
+
+    for signal in sorted(all_signals, key=lambda s: s.confidence_score, reverse=True):
+        mkt_display = signal.market_id[:12] + "..."
+        dir_style = "green" if signal.direction == "LONG" else "red"
+        entry_display = (
+            f"{float(signal.expert_avg_entry):.3f}"
+            if signal.expert_avg_entry is not None
+            else "n/a"
         )
+        act_display = (
+            "[green]YES[/green]" if config and config.actionable else "[yellow]WEAK[/yellow]"
+        )
+        table.add_row(
+            mkt_display,
+            f"[{dir_style}]{signal.direction}[/{dir_style}]",
+            str(signal.expert_count),
+            entry_display,
+            f"{float(signal.confidence_score):.1f}",
+            act_display,
+        )
+
+    console.print(table)
+    console.print(
+        "\n[dim]Sizing guidance: 0-2 Q5 = 1% bankroll, 3+ Q5 = 2-3% bankroll[/dim]"
+    )
 
 
 if __name__ == "__main__":

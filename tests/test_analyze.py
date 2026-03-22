@@ -16,7 +16,7 @@ from pathlib import Path
 from sqlalchemy import create_engine, select
 from sqlalchemy.orm import Session
 
-from src.db.models import Base, Position, MarketEntity, Trader
+from src.db.models import Base, Position, MarketEntity, Trader, LiftScore
 from src.org_mapping.models import TraderTeamStats, EntityAlpha
 from src.org_mapping.queries import (
     get_entity_alpha_for_trader,
@@ -387,6 +387,25 @@ def test_analyze_cli(tmp_path, monkeypatch):
             )
             session.add(position)
 
+        # Seed a LiftScore so the Q5 leaderboard path has data
+        lift_score = LiftScore(
+            trader_address="0xALPHA123456789012345678901234567890",
+            category="esports",
+            composite_score=Decimal("2.5"),
+            clv_raw=Decimal("0.8"),
+            clv_zscore=Decimal("1.0"),
+            roi_raw=Decimal("0.5"),
+            roi_zscore=Decimal("0.8"),
+            sharpe_raw=Decimal("0.6"),
+            sharpe_zscore=Decimal("0.7"),
+            quintile=5,
+            position_count=5,
+            total_pnl=Decimal("500.0"),
+            capital_deployed=Decimal("1000.0"),
+            window_start=now - timedelta(days=90),
+            window_end=now,
+        )
+        session.add(lift_score)
         session.commit()
 
     def mock_get_dependencies(settings=None):
@@ -399,4 +418,4 @@ def test_analyze_cli(tmp_path, monkeypatch):
     result = runner.invoke(cli, ["analyze"])
 
     assert result.exit_code == 0
-    assert "alpha" in result.output.lower() or "no alpha" in result.output.lower()
+    assert "q5" in result.output.lower() or "leaderboard" in result.output.lower() or "esports" in result.output.lower()

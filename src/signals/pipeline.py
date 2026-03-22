@@ -27,7 +27,7 @@ from decimal import Decimal
 
 from sqlalchemy.orm import Session
 
-from src.db.models import SignalSnapshot, ExpertiseScore
+from src.db.models import SignalSnapshot, LiftScore
 from src.signals.detection import detect_consensus, identify_first_mover, classify_followers
 from src.signals.confidence import calculate_confidence_score
 from src.signals.queries import (
@@ -69,6 +69,7 @@ class SignalResult:
     herding_status: str
     status: str
     computed_at: datetime
+    expert_avg_entry: Decimal | None
 
 
 def refresh_market_signal(
@@ -125,7 +126,7 @@ def refresh_market_signal(
         session.commit()
         return []
 
-    # 2. Query latest expertise scores for traders in those positions
+    # 2. Query latest LiftScore rows for traders in those positions (Q5 only)
     # Use max(computed_at) subquery to get latest score per trader
     from sqlalchemy import select, func
 
@@ -133,28 +134,29 @@ def refresh_market_signal(
 
     subquery = (
         select(
-            ExpertiseScore.trader_address,
-            func.max(ExpertiseScore.computed_at).label("max_computed_at"),
+            LiftScore.trader_address,
+            func.max(LiftScore.computed_at).label("max_computed_at"),
         )
-        .where(ExpertiseScore.trader_address.in_(trader_addresses))
-        .group_by(ExpertiseScore.trader_address)
+        .where(LiftScore.trader_address.in_(trader_addresses))
+        .group_by(LiftScore.trader_address)
         .subquery()
     )
 
     query = (
-        select(ExpertiseScore)
+        select(LiftScore)
         .join(
             subquery,
-            (ExpertiseScore.trader_address == subquery.c.trader_address)
-            & (ExpertiseScore.computed_at == subquery.c.max_computed_at),
+            (LiftScore.trader_address == subquery.c.trader_address)
+            & (LiftScore.computed_at == subquery.c.max_computed_at),
         )
+        .where(LiftScore.quintile == 5)
     )
 
     result = session.execute(query)
     expert_scores_list = result.scalars().all()
 
-    # Build dict {trader_address: raw_score}
-    expert_scores = {score.trader_address: score.raw_score for score in expert_scores_list}
+    # Build dict {trader_address: composite_score} (Q5 pre-filtered)
+    expert_scores = {score.trader_address: score.composite_score for score in expert_scores_list}
 
     # 3. Call detect_consensus
     consensus_results = detect_consensus(positions, expert_scores, min_experts, min_agreement_pct)
@@ -210,6 +212,7 @@ def refresh_market_signal(
             herding_status="not_analyzed",  # Stub per user decision
             status=status,
             computed_at=now,
+            expert_avg_entry=consensus.expert_avg_entry,
         )
         signal_results.append(signal_result)
 
@@ -432,6 +435,7 @@ def get_ranked_signals(
             herding_status="not_analyzed",  # Stub per user decision
             status=snapshot.status,
             computed_at=snapshot.computed_at,
+            expert_avg_entry=None,  # Not stored in SignalSnapshot; re-run pipeline to get
         )
         results.append(result)
 

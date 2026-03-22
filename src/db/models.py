@@ -487,6 +487,50 @@ class GammaEvent(Base):
     __table_args__ = (Index("ix_gamma_event_end_date", "end_date"),)
 
 
+class LiftScore(Base):
+    """Lift-based trader score per category.
+
+    Replaces ExpertiseScore as the active scoring table. Stores the
+    z(CLV) + z(ROI) + z(Sharpe) composite and individual components
+    for debugging and display.
+
+    Each scoring run DELETEs old rows for the category and INSERTs new ones.
+    Only the most recent scoring snapshot is kept (unlike ExpertiseScore which
+    was append-only).
+    """
+
+    __tablename__ = "lift_scores"
+
+    id: Mapped[int] = mapped_column(primary_key=True, autoincrement=True)
+    trader_address: Mapped[str] = mapped_column(String(42), nullable=False)
+    category: Mapped[str] = mapped_column(
+        String(50), nullable=False
+    )  # "esports", "epl", etc.
+    composite_score: Mapped[Decimal] = mapped_column(Numeric(10, 6), nullable=False)
+    clv_raw: Mapped[Decimal] = mapped_column(Numeric(10, 6), nullable=False)
+    clv_zscore: Mapped[Decimal] = mapped_column(Numeric(10, 6), nullable=False)
+    roi_raw: Mapped[Decimal] = mapped_column(Numeric(10, 6), nullable=False)
+    roi_zscore: Mapped[Decimal] = mapped_column(Numeric(10, 6), nullable=False)
+    sharpe_raw: Mapped[Decimal] = mapped_column(Numeric(10, 6), nullable=False)
+    sharpe_zscore: Mapped[Decimal] = mapped_column(Numeric(10, 6), nullable=False)
+    quintile: Mapped[int] = mapped_column(nullable=False)  # 1-5, Q5 = top 20%
+    position_count: Mapped[int] = mapped_column(nullable=False)
+    total_pnl: Mapped[Decimal] = mapped_column(Numeric(20, 6), nullable=False)
+    capital_deployed: Mapped[Decimal] = mapped_column(Numeric(20, 6), nullable=False)
+    window_start: Mapped[datetime] = mapped_column(nullable=False)
+    window_end: Mapped[datetime] = mapped_column(nullable=False)
+    computed_at: Mapped[datetime] = mapped_column(
+        default=datetime.utcnow, nullable=False
+    )
+
+    __table_args__ = (
+        Index("ix_lift_trader_category", "trader_address", "category"),
+        Index("ix_lift_category_composite", "category", "composite_score"),
+        Index("ix_lift_category_quintile", "category", "quintile"),
+        Index("ix_lift_computed_at", "computed_at"),
+    )
+
+
 class MarketEntity(Base):
     """LLM-extracted entities from market question text.
 

@@ -2,74 +2,55 @@
 gsd_state_version: 1.0
 milestone: v1.2
 milestone_name: Market Resolution & Deep Classification
-status: Phase 24 complete. Scoring pipeline rewired to MarketEntity.
-stopped_at: Phase 24 cleared
-last_updated: "2026-03-15T12:00:00.000Z"
-last_activity: "2026-03-15 — Phase 24 plan 01 complete: rewired 13 functions from MarketClassification/TaxonomyNode to MarketEntity in trader_discovery.py, queries.py, scoring_pipeline.py, ingest.py. All 26 modified tests pass. SUMMARY.md written."
+status: shipped
+stopped_at: Milestone v1.2 archived
+last_updated: "2026-03-22T16:30:00.000Z"
+last_activity: "2026-03-22 — v1.2 milestone archived. 11 phases, 21 plans shipped."
 progress:
-  total_phases: 24
-  completed_phases: 23
-  total_plans: 20
-  completed_plans: 19
-  percent: 95
+  total_phases: 11
+  completed_phases: 11
+  total_plans: 21
+  completed_plans: 21
+  percent: 100
 ---
 
 # Project State
 
 ## Project Reference
 
-See: .planning/PROJECT.md (updated 2026-02-21)
+See: .planning/PROJECT.md (updated 2026-03-22)
 
 **Core value:** Surface where smart money is moving in niche prediction markets so the user can see what informed traders are doing and factor that into their own thinking.
-**Current focus:** Phase 24 — Scoring pipeline rewire from MarketClassification to MarketEntity
+**Current focus:** Planning next milestone
 
 ## Current Position
 
-Phase: 24/24 (Scoring Rewire — CLEARED)
-Plan: 24-01 implemented (2026-03-15)
-Status: Complete. 13 functions rewired to MarketEntity, all tests pass.
-Last activity: 2026-03-15 — Phase 24 plan 01 complete: rewired 13 functions to MarketEntity, all tests pass.
+Milestone: v1.2 Market Resolution & Deep Classification — SHIPPED 2026-03-22
+All 11 phases (15-25) complete, 21 plans delivered.
 
-Progress: [███████████████████░] 95% (v1.2 — 23/24 phases complete)
+Progress: [████████████████████] 100% (v1.2 — shipped)
 
 ## Performance Metrics
 
-**Velocity (v1.1):**
-- Total plans completed: 41 (29 from v1.0 + 12 from v1.1 phases 10-14)
-- Codebase: ~32,065 LOC Python (15,400 src + 16,665 tests)
-- Timeline: 2026-02-13 → 2026-02-21 (8 days)
+**Velocity (v1.2):**
+- Phases: 11 (15-25)
+- Plans completed: 21
+- Commits: 109
+- Codebase: ~39,673 LOC Python (19,100 src + 20,573 tests)
+- Timeline: 2026-02-22 → 2026-03-22 (29 days)
 
 ## Accumulated Context
 
 ### Decisions
 
 Decisions are logged in PROJECT.md Key Decisions table.
-Recent decisions affecting v1.2:
-
-- Gamma Events API (`gamma-api.polymarket.com/events`) chosen as authoritative source for both market resolution and deep classification
-- One-time ~30s download (~10MB) is sufficient; no incremental polling needed for v1.2
-- Phase 17 (classification) depends on Phase 15 but not Phase 16 — can potentially parallelize 16+17
+All v1.2 decisions recorded with outcomes.
 
 ### Roadmap Evolution
 
-- v1.0 phases 1-9 completed and archived (milestones/v1.0-ROADMAP.md)
-- v1.1 phases 10-14 completed and archived (milestones/v1.1-ROADMAP.md)
-- v1.2 phases 15-18 defined: Gamma ingestion → Resolution → Classification → E2E validation
-- Phase 19: Self-healing token catalog (auto-patch gaps after backfill)
-- Phase 20: eSports token gap recovery (156 null-token markets, 3,633 trades)
-- Phase 21 added: Market Entity Extraction — LLM extracts team_a, team_b, tournament, game from market question text during discover
-- Phase 22 added: Org-Team Mapping — data model for org→team relationships, cross-game org tracking, normalization layer
-- Phase 23 added: Contextual Analyze Command — query-time win rate per dimension per trader, replaces pre-computed scoring
-- Phase 24 added: Scoring Rewire — replace MarketClassification/TaxonomyNode joins with MarketEntity in 13 functions (trader_discovery, queries, scoring_pipeline, ingest). Unblocks scoring from 89 → 6,105 traders.
-- Phase 25 added: Lift-Based Scoring v2 — replace win_rate_component (40% weight, measures price preference not skill) with avg_lift (outcome − entry_price); add price-context to consensus signals (expert avg entry + live CLOB market line); add fade detection for reliably bad traders as contrarian signals.
-
-### Known Limitations (carry to v1.2 work)
-
-- `markets.outcome=NULL` for all 117k markets — blocks PnL scoring (fixed by Phase 16)
-- `token_catalog.node_path=NULL` — classification stuck at eSports root (fixed by Phase 17)
-- Position.resolved=False for all positions — scoring pipeline can't filter (FIXED by 18-01)
-- Scoring produces empty leaderboards end-to-end until both gaps are closed (validated in Phase 18)
-- Note: E2E leaderboard still empty in practice due to MIN_RESOLVED_MARKETS=5 threshold + Xero100i having 0 positions — data gap, not a code gap
+- v1.0 phases 1-9 archived (milestones/v1.0-ROADMAP.md)
+- v1.1 phases 10-14 archived (milestones/v1.1-ROADMAP.md)
+- v1.2 phases 15-25 archived (milestones/v1.2-ROADMAP.md)
 
 ### Pending Todos
 
@@ -81,7 +62,7 @@ None.
 
 ## Session Continuity
 
-Last session: 2026-03-15T12:00:00.000Z
-Stopped at: Phase 24 cleared
-Resume file: N/A
-Next: Run polymarket compute-positions && polymarket score to validate full pipeline
+Last session: 2026-03-22
+Stopped at: Milestone v1.2 archived
+Resume file: None
+Next: `/gsd:new-milestone` to plan next milestone

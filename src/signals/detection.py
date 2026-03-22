@@ -11,10 +11,12 @@ Design principles:
 - No SQLAlchemy imports (keeps module pure and decoupled)
 
 Consensus detection:
-- Filters to experts only (raw_score > 70)
+- Caller pre-filters to Q5 experts only (LiftScore quintile==5)
+- Any trader present in expert_scores dict is treated as an expert
 - Excludes FLAT positions (only LONG/SHORT count)
 - Agreement % uses total market experts as denominator (not just one direction)
 - Requires both min_experts AND min_agreement_pct thresholds
+- ConsensusResult includes expert_avg_entry: avg entry price across expert positions
 
 First-mover identification:
 - Finds earliest entry_timestamp among experts in a direction
@@ -39,6 +41,8 @@ class ConsensusResult:
         agreement_percentage: Percentage of experts agreeing (expert_count / total_experts * 100)
         expert_positions: List of position objects for experts in this direction
         first_mover_address: Trader address of earliest entry, or None if no timestamps
+        expert_avg_entry: Average avg_entry_price across expert positions in this direction,
+                         or None if no positions have entry prices.
     """
 
     market_id: str
@@ -48,6 +52,7 @@ class ConsensusResult:
     agreement_percentage: Decimal
     expert_positions: list[Any]
     first_mover_address: str | None
+    expert_avg_entry: Decimal | None
 
 
 def detect_consensus(
@@ -64,6 +69,10 @@ def detect_consensus(
 
     FLAT positions are excluded from both numerator and denominator.
 
+    The caller is responsible for pre-filtering expert_scores to Q5 traders only
+    (LiftScore quintile==5). Any trader present in the expert_scores dict is treated
+    as an expert — no additional score threshold is applied here.
+
     Args:
         positions: List of position-like objects with attributes:
                   - market_id: str
@@ -72,8 +81,8 @@ def detect_consensus(
                   - size: Decimal
                   - avg_entry_price: Decimal | None
                   - entry_timestamp: datetime | None
-        expert_scores: Dict mapping trader_address -> raw_score (Decimal).
-                      Only traders with raw_score > 70 are considered experts.
+        expert_scores: Dict mapping trader_address -> composite_score (Decimal).
+                      Any trader present in this dict is treated as an expert (Q5 pre-filtered).
         min_experts: Minimum number of experts required for consensus (default: 3)
         min_agreement_pct: Minimum agreement percentage required (default: 75)
 
@@ -87,7 +96,7 @@ def detect_consensus(
         ...     MockPosition("market1", "trader2", "LONG", Decimal("200"), Decimal("0.5"), datetime(2024, 1, 2)),
         ...     MockPosition("market1", "trader3", "LONG", Decimal("150"), Decimal("0.5"), datetime(2024, 1, 3)),
         ... ]
-        >>> expert_scores = {"trader1": Decimal("75"), "trader2": Decimal("80"), "trader3": Decimal("85")}
+        >>> expert_scores = {"trader1": Decimal("2.5"), "trader2": Decimal("2.0"), "trader3": Decimal("1.9")}
         >>> results = detect_consensus(positions, expert_scores)
         >>> results[0].expert_count
         3
@@ -97,9 +106,9 @@ def detect_consensus(
     if not positions:
         return []
 
-    # Filter to expert positions only (score > 70)
+    # Filter to expert positions only: trader must be present in expert_scores dict (Q5 pre-filtered)
     expert_positions = [
-        p for p in positions if expert_scores.get(p.trader_address, Decimal("0")) > 70
+        p for p in positions if p.trader_address in expert_scores
     ]
 
     # Filter to LONG/SHORT only (exclude FLAT)
@@ -146,6 +155,17 @@ def detect_consensus(
             # Identify first mover
             first_mover = identify_first_mover(group_positions)
 
+            # Compute expert_avg_entry: average of non-None avg_entry_price
+            entry_prices = [
+                p.avg_entry_price
+                for p in group_positions
+                if p.avg_entry_price is not None
+            ]
+            if entry_prices:
+                expert_avg_entry: Decimal | None = sum(entry_prices, Decimal("0")) / Decimal(len(entry_prices))
+            else:
+                expert_avg_entry = None
+
             result = ConsensusResult(
                 market_id=market_id,
                 direction=direction,
@@ -154,6 +174,7 @@ def detect_consensus(
                 agreement_percentage=agreement_pct,
                 expert_positions=group_positions,
                 first_mover_address=first_mover,
+                expert_avg_entry=expert_avg_entry,
             )
             results.append(result)
 

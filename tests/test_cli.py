@@ -61,12 +61,12 @@ class TestSignalsCommand:
 class TestLeaderboardCommand:
     """Test leaderboard subcommand."""
 
-    def test_help_shows_game_argument(self):
-        """leaderboard --help shows game slug argument."""
+    def test_help_shows_category_option(self):
+        """leaderboard --help shows --category option (lift-based leaderboard)."""
         runner = CliRunner()
         result = runner.invoke(cli, ["leaderboard", "--help"])
         assert result.exit_code == 0
-        assert "GAME_SLUG" in result.output or "game" in result.output
+        assert "--category" in result.output or "category" in result.output
 
 
 class TestScoreCommand:

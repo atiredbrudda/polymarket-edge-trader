@@ -16,7 +16,7 @@ from decimal import Decimal
 from sqlalchemy import select, func
 from sqlalchemy.orm import Session
 
-from src.db.models import SignalSnapshot, Position, ExpertiseScore
+from src.db.models import SignalSnapshot, Position, LiftScore
 
 
 def get_latest_signals(
@@ -136,38 +136,33 @@ def get_expert_positions_for_market(
 ) -> list[Position]:
     """Query expert positions for a specific market.
 
-    Returns positions for traders with expertise score > min_score,
-    excluding FLAT positions. This is the database-backed version of
-    the pure function's input assembly.
+    Returns positions for traders in LiftScore quintile==5 (Q5),
+    excluding FLAT positions. The min_score parameter is kept for
+    backward compatibility but is no longer used — Q5 is the threshold.
 
     Args:
         session: SQLAlchemy session
         market_id: Market condition_id
-        min_score: Minimum expertise score threshold (default: 70)
+        min_score: Deprecated — kept for backward compat, ignored. Q5 is the threshold.
 
     Returns:
-        List of Position ORM objects for experts in this market
+        List of Position ORM objects for Q5 experts in this market
 
     Example:
-        # Get all expert positions in a market
+        # Get all Q5 expert positions in a market
         positions = get_expert_positions_for_market(session, "0xMarket123")
-
-        # Get only top-tier experts (score >= 80)
-        top_positions = get_expert_positions_for_market(
-            session, "0xMarket123", min_score=Decimal("80")
-        )
     """
-    # Subquery to find max(computed_at) per trader (latest expertise score)
+    # Subquery to find max(computed_at) per trader (latest LiftScore)
     subquery = (
         select(
-            ExpertiseScore.trader_address,
-            func.max(ExpertiseScore.computed_at).label("max_computed_at"),
+            LiftScore.trader_address,
+            func.max(LiftScore.computed_at).label("max_computed_at"),
         )
-        .group_by(ExpertiseScore.trader_address)
+        .group_by(LiftScore.trader_address)
         .subquery()
     )
 
-    # Main query: join Position -> ExpertiseScore (latest) -> filter
+    # Main query: join Position -> LiftScore (latest) -> filter quintile == 5
     query = (
         select(Position)
         .join(
@@ -175,13 +170,13 @@ def get_expert_positions_for_market(
             Position.trader_address == subquery.c.trader_address,
         )
         .join(
-            ExpertiseScore,
-            (ExpertiseScore.trader_address == subquery.c.trader_address)
-            & (ExpertiseScore.computed_at == subquery.c.max_computed_at),
+            LiftScore,
+            (LiftScore.trader_address == subquery.c.trader_address)
+            & (LiftScore.computed_at == subquery.c.max_computed_at),
         )
         .where(Position.market_id == market_id)
         .where(Position.direction.in_(["LONG", "SHORT"]))
-        .where(ExpertiseScore.raw_score > min_score)
+        .where(LiftScore.quintile == 5)
     )
 
     result = session.execute(query)
@@ -193,25 +188,25 @@ def get_markets_by_expert_activity(
     window_hours: int = 24,
     min_experts: int = 1,
 ) -> list[tuple[str, int, datetime]]:
-    """Query markets with expert position activity within a time window.
+    """Query markets with Q5 expert position activity within a time window.
 
-    Returns markets that have expert (score >70) position activity within
+    Returns markets that have LiftScore quintile==5 position activity within
     the specified time window, grouped by market and ranked by expert count.
 
     Args:
         session: SQLAlchemy session
         window_hours: Time window in hours (default: 24)
-        min_experts: Minimum number of distinct experts required (default: 1)
+        min_experts: Minimum number of distinct Q5 experts required (default: 1)
 
     Returns:
         List of tuples: (market_id, expert_count, latest_activity_timestamp)
         Ordered by expert_count DESC, latest_activity DESC
 
     Example:
-        # Get markets with expert activity in last 24 hours
+        # Get markets with Q5 expert activity in last 24 hours
         markets = get_markets_by_expert_activity(session, window_hours=24)
 
-        # Get markets with 3+ experts active in last 6 hours
+        # Get markets with 3+ Q5 experts active in last 6 hours
         hot_markets = get_markets_by_expert_activity(
             session, window_hours=6, min_experts=3
         )
@@ -219,17 +214,17 @@ def get_markets_by_expert_activity(
     now = datetime.now(UTC)
     window_start = now - timedelta(hours=window_hours)
 
-    # Subquery to find max(computed_at) per trader (latest expertise score)
+    # Subquery to find max(computed_at) per trader (latest LiftScore)
     subquery = (
         select(
-            ExpertiseScore.trader_address,
-            func.max(ExpertiseScore.computed_at).label("max_computed_at"),
+            LiftScore.trader_address,
+            func.max(LiftScore.computed_at).label("max_computed_at"),
         )
-        .group_by(ExpertiseScore.trader_address)
+        .group_by(LiftScore.trader_address)
         .subquery()
     )
 
-    # Main query: join Position -> ExpertiseScore (latest) -> filter by time window
+    # Main query: join Position -> LiftScore (latest) -> filter quintile == 5
     query = (
         select(
             Position.market_id,
@@ -241,12 +236,12 @@ def get_markets_by_expert_activity(
             Position.trader_address == subquery.c.trader_address,
         )
         .join(
-            ExpertiseScore,
-            (ExpertiseScore.trader_address == subquery.c.trader_address)
-            & (ExpertiseScore.computed_at == subquery.c.max_computed_at),
+            LiftScore,
+            (LiftScore.trader_address == subquery.c.trader_address)
+            & (LiftScore.computed_at == subquery.c.max_computed_at),
         )
         .where(Position.last_trade_timestamp >= window_start)
-        .where(ExpertiseScore.raw_score > Decimal("70"))
+        .where(LiftScore.quintile == 5)
         .group_by(Position.market_id)
         .having(func.count(func.distinct(Position.trader_address)) >= min_experts)
         .order_by(

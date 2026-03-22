@@ -53,19 +53,17 @@ def mock_session(mocker, in_memory_db):
 
 
 class TestLeaderboardDepth:
-    """Tests for leaderboard command with --depth flag."""
+    """Tests for leaderboard command structure (updated for lift-based leaderboard)."""
 
-    def test_leaderboard_depth_option_exists(self, runner):
-        """Verify --depth option is available."""
+    def test_leaderboard_category_option_exists(self, runner):
+        """Verify --category option is available (replaces old --depth)."""
         result = runner.invoke(cli, ["leaderboard", "--help"])
-        assert "--depth" in result.output or "-d" in result.output
+        assert "--category" in result.output or "-c" in result.output
 
-    def test_leaderboard_depth_choices(self, runner):
-        """Verify depth choices are game, tournament, team."""
+    def test_leaderboard_has_top_n_option(self, runner):
+        """Verify --top-n option is available."""
         result = runner.invoke(cli, ["leaderboard", "--help"])
-        assert "game" in result.output
-        assert "tournament" in result.output
-        assert "team" in result.output
+        assert "--top-n" in result.output or "-n" in result.output
 
 
 class TestExpertiseCommand:

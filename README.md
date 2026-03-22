@@ -1,782 +1,297 @@
-# Polymarket Smart Money Tracker
+# Polymarket Edge Tracker
 
-A category-agnostic intelligence pipeline that identifies expert niche traders on Polymarket, scores their specialization depth, and surfaces consensus signals when multiple experts converge on positions.
+A category-agnostic intelligence pipeline that identifies edge traders on Polymarket — wallets whose entries consistently beat the market's implied probability — and surfaces consensus signals when multiple edge traders converge on the same position.
 
-**eSports is the first case study** — the architecture generalizes to any Polymarket category (politics, crypto, sports) via taxonomy configuration.
+**eSports is the first case study** — the architecture generalizes to any Polymarket category via taxonomy configuration.
 
 ## What It Does
 
-The Smart Money Tracker helps you see where informed traders are moving in niche prediction markets by:
+1. **Discovers traders** from active eSports markets (event-first approach)
+2. **Extracts entities** (teams, tournaments, games) from each market via pattern matcher + LLM fallback
+3. **Backfills trade history** using a 4-tier cost-optimized hierarchy (JBecker → API → Graph → Blockchain)
+4. **Resolves outcomes** — determines win/loss for every position using Gamma Events API data
+5. **Scores traders** — z(CLV) + z(ROI) + z(Sharpe) composite lift score, Q5 = top 20% = "smart money"
+6. **Detects consensus** — surfaces markets where Q5 traders converge on the same position
+7. **Delivers alerts** — Telegram notifications for new/strengthening signals
 
-1. **Discovering Active Traders** — Event-first approach finds who's trading in active eSports markets
-2. **Evaluating Expertise** — Calculates performance metrics (PnL, win rate, consistency) across multiple timeframes
-3. **Scoring Specialization** — Identifies game-level specialists vs generalists using concentration metrics
-4. **Detecting Consensus** — Surfaces markets where 3+ expert traders (score >70) align on the same position
-5. **Delivering Alerts** — Sends Telegram notifications when new signals emerge or strengthen
-6. **CLI Interface** — Explore markets, traders, signals, and leaderboards via command-line tools
+## Full Pipeline
 
-## Capabilities
+### First-Time Setup (run once)
 
-### CLI Commands
+These commands download reference data and build the classification layer. Safe to re-run (idempotent).
 
 ```bash
-# List active eSports markets
-polymarket markets
+# 1. Download ~8,500 closed eSports events from Gamma API (~30s)
+polymarket ingest-events
 
-# View trader profile (supports partial address matching)
-polymarket trader 0xAbCd
+# 2. Populate markets.outcome (YES/NO) for all resolved markets
+polymarket resolve-outcomes
 
-# Show recent consensus signals
-polymarket signals --window 6      # 6-hour window
-polymarket signals --min-conf 80   # High-confidence signals only
+# 3. Classify tokens at game/tournament/team depth from Gamma event tags
+polymarket classify-tokens
 
-# View game-specific expert leaderboards
-polymarket leaderboard esports.cs2
-polymarket leaderboard esports.lol
-
-# Deep Niche Scoring - Leaderboard at any taxonomy depth
-polymarket leaderboard esports.cs2.iem-katowice --depth tournament
-polymarket leaderboard esports.cs2.iem-katowice.navi --depth team
-
-# Show trader's expertise breakdown across all taxonomy depths
-polymarket expertise 0xTrader123
-
-# Discover hidden specialists in a game
-polymarket specialists esports.cs2
-polymarket specialists esports.cs2 --game-threshold 50 --deep-threshold 80
-
-# Pipeline Decoupling - Run discovery and backfill independently
-polymarket discover                    # Find traders without backfilling
-polymarket backfill                    # Backfill discovered traders
-polymarket status                      # Show discovery/backfill status
-
-# Targeted Market Scanning - Filter discover by niche and time
-polymarket discover --niche esports --niche crypto                    # Scan specific niches
-polymarket discover --closing-within 48h   # Only markets closing within 48 hours
-polymarket discover --niche esports --closing-within 24h             # Combined filters
-
-# Research trader history offline (requires JBecker dataset)
-polymarket research 0xAbCd         # Table output
-polymarket research 0xAbCd --output json --limit 100
-
-# Bulk ingest traders from JBecker dataset
-polymarket batch-analyze 0xAddr1 0xAddr2
-polymarket batch-analyze --file traders.txt
-
-# Score, detect, and alert as standalone steps
-polymarket score                   # Compute expertise scores
-polymarket detect                  # Refresh signal detection
-polymarket alert                   # Deliver Telegram alerts
-
-# Start automated hourly polling
-polymarket poll --interval 60      # Poll every 60 minutes
-
-# Resolve trader profiles (proxy wallet → real Polymarket profiles)
-polymarket resolve-profiles                    # Resolve all pending
-polymarket resolve-profiles --limit 50         # Limit to 50 traders
-
-# Token catalog inspection (eSports token coverage from JBecker dataset)
-polymarket catalog-stats                       # Summary + per-game breakdown
-polymarket catalog-stats --verbose             # Include debug logging
+# 4. Fill any token_catalog gaps (local join → API → category-only fallback)
+polymarket patch-catalog
 ```
 
-### Intelligence Features
+### Regular Pipeline Run
 
-- **Expert Consensus Detection**: Identifies when 3+ expert traders take the same position with 75%+ agreement
-- **Confidence Scoring**: 0-100 score combining agreement %, sample size, and position uniformity
-- **First-Mover Tracking**: Distinguishes early movers from fast-followers (6-hour window)
-- **Signal Event Classification**: NEW, STRENGTHENING, WEAKENING, LOST
-- **Specialization Metrics**: Game-level concentration (CS2 specialist vs eSports generalist)
-- **Deep Niche Scoring**: Tournament and team-level expertise scoring beyond game level
-- **Hidden Specialist Detection**: Finds traders with average game scores but high tournament/team scores
-- **Targeted Market Scanning**: Filter by niche category and time-to-close window
-- **Consistency Detection**: Cross-timeframe stability analysis (30d, 90d, all-time)
-- **Multi-Source Data**: 4-tier cost-optimized ingestion (JBecker → API → Graph → Blockchain)
-- **Offline Research**: Query complete trader histories from 33.5GB historical dataset
-- **Profile Resolution**: Map proxy wallets to real Polymarket user profiles
-- **Token Catalog**: Pre-built mapping of JBecker token IDs → eSports taxonomy (auto-built on first backfill, ~25s)
+Run this whenever you want fresh intelligence. Each step feeds the next.
 
-### Data Sources
+```bash
+# 1. Find traders from active markets + extract entities (teams/tournaments)
+polymarket discover --niche esports
 
-The system uses a **4-tier cost-optimized hierarchy** for trader history:
+# 2. Fetch full trade history for all pending traders
+polymarket backfill
 
-1. **JBecker Dataset** (Primary, FREE)
-   - 33.5GB Parquet archive of all Polymarket trades
-   - Complete historical coverage
-   - Instant DuckDB queries with filter pushdown
-   - Requires one-time download (~140GB uncompressed)
+# 3. Compute win/loss + PnL for each position using resolved outcomes
+polymarket resolve-positions
 
-2. **Polymarket API** (Gap Fill, FREE)
-   - Recent 100 trades per trader
-   - Fills gap between JBecker snapshot and current
-   - 50 req/s rate limit
+# 4. Compute lift-based scores (z(CLV)+z(ROI)+z(Sharpe)), 30-day rolling window
+polymarket score
 
-3. **The Graph** (If Insufficient, PAID)
-   - Polymarket Orderbook subgraph
-   - Instant queries (~3 seconds for 2,000+ trades)
-   - Costs API units
-   - Only called when API maxes out
+# 5. Detect Q5 expert consensus on active markets
+polymarket detect
 
-4. **Polygon Blockchain** (Last Resort, SLOW)
-   - Complete history via RPC
-   - 6-7 hours per trader (49M blocks)
-   - Fallback for maximum completeness
+# 6. Send Telegram alerts for new/strengthening signals
+polymarket alert
+```
 
-**Cost optimization achieved:** JBecker + API covers ~99.9% of traders for FREE, minimizing Graph API consumption for bulk analysis.
+### Copy-Paste One-Liners
+
+```bash
+# First-time setup
+polymarket ingest-events && polymarket resolve-outcomes && polymarket classify-tokens && polymarket patch-catalog
+
+# Regular run
+polymarket discover --niche esports && polymarket backfill && polymarket resolve-positions && polymarket score && polymarket detect && polymarket alert
+
+# Re-score without re-discovering (after code changes, etc.)
+polymarket resolve-positions && polymarket score && polymarket detect
+```
+
+## Viewing Results
+
+```bash
+# Q5 leaderboard (top quintile traders by lift score)
+polymarket analyze
+
+# Q5 consensus signals with price context
+polymarket analyze --signals
+
+# Full leaderboard (all quintiles) by category
+polymarket leaderboard esports
+
+# Active consensus signals
+polymarket signals
+
+# Individual trader profile
+polymarket trader 0xAddress
+
+# Per-team win/loss stats for a trader
+polymarket team-stats 0xAddress
+
+# Pipeline status (discovery/backfill progress)
+polymarket status
+```
+
+## All Commands
+
+| Command | Description |
+|---------|-------------|
+| `discover` | Find traders from active markets, extract entities via LLM |
+| `backfill` | Fetch full trade history (4-tier: JBecker → API → Graph → Blockchain) |
+| `ingest-events` | Download closed eSports events from Gamma API |
+| `resolve-outcomes` | Populate `markets.outcome` from Gamma event data |
+| `classify-tokens` | Set token `node_path`/`depth` from Gamma event tags |
+| `patch-catalog` | Auto-fix token_catalog gaps (3-tier patcher) |
+| `recover-catalog` | Populate `markets.tokens` for null-token eSports markets |
+| `resolve-positions` | Compute win/loss + PnL per position |
+| `score` | Compute lift-based scores (z(CLV)+z(ROI)+z(Sharpe)) |
+| `detect` | Detect Q5 expert consensus signals |
+| `alert` | Deliver signals via Telegram |
+| `analyze` | Q5 leaderboard or `--signals` for consensus signals |
+| `leaderboard` | Full Q1-Q5 ranked traders with CLV/ROI/Sharpe breakdown |
+| `signals` | View active consensus signals |
+| `trader` | Individual trader profile |
+| `team-stats` | Per-team win/loss stats for a trader |
+| `expertise` | Trader expertise breakdown across taxonomy depths |
+| `specialists` | Find hidden specialists in a game |
+| `markets` | List active markets |
+| `status` | Pipeline discovery/backfill progress |
+| `poll` | Automated polling loop (hourly by default) |
+| `research` | Query trader history from JBecker dataset (offline) |
+| `batch-analyze` | Bulk ingest from JBecker dataset |
+| `catalog-stats` | Token catalog coverage statistics |
+| `resolve-profiles` | Map proxy wallets to Polymarket profiles |
+| `backfill-classifications` | Classify markets pre-dating ingest-events |
+| `reset-backfill` | Clear JBecker trades and reset backfill state |
+| `build-index` | Build trader-to-file index for JBecker lookups |
 
 ## Installation
 
 ### Prerequisites
 
-- Python 3.10+ (virtual environment required for Homebrew Python)
+- Python 3.10+
 - SQLite 3.x
-- Telegram bot (optional, for alerts)
 
 ### Setup
-
-1. **Clone and enter directory:**
-   ```bash
-   cd GSD_Polymarket
-   ```
-
-2. **Create virtual environment:**
-   ```bash
-   python3 -m venv .venv
-   source .venv/bin/activate  # On Windows: .venv\Scripts\activate
-   ```
-
-3. **Install dependencies:**
-   ```bash
-   pip install -e .
-   ```
-
-4. **Configure environment variables** (create `.env` or export):
-   ```bash
-   # Optional: Telegram alerts (get from @BotFather)
-   export TELEGRAM_BOT_TOKEN="your_bot_token"
-   export TELEGRAM_CHAT_ID="your_chat_id"
-
-   # Optional: The Graph API for fast historical queries
-   export THE_GRAPH_API_KEY="your_graph_api_key"
-
-   # Optional: JBecker dataset root (extracted archive, see below)
-   export JBECKER_DATA_PATH="./data"
-
-   # Optional: Custom settings
-   export POLYMARKET_API_HOST="https://clob.polymarket.com"
-   export DATABASE_URL="sqlite:///./polymarket.db"
-   export TAXONOMY_PATH="./taxonomy/esports.yaml"
-   ```
-
-5. **Verify installation:**
-   ```bash
-   polymarket --help
-   ```
-
-## Getting Started
-
-### Setup (One-Time)
 
 ```bash
 # Create virtual environment
 python3 -m venv .venv
-source .venv/bin/activate
 
-# Install dependencies
+# Activate it (run this every new terminal session)
+source .venv/bin/activate    # macOS / Linux
+# .venv\Scripts\activate     # Windows
+
+# Install the project
 pip install -e .
 
-# Verify installation
+# Verify
 polymarket --help
 ```
 
----
+### Environment Variables
 
-### Pipeline Walkthrough: Zero to Scored Trader
+Create `.env` or export:
 
-The pipeline has five sequential stages. **If you have already run `discover` and `backfill`, skip to Stage 3.**
-
-**Stage 1 — Discover traders**
 ```bash
-polymarket discover
-```
-Ingests active eSports markets and finds trader addresses from market order books. Each new trader is stored with `backfill_complete=False`. Check what was found:
-```bash
-polymarket status
-```
+# Optional: Telegram alerts
+TELEGRAM_BOT_TOKEN="your_bot_token"
+TELEGRAM_CHAT_ID="your_chat_id"
 
-**Stage 2 — Backfill trade history**
-```bash
-polymarket backfill
-```
-Fetches complete trade history for every pending trader using the 4-tier cost hierarchy (JBecker dataset → Polymarket API → The Graph → Blockchain). Each trader is marked `backfill_complete=True` when done.
+# Optional: The Graph API (paid, for fast historical queries)
+THE_GRAPH_API_KEY="your_key"
 
-**Stage 3 — Enrich with market outcomes**
-```bash
-polymarket ingest-events      # Download ~8,500 closed eSports events from Gamma API
-polymarket resolve-outcomes   # Determine YES/NO outcome for each resolved market
-polymarket resolve-positions  # Compute win/loss + PnL for every trader position
-```
-Pulls historical market results and calculates profit/loss per position. This is what feeds PnL data into expertise scores. Safe to re-run — all three commands are idempotent.
+# Optional: Anthropic API (for LLM entity extraction during discover)
+ANTHROPIC_API_KEY="your_key"
 
-**Stage 4 — Compute expertise scores**
-```bash
-polymarket score
-```
-Rebuilds positions from raw trades and computes game-level expertise scores for every trader with history.
-
-**Stage 5 — View results**
-```bash
-polymarket trader 0xAddress          # Profile and scores for a specific trader
-polymarket leaderboard esports.cs2   # Top CS2 traders ranked by expertise score
-polymarket detect                    # Refresh expert consensus signal detection
-polymarket signals                   # View active consensus signals
+# Optional: JBecker dataset path
+JBECKER_DATA_PATH="./data"
 ```
 
----
+### JBecker Dataset (Optional)
 
-### Quick Reference
-
-| Situation | Commands to run |
-|-----------|----------------|
-| Starting fresh | `discover` → `backfill` → `ingest-events` → `resolve-outcomes` → `resolve-positions` → `score` |
-| Already backfilled new traders | `ingest-events` → `resolve-outcomes` → `resolve-positions` → `score` |
-| Re-score without re-backfilling | `score` |
-| Add more traders, then re-score | `discover` → `backfill` → `score` |
-
----
-
-### Exploring Data
+For offline research and free bulk trader analysis:
 
 ```bash
-# See active markets
-polymarket markets
+# Download (33.5GB compressed)
+wget https://s3.jbecker.dev/data.tar.zst
 
-# Check signals
-polymarket signals
+# Extract (requires zstd)
+brew install zstd  # macOS
+tar --use-compress-program=unzstd -xvf data.tar.zst
 
-# View top CS2 traders
-polymarket leaderboard esports.cs2
+# Configure
+export JBECKER_DATA_PATH="./data"
 
-# Look up a specific trader
-polymarket trader 0x1234...
-```
-
-### Automated Monitoring
-
-```bash
-# Start hourly polling (runs in foreground)
-polymarket poll
-
-# Custom interval (every 30 minutes)
-polymarket poll --interval 30
-
-# Dry-run mode (no alerts)
-polymarket poll --no-alerts
-```
-
-> **Note:** `polymarket poll` covers market ingestion, scoring, and signal detection but does **not** discover or backfill new traders. Run `discover → backfill` separately when you want to add new traders, then `score` to incorporate them.
-
-Press `Ctrl+C` for graceful shutdown.
-
-## Configuration
-
-### Settings File
-
-All settings have sensible defaults. Override via environment variables:
-
-```bash
-# Database
-DATABASE_URL="sqlite:///./polymarket.db"
-
-# API
-POLYMARKET_API_HOST="https://clob.polymarket.com"
-MAX_REQUESTS_PER_SECOND=50
-
-# Taxonomy
-TAXONOMY_PATH="./taxonomy/esports.yaml"
-DETAIL_CATEGORIES='["eSports"]'
-
-# Polling
-POLL_INTERVAL_MINUTES=60
-
-# Alerts
-TELEGRAM_BOT_TOKEN=""           # Leave empty to disable alerts
-TELEGRAM_CHAT_ID=""
-ALERT_RETRY_MAX_ATTEMPTS=5
-ALERT_RETRY_MIN_WAIT=2.0
-ALERT_RETRY_MAX_WAIT=60.0
-ALERT_DEDUP_TTL_MINUTES=60
+# Verify
+polymarket research 0xeffd76b6a4318d50c6f71a16b276c5b279445a86 --limit 10
 ```
 
 ### Telegram Setup (Optional)
 
 1. Create bot via [@BotFather](https://t.me/BotFather)
-2. Copy the HTTP API token → `TELEGRAM_BOT_TOKEN`
-3. Send a message to your bot
-4. GET `https://api.telegram.org/bot<token>/getUpdates`
-5. Find `chat.id` in response → `TELEGRAM_CHAT_ID`
+2. Copy the API token → `TELEGRAM_BOT_TOKEN`
+3. Send a message to your bot, then GET `https://api.telegram.org/bot<token>/getUpdates`
+4. Find `chat.id` → `TELEGRAM_CHAT_ID`
 
-### JBecker Historical Dataset (Optional)
-
-For offline research and bulk trader analysis, download Jon Becker's complete Polymarket trade history:
-
-1. **Download dataset** (33.5GB compressed, ~140GB uncompressed):
-   ```bash
-   wget https://s3.jbecker.dev/data.tar.zst
-   ```
-
-2. **Extract** (requires zstd):
-   ```bash
-   # macOS
-   brew install zstd
-   tar --use-compress-program=unzstd -xvf data.tar.zst
-
-   # Linux
-   sudo apt install zstd
-   tar -I zstd -xvf data.tar.zst
-   ```
-
-3. **Configure path** (point to the extracted root, not a subdirectory):
-   ```bash
-   export JBECKER_DATA_PATH="./data"
-   ```
-   The system expects `$JBECKER_DATA_PATH/polymarket/trades/` for trade data and
-   `$JBECKER_DATA_PATH/polymarket/markets/` for the token catalog build.
-
-4. **Verify**:
-   ```bash
-   polymarket research 0xeffd76b6a4318d50c6f71a16b276c5b279445a86 --limit 10
-   ```
-
-The dataset enables:
-- Complete trader history (no 100-trade API limit)
-- Offline research (no API keys needed)
-- Cost-free bulk analysis (minimal Graph API consumption)
-- Auto-built token catalog for eSports classification (first backfill, ~25s)
-
-## Targeted Market Scanning (v1.1)
-
-Instead of scanning all markets, you can filter by niche category and time-to-close:
-
-### Filters
-
-**--niche / -n**: Filter by category (repeatable)
-- `esports` — eSports markets only
-- `crypto` — Cryptocurrency markets
-- Can combine: `--niche esports --niche crypto`
-
-**--closing-within**: Only scan markets closing within time window
-- `24h` — Markets closing within 24 hours
-- `48h` — Markets closing within 48 hours
-- `7d` — Markets closing within 7 days
-
-### Examples
+## Discover Options
 
 ```bash
-# Discover only eSports markets
+# Filter by category
 polymarket discover --niche esports
-
-# Discover multiple niches
 polymarket discover --niche esports --niche crypto
 
-# Discover markets closing soon
-polymarket discover --closing-within 48h
-
-# Combined: eSports closing within 24 hours
-polymarket discover --niche esports --closing-within 24h
+# Filter by time-to-close
+polymarket discover --closing-within 24h
+polymarket discover --niche esports --closing-within 48h
 ```
-
-### How It Works
-
-The Gamma API client sends niche and time filters directly to the API, avoiding client-side filtering. This reduces:
-- API calls (fewer markets fetched)
-- Processing time (less data to filter)
-- Database writes (only relevant markets stored)
-
-## Deep Niche Scoring (v1.1)
-
-The system now scores expertise at three taxonomy depths:
-
-| Depth | Level | Example | Description |
-|-------|-------|---------|-------------|
-| 1 | Game | `esports.cs2` | CS2 specialists |
-| 2 | Tournament | `esports.cs2.iem-katowice` | IEM Katowice specialists |
-| 3 | Team | `esports.cs2.iem-katowice.navi` | NaVi specialists |
-
-### Key Concepts
-
-**Tournament Concentration**: Fraction of game volume in a specific tournament
-- `tournament_volume / game_volume` — High values = focused on specific tournaments
-
-**Team Concentration**: Fraction of tournament volume for a specific team
-- `team_volume / tournament_volume` — High values = team specialists
-
-**Hidden Specialists**: Traders with average game scores but exceptional tournament/team scores
-- Example: Trader with 55 game score but 85 tournament score in IEM Katowice
-- These are "Chelsea traders" — experts in specific niches
-
-### Commands
-
-```bash
-# Game leaderboard (default, depth=1)
-polymarket leaderboard esports.cs2
-
-# Tournament leaderboard (depth=2)
-polymarket leaderboard esports.cs2.iem-katowice --depth tournament
-
-# Team leaderboard (depth=3)
-polymarket leaderboard esports.cs2.iem-katowice.navi --depth team
-
-# Show trader's expertise breakdown
-polymarket expertise 0xTrader123
-
-# Discover hidden specialists
-polymarket specialists esports.cs2
-
-# Custom thresholds
-polymarket specialists esports.cs2 --game-threshold 50 --deep-threshold 80
-```
-
-## Profile Resolution
-
-Many trader addresses in the database are proxy wallets (smart contracts deployed by Polymarket), not actual user accounts. When you search these on polymarket.com, they show no profile. Profile resolution maps proxy addresses to real Polymarket profiles.
-
-### What It Does
-
-1. **Resolves proxy wallets** — Maps trading addresses to real user profiles
-2. **Identifies real traders** — Filters out bots/contracts without profiles
-3. **Stores profile metadata** — Captures display names, avatars, bio
-
-### How It Works
-
-The system queries the Polymarket public profile API:
-
-```
-GET https://gamma-api.polymarket.com/public-profile?address={address}
-```
-
-Returns:
-- `proxyWallet` — The proxy contract address (on-chain trading address)
-- `name` — Display name
-- `pseudonym` — Auto-generated pseudonym
-- `bio` — User bio
-- `profileImage` — Avatar URL
-- `createdAt` — Profile creation timestamp
-
-### Commands
-
-```bash
-# Resolve profiles for all pending traders
-polymarket resolve-profiles
-
-# Limit to 50 traders
-polymarket resolve-profiles --limit 50
-
-# Show progress and summary
-# Output:
-# Resolving profiles... 200 traders pending
-# [################] 200/200
-# Found 45 profiles, 155 no profile
-```
-
-### Database Columns
-
-The `traders` table gets new columns:
-
-| Column | Type | Description |
-|--------|------|-------------|
-| `proxy_wallet` | VARCHAR(42) | Proxy contract address from API |
-| `display_name` | VARCHAR(100) | Human-readable name or pseudonym |
-| `profile_resolved` | BOOLEAN | Whether we've attempted resolution |
-| `has_profile` | BOOLEAN | Whether profile exists on Polymarket |
-
-The system automatically migrates existing databases by adding these columns.
-
-### Integration
-
-Profile resolution runs after trader discovery to enrich trader data:
-
-```bash
-# Discover new traders
-polymarket discover
-
-# Resolve their profiles
-polymarket resolve-profiles
-
-# Then backfill history
-polymarket backfill
-```
-
-## Token Catalog (v1.2)
-
-The token catalog bridges the JBecker dataset to the eSports scoring pipeline. JBecker trades reference numeric token IDs (e.g., `12345678`), but the classifier works on market question text. The catalog pre-maps each token ID to its eSports taxonomy node so JBecker trades can flow through scoring without per-trade API calls.
-
-### How It Works
-
-1. **Auto-build on first backfill** — When `polymarket backfill` runs for the first time, the system scans the JBecker markets parquet files (~41 files), classifies each market against the eSports taxonomy, and persists the `token_id → taxonomy` mapping in SQLite. This takes ~25 seconds and is only done once.
-2. **Cached thereafter** — Subsequent backfill runs skip the build step (checked via `_catalog_built` flag).
-3. **Esports trades get Market + MarketClassification records** — Catalog hits create the DB rows needed for the scoring pipeline without any Gamma API calls. Catalog misses fall through to the existing Gamma API lookup.
-
-### Schema
-
-The `token_catalog` table stores:
-
-| Column | Type | Description |
-|--------|------|-------------|
-| `token_id` | VARCHAR | JBecker numeric token ID (primary key) |
-| `condition_id` | VARCHAR | Polymarket condition ID |
-| `question` | TEXT | Market question text |
-| `niche_slug` | VARCHAR | e.g. `esports` (NULL if unclassified) |
-| `node_path` | VARCHAR | e.g. `eSports.CS2.IEM Katowice` |
-| `depth` | INTEGER | Taxonomy depth (1=game, 2=tournament, 3=team) |
-| `market_type` | VARCHAR | e.g. `match`, `tournament` |
-
-### Commands
-
-```bash
-# Check catalog coverage (auto-builds if empty)
-polymarket catalog-stats
-
-# Example output:
-# Token Catalog Statistics
-#   Total rows:        142,350
-#   Esports rows:      38,210
-#   Unclassified rows: 104,140
-#
-# Esports Coverage by Game
-#  Game                 Token Rows
-#  CS2                  18,450
-#  League of Legends     9,820
-#  Dota 2                5,210
-#  ...
-```
-
-The catalog is automatically populated on the first `polymarket backfill` run — no manual step required. Run `polymarket catalog-stats` afterward to verify coverage.
 
 ## Architecture
 
-### Data Flow
-
 ```
-Data Sources (4-tier fallback)
-  JBecker Dataset (primary, free, complete historical)
-    ↓ (gap fill)
-  Polymarket API (recent 100 trades, free)
-    ↓ (if insufficient)
-  The Graph (instant queries, costs API units)
-    ↓ (last resort)
-  Polygon Blockchain (complete, 6-7 hours per trader)
-  ↓ (ingest)
-SQLite Database
-  ↓ (classify)
-Taxonomy Matching
-  ↓ (evaluate)
-Performance Metrics
-  ↓ (score)
-Expertise Scores
-  ↓ (detect)
-Consensus Signals
-  ↓ (alert)
-Telegram
+Gamma Events API → gamma_events table
+                     ├── resolve-outcomes → markets.outcome (YES/NO)
+                     └── classify-tokens  → token_catalog.node_path/depth
+
+Polymarket API → discover → traders + market_entities (LLM extraction)
+                    └── backfill → trades (4-tier: JBecker/API/Graph/Blockchain)
+                           └── patch-catalog (auto-heal gaps)
+
+                resolve-positions → positions (win/loss/PnL)
+                    └── score → lift_scores (z(CLV)+z(ROI)+z(Sharpe))
+                        └── detect → signals (Q5 consensus)
+                            └── alert → Telegram
 ```
 
-### Pipeline Stages
+### Data Sources (4-tier hierarchy)
 
-1. **Foundation** (Phase 1): API client, rate limiting, database schema
-2. **Classification** (Phase 2): YAML taxonomy, position tracking, trader discovery
-3. **Evaluation** (Phase 3): PnL calculation, win rates, consistency detection
-4. **Scoring** (Phase 4): Concentration metrics, composite scoring, leaderboards
-5. **Signals** (Phase 5): Consensus detection, confidence scoring, first-mover tracking
-6. **Alerts** (Phase 6): Event detection, Telegram formatting, delivery orchestration
-7. **CLI** (Phase 7): Commands, formatters, polling scheduler
-8. **Blockchain History** (Phase 8): Polygon RPC integration, complete trade history
-9. **JBecker Dataset** (Phase 9): DuckDB query layer, 4-tier cost-optimized ingestion
-10. **Targeted Market Scanning** (Phase 10): Niche filters, time-to-close filters
-11. **Pipeline Decoupling** (Phase 11): Independent discover/backfill commands
-12. **Deep Niche Scoring** (Phase 12): Tournament/team-level expertise, hidden specialists
-13. **Token Catalog** (Phase 13): JBecker token ID → eSports taxonomy mapping, catalog-backed backfill classification
+| Tier | Source | Cost | Speed | Coverage |
+|------|--------|------|-------|----------|
+| 1 | JBecker Dataset | Free | ~100ms | Complete historical |
+| 2 | Polymarket API | Free | ~1s | Recent 100 trades |
+| 3 | The Graph | Paid | ~3s | Complete |
+| 4 | Polygon Blockchain | Free | ~6-7 hrs | Complete |
+
+JBecker + API covers ~99.9% of traders for free.
 
 ### Key Design Decisions
 
-- **Event-first discovery**: Start from active events → find traders → backtrack history
-- **Category-agnostic**: eSports is first case study; architecture extends to any category via taxonomy YAML
-- **4-tier cost optimization**: JBecker (free) → API (free) → Graph (paid) → Blockchain (slow)
-- **Multi-depth scoring**: Game (depth 1), tournament (depth 2), team (depth 3) for granular expertise
-- **Hidden specialist detection**: Find niche experts that game-level scoring misses
-- **Local-first storage**: SQLite with WAL mode (no external database required)
-- **Token bucket rate limiting**: 50 req/s (80% of 60/s sustained limit)
-- **Numeric precision**: Decimal types for all financial calculations (no float errors)
-- **TDD approach**: 613 tests (100% passing) across all components
-
-## Testing
-
-```bash
-# Run all tests
-pytest
-
-# Run specific phase tests
-pytest tests/test_formatters.py
-pytest tests/test_scheduler.py
-
-# Verbose output
-pytest -v
-
-# With coverage
-pytest --cov=src --cov-report=term-missing
-```
-
-**Test Stats:**
-- Total: 613 tests (100% passing)
-- Foundation: 62
-- Classification: 51
-- Evaluation: 121
-- Scoring: 73
-- Signals: 55
-- Alerts: 39
-- CLI: 49
-- Blockchain: 35
-- JBecker Dataset: 53
-- Deep Scoring: 29
-- Token Catalog: 11 (builder: 6, integration: 5)
+- **Event-first discovery** — start from active events, not the full trader database
+- **Lift-based scoring** — z(CLV)+z(ROI)+z(Sharpe), validated through 348-experiment backtest
+- **Pattern-match-first entity extraction** — regex before LLM to minimize API costs
+- **Category-agnostic** — add categories via YAML taxonomy files
+- **Local-first** — SQLite with WAL mode, no external database needed
+- **Idempotent commands** — every pipeline step is safe to re-run
 
 ## Project Structure
 
 ```
-GSD_Polymarket/
-├── src/
-│   ├── api/           # Polymarket CLOB client
-│   ├── db/            # SQLAlchemy models and session
-│   ├── config/        # Settings and configuration
-│   ├── pipeline/      # Ingestion, scoring, queries
-│   ├── taxonomy/      # YAML loader and classifier
-│   ├── signals/       # Consensus detection
-│   ├── alerts/        # Telegram delivery
-│   ├── cli/           # Click commands and formatters
-│   ├── blockchain/    # Polygon RPC client
-│   ├── graph/         # The Graph subgraph client
-│   ├── datasources/   # JBecker dataset & converters
-│   └── catalog/       # Token catalog builder (JBecker token → taxonomy)
-├── tests/             # Comprehensive test suite (509 tests)
-├── taxonomy/          # eSports game taxonomy (YAML)
-├── data/              # JBecker dataset (optional, 140GB)
-├── .planning/         # GSD workflow artifacts
-└── pyproject.toml     # Dependencies and entry point
+src/
+├── api/           # Polymarket CLOB + Gamma API clients
+├── db/            # SQLAlchemy models and session
+├── config/        # Settings
+├── pipeline/      # Ingestion, scoring, queries
+├── taxonomy/      # YAML loader and classifier
+├── signals/       # Consensus detection
+├── alerts/        # Telegram delivery
+├── cli/           # Click commands and formatters
+├── blockchain/    # Polygon RPC client
+├── graph/         # The Graph subgraph client
+├── datasources/   # JBecker dataset & converters
+├── catalog/       # Token catalog builder + patcher
+├── gamma/         # Gamma events ingestion, resolution, classification
+├── extraction/    # LLM + pattern matcher entity extraction
+└── org_mapping/   # TraderTeamStats, team-level queries
 ```
 
-## Extending to New Categories
+## Testing
 
-The pipeline is designed to be category-agnostic. To add a new category:
-
-1. **Create taxonomy YAML** (e.g., `taxonomy/politics.yaml`):
-   ```yaml
-   - slug: politics.us-elections
-     keywords: [election, presidential, senate]
-     teams: ["Democratic Party", "Republican Party"]
-   ```
-
-2. **Update settings**:
-   ```bash
-   export DETAIL_CATEGORIES='["eSports", "Politics"]'
-   ```
-
-3. **Discover and score**:
-   ```bash
-   polymarket discover && polymarket backfill && polymarket score
-   ```
-
-The same expertise scoring, consensus detection, and alerting logic applies to any category.
-
-## Performance
-
-- **Average plan execution**: 5.56 minutes
-- **score + detect** (compute scores → detect signals): ~2-5 minutes
-- **JBecker query**: ~100ms for 2,000+ trades (DuckDB filter pushdown)
-- **The Graph query**: ~3 seconds for complete trader history (if dataset unavailable)
-- **Blockchain scan**: 6-7 hours per trader for complete history (fallback only)
-- **Database size**: ~50-100 MB for 1000 markets, 5000 traders
-- **API rate**: 50 req/s with automatic retry on 429
-- **Memory footprint**: ~200 MB typical
-
-## Debugging
-
-All CLI commands automatically log to `logs/cli_session.log` for debugging and monitoring.
-
-**View logs in real-time:**
 ```bash
-./view_logs.sh tail
+pytest              # Run all tests
+pytest -v           # Verbose
+pytest --cov=src    # With coverage
 ```
-
-**Quick check (last 50 lines):**
-```bash
-./view_logs.sh last
-```
-
-**Search for errors:**
-```bash
-grep ERROR logs/cli_session.log
-```
-
-See [LOGGING.md](LOGGING.md) for complete logging documentation.
 
 ## Troubleshooting
 
-### "No module named 'src'"
+**"No module named 'src'"** — Activate venv: `source .venv/bin/activate && pip install -e .`
 
-Ensure you're in the virtual environment:
-```bash
-source .venv/bin/activate
-pip install -e .
-```
+**"Rate limit exceeded"** — Auto-retries with backoff. Lower rate: `export MAX_REQUESTS_PER_SECOND=30`
 
-### "Rate limit exceeded"
+**"No signals found"** — Normal if no Q5 consensus exists. Run `polymarket score && polymarket detect`.
 
-The client automatically retries with exponential backoff. If persistent:
-```bash
-export MAX_REQUESTS_PER_SECOND=30  # Lower rate
-```
+**Database locked** — Check for other processes: `fuser polymarket.db`
 
-### "No signals found"
+## Version History
 
-This is normal if no expert consensus exists yet. Re-score and re-detect:
-```bash
-polymarket score && polymarket detect
-```
-
-### Database locked
-
-SQLite WAL mode prevents most locks. If persistent, check for other processes:
-```bash
-fuser polymarket.db  # Linux/Mac
-```
-
-## License
-
-MIT License - see LICENSE file for details.
-
-## Contributing
-
-This project was built using the GSD (Get Shit Done) workflow. See `.planning/` for complete planning artifacts, execution history, and verification reports.
-
-## Roadmap
-
-**v1.2 (Current)**: Token Catalog & JBecker Classification
-- ✅ Phase 13: eSports token catalog (JBecker token ID → taxonomy mapping)
-- ✅ Catalog-backed JBecker backfill (no Gamma API calls for known eSports tokens)
-- ✅ `catalog-stats` CLI command with per-game breakdown
-- ✅ 613 tests passing (100%)
-- ✅ Production-ready
+- **v1.2** (2026-03-22) — Gamma events integration, market resolution, deep classification, entity-level intelligence, lift-based scoring v2. 11 phases (15-25).
+- **v1.1** (2026-02-21) — Targeted scanning, pipeline decoupling, deep category scoring, JBecker token catalog. 5 phases (10-14).
+- **v1.0** (2026-02-13) — Foundation: API client, taxonomy, evaluation, scoring, signals, alerts, CLI, blockchain, JBecker dataset. 9 phases (1-9).
 
 ---
 
-**v1.1 (Previous)**: Targeted Scanning & Deep Niche Scoring
-- ✅ Phase 10: Targeted Market Scanning (niche + time filters)
-- ✅ Phase 11: Pipeline Decoupling (independent discover/backfill)
-- ✅ Phase 12: Deep Niche Scoring (tournament/team levels, hidden specialists)
-- ✅ Profile resolution (proxy wallet → real Polymarket profile mapping)
-- ✅ Production-ready
-
----
-
-**Questions?** Check `.planning/PROJECT.md` for design decisions and requirements.
-
-**Built with**: Python, SQLAlchemy, Click, Rich, py-clob-client, python-telegram-bot, DuckDB, web3.py, gql
+**Built with**: Python, SQLAlchemy, Click, Rich, py-clob-client, DuckDB, Anthropic SDK
