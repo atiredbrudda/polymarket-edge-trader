@@ -67,14 +67,14 @@ class TelegramAlerter:
         self.min_wait = min_wait
         self.max_wait = max_wait
 
-    def validate(self) -> None:
+    async def validate(self) -> None:
         """Validate bot token by calling get_me().
 
         Raises:
             ValueError: If token is invalid or bot cannot be reached
         """
         try:
-            self.bot.get_me()
+            await self.bot.get_me()
         except InvalidToken as e:
             raise ValueError(f"Invalid Telegram bot token: {e}") from e
         except Exception as e:
@@ -159,7 +159,9 @@ class TelegramAlerter:
         )
 
         # Validate token at startup
-        alerter.validate()
+        import asyncio
+
+        asyncio.run(alerter.validate())
         logger.info("Telegram bot validated successfully")
 
         return alerter

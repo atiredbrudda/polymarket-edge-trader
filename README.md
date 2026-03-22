@@ -63,6 +63,18 @@ polymarket research 0xAbCd --output json --limit 100
 polymarket batch-analyze 0xAddr1 0xAddr2
 polymarket batch-analyze --file traders.txt
 
+# Market outcome resolution (v1.2)
+polymarket ingest-events           # Download closed eSports events from Gamma API
+polymarket resolve-outcomes        # Determine YES/NO outcome for each resolved market
+polymarket classify-tokens         # Deep eSports taxonomy classification
+polymarket backfill-classifications  # Classify markets that pre-date ingest-events
+polymarket resolve-positions       # Compute win/loss + PnL for every trader position
+
+# Entity-level alpha (v1.2)
+polymarket analyze                 # Compute entity alpha for latest discover batch
+polymarket analyze --crawl         # Crawl all traders with cursor-based resumption
+polymarket team-stats 0xAddress    # Show team-level win rates for a specific trader
+
 # Score, detect, and alert as standalone steps
 polymarket score                   # Compute expertise scores
 polymarket detect                  # Refresh signal detection
@@ -191,18 +203,16 @@ polymarket --help
 
 ---
 
-### Pipeline Walkthrough: Zero to Scored Trader
+### Pipeline Walkthrough: Zero to Full Intelligence
 
-The pipeline has five sequential stages. **If you have already run `discover` and `backfill`, skip to Stage 3.**
+The full pipeline has seven sequential stages. Run them in order on a fresh database. Each stage is idempotent — safe to re-run if interrupted.
 
 **Stage 1 — Discover traders**
 ```bash
 polymarket discover
+polymarket status   # Check how many traders are pending backfill
 ```
-Ingests active eSports markets and finds trader addresses from market order books. Each new trader is stored with `backfill_complete=False`. Check what was found:
-```bash
-polymarket status
-```
+Ingests active eSports markets and finds trader addresses from market order books. Each new trader is stored with `backfill_complete=False`.
 
 **Stage 2 — Backfill trade history**
 ```bash
@@ -210,26 +220,41 @@ polymarket backfill
 ```
 Fetches complete trade history for every pending trader using the 4-tier cost hierarchy (JBecker dataset → Polymarket API → The Graph → Blockchain). Each trader is marked `backfill_complete=True` when done.
 
-**Stage 3 — Enrich with market outcomes**
+**Stage 3 — Resolve market outcomes**
 ```bash
-polymarket ingest-events      # Download ~8,500 closed eSports events from Gamma API
+polymarket ingest-events      # Download ~8,500 closed eSports events from Gamma API (~30s)
 polymarket resolve-outcomes   # Determine YES/NO outcome for each resolved market
-polymarket resolve-positions  # Compute win/loss + PnL for every trader position
 ```
-Pulls historical market results and calculates profit/loss per position. This is what feeds PnL data into expertise scores. Safe to re-run — all three commands are idempotent.
+Downloads historical Gamma event data and maps each token to its win/loss outcome. Required before position scoring.
 
-**Stage 4 — Compute expertise scores**
+**Stage 4 — Classify tokens and resolve positions**
+```bash
+polymarket classify-tokens           # Deep eSports taxonomy classification (game → tournament → team)
+polymarket backfill-classifications  # Classify markets that pre-date the Gamma events download
+polymarket resolve-positions         # Compute win/loss + PnL for every trader position
+```
+Classifies each market token into the eSports taxonomy tree, then scores each trader position as a win or loss. This feeds PnL and win-rate data into all downstream scoring.
+
+**Stage 5 — Compute expertise scores**
 ```bash
 polymarket score
 ```
-Rebuilds positions from raw trades and computes game-level expertise scores for every trader with history.
+Computes game-level expertise scores (PnL, win rate, consistency, concentration) for every trader with resolved positions.
 
-**Stage 5 — View results**
+**Stage 6 — Compute entity-level alpha**
 ```bash
-polymarket trader 0xAddress          # Profile and scores for a specific trader
-polymarket leaderboard esports.cs2   # Top CS2 traders ranked by expertise score
-polymarket detect                    # Refresh expert consensus signal detection
-polymarket signals                   # View active consensus signals
+polymarket analyze           # Process latest discover batch (incremental)
+polymarket analyze --crawl   # Process all traders in DB (resumable if interrupted)
+```
+Computes per-entity win rates broken down by team, tournament, and game. Identifies traders with statistically significant edge on specific entities (≥5 resolved positions, ≥60% win rate).
+
+**Stage 7 — View results**
+```bash
+polymarket trader 0xAddress             # Full profile with scores
+polymarket leaderboard esports.cs2      # Top CS2 traders by expertise score
+polymarket team-stats 0xAddress         # Team-level win rates for a specific trader
+polymarket detect                       # Detect expert consensus signals
+polymarket signals                      # View active consensus signals
 ```
 
 ---
@@ -238,10 +263,12 @@ polymarket signals                   # View active consensus signals
 
 | Situation | Commands to run |
 |-----------|----------------|
-| Starting fresh | `discover` → `backfill` → `ingest-events` → `resolve-outcomes` → `resolve-positions` → `score` |
-| Already backfilled new traders | `ingest-events` → `resolve-outcomes` → `resolve-positions` → `score` |
-| Re-score without re-backfilling | `score` |
-| Add more traders, then re-score | `discover` → `backfill` → `score` |
+| Starting fresh (full pipeline) | `discover` → `backfill` → `ingest-events` → `resolve-outcomes` → `classify-tokens` → `backfill-classifications` → `resolve-positions` → `score` → `analyze` |
+| New traders added, refresh intelligence | `discover` → `backfill` → `resolve-positions` → `score` → `analyze` |
+| Re-score without re-backfilling | `score` → `analyze` |
+| Refresh signals only | `detect` |
+| Re-run entity alpha on all traders | `analyze --crawl` |
+| Patch token catalog gaps | `patch-catalog` |
 
 ---
 
@@ -566,16 +593,22 @@ Data Sources (4-tier fallback)
   The Graph (instant queries, costs API units)
     ↓ (last resort)
   Polygon Blockchain (complete, 6-7 hours per trader)
-  ↓ (ingest)
-SQLite Database
-  ↓ (classify)
-Taxonomy Matching
-  ↓ (evaluate)
-Performance Metrics
+  ↓ (ingest: discover + backfill)
+SQLite Database (trades, markets, positions)
+  ↓ (ingest-events + resolve-outcomes)
+Market Outcomes (YES/NO per resolved market)
+  ↓ (classify-tokens + backfill-classifications)
+Token Classification (game → tournament → team depth)
+  ↓ (extract entities via LLM)
+Market Entities (team_a, team_b, tournament, game per market)
+  ↓ (resolve-positions)
+Resolved Positions (win/loss + PnL per trader per market)
   ↓ (score)
-Expertise Scores
+Expertise Scores (game-level: PnL, win rate, concentration)
+  ↓ (analyze)
+Entity Alpha (team/tournament/game win rates per trader)
   ↓ (detect)
-Consensus Signals
+Consensus Signals (3+ experts, 75%+ agreement)
   ↓ (alert)
 Telegram
 ```
@@ -594,7 +627,17 @@ Telegram
 10. **Targeted Market Scanning** (Phase 10): Niche filters, time-to-close filters
 11. **Pipeline Decoupling** (Phase 11): Independent discover/backfill commands
 12. **Deep Niche Scoring** (Phase 12): Tournament/team-level expertise, hidden specialists
-13. **Token Catalog** (Phase 13): JBecker token ID → eSports taxonomy mapping, catalog-backed backfill classification
+13. **Token Catalog** (Phase 13): JBecker token ID → eSports taxonomy mapping
+14. **Timestamp Fix** (Phase 14): Block-anchored timestamps for JBecker trades
+15. **Gamma Events Ingestion** (Phase 15): Bulk download of closed eSports events
+16. **Market Outcome Resolution** (Phase 16): YES/NO determination per resolved market
+17. **Deep Token Classification** (Phase 17): Game → tournament → team depth classification
+18. **End-to-End Validation** (Phase 18): Full pipeline smoke test with resolved positions
+19. **Self-Healing Token Catalog** (Phase 19): Auto-patch catalog gaps post-backfill
+20. **eSports Token Gap Recovery** (Phase 20): Recover 156 null-token markets
+21. **Market Entity Extraction** (Phase 21): LLM extracts team_a, team_b, tournament, game per market
+22. **Org-Team Mapping** (Phase 22): TraderTeamStats model, cross-game team tracking
+23. **Contextual Analyze Command** (Phase 23): Per-entity alpha (team/tournament/game win rates)
 
 ### Key Design Decisions
 
@@ -644,7 +687,7 @@ pytest --cov=src --cov-report=term-missing
 ```
 GSD_Polymarket/
 ├── src/
-│   ├── api/           # Polymarket CLOB client
+│   ├── api/           # Polymarket CLOB + Gamma API clients
 │   ├── db/            # SQLAlchemy models and session
 │   ├── config/        # Settings and configuration
 │   ├── pipeline/      # Ingestion, scoring, queries
@@ -655,10 +698,13 @@ GSD_Polymarket/
 │   ├── blockchain/    # Polygon RPC client
 │   ├── graph/         # The Graph subgraph client
 │   ├── datasources/   # JBecker dataset & converters
-│   └── catalog/       # Token catalog builder (JBecker token → taxonomy)
-├── tests/             # Comprehensive test suite (509 tests)
+│   ├── catalog/       # Token catalog builder + recovery
+│   ├── gamma/         # Gamma events ingestion, resolution, classification
+│   ├── extraction/    # LLM entity extraction (team_a, team_b, tournament, game)
+│   └── org_mapping/   # Org-team mapping, TraderTeamStats, EntityAlpha, crawler
+├── tests/             # Comprehensive test suite
 ├── taxonomy/          # eSports game taxonomy (YAML)
-├── data/              # JBecker dataset (optional, 140GB)
+├── data/              # JBecker dataset (optional, ~140GB)
 ├── .planning/         # GSD workflow artifacts
 └── pyproject.toml     # Dependencies and entry point
 ```
@@ -759,20 +805,33 @@ This project was built using the GSD (Get Shit Done) workflow. See `.planning/` 
 
 ## Roadmap
 
-**v1.2 (Current)**: Token Catalog & JBecker Classification
-- ✅ Phase 13: eSports token catalog (JBecker token ID → taxonomy mapping)
-- ✅ Catalog-backed JBecker backfill (no Gamma API calls for known eSports tokens)
-- ✅ `catalog-stats` CLI command with per-game breakdown
-- ✅ 613 tests passing (100%)
+**v1.2 (Complete)**: Market Resolution, Deep Classification & Entity Intelligence
+- ✅ Phase 15: Gamma Events Ingestion (`ingest-events`)
+- ✅ Phase 16: Market Outcome Resolution (`resolve-outcomes`)
+- ✅ Phase 17: Deep Token Classification (`classify-tokens`, `backfill-classifications`)
+- ✅ Phase 18: End-to-End Validation (positions resolve correctly through full pipeline)
+- ✅ Phase 19: Self-Healing Token Catalog (`patch-catalog` — auto-repairs gaps post-backfill)
+- ✅ Phase 20: eSports Token Gap Recovery (`recover-catalog` — 156 null-token markets)
+- ✅ Phase 21: Market Entity Extraction (LLM extracts team_a, team_b, tournament, game)
+- ✅ Phase 22: Org-Team Mapping (TraderTeamStats model, `team-stats` command)
+- ✅ Phase 23: Contextual Analyze Command (`analyze`, `analyze --crawl`)
 - ✅ Production-ready
 
 ---
 
-**v1.1 (Previous)**: Targeted Scanning & Deep Niche Scoring
+**v1.1 (Complete)**: Targeted Scanning, Deep Niche Scoring & JBecker Integration
 - ✅ Phase 10: Targeted Market Scanning (niche + time filters)
 - ✅ Phase 11: Pipeline Decoupling (independent discover/backfill)
 - ✅ Phase 12: Deep Niche Scoring (tournament/team levels, hidden specialists)
+- ✅ Phase 13: eSports Token Catalog (JBecker token ID → taxonomy mapping)
+- ✅ Phase 14: Timestamp Fix & Pipeline Decomposition
 - ✅ Profile resolution (proxy wallet → real Polymarket profile mapping)
+- ✅ Production-ready
+
+---
+
+**v1.0 (Complete)**: Foundation
+- ✅ Phases 1–9: API client, classification, evaluation, scoring, signals, alerts, CLI, blockchain, JBecker dataset
 - ✅ Production-ready
 
 ---
