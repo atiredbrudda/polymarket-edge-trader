@@ -8,7 +8,7 @@ Category-agnostic intelligence pipeline that discovers expert niche traders on P
 
 - ✅ **v1.0 MVP** — Phases 1-9 (shipped 2026-02-13)
 - ✅ **v1.1 Targeted Scanning & Deep Niche Scoring** — Phases 10-14 (shipped 2026-02-21)
-- 🚧 **v1.2 Market Resolution & Deep Classification** — Phases 15-18 (in progress)
+- ✅ **v1.2 Market Resolution & Deep Classification** — Phases 15-25 (shipped 2026-03-22)
 
 ## Phases
 
@@ -42,159 +42,24 @@ See `.planning/milestones/v1.1-ROADMAP.md` for full details.
 
 </details>
 
-### 🚧 v1.2 Market Resolution & Deep Classification (In Progress)
+<details>
+<summary>✅ v1.2 Market Resolution & Deep Classification (Phases 15-25) — SHIPPED 2026-03-22</summary>
 
-**Milestone Goal:** Integrate Gamma Events API data to fix the two critical v1.1 gaps — market outcome resolution and deep token classification — enabling the scoring pipeline to produce real leaderboard results end-to-end.
+- [x] Phase 15: Gamma Events Ingestion (2/2 plans) — completed 2026-02-22
+- [x] Phase 16: Market Outcome Resolution (2/2 plans) — completed 2026-02-23
+- [x] Phase 17: Deep Token Classification (2/2 plans) — completed 2026-02-24
+- [x] Phase 18: End-to-End Validation (2/2 plans) — completed 2026-02-26
+- [x] Phase 19: Self-Healing Token Catalog (2/2 plans) — completed 2026-03-01
+- [x] Phase 20: eSports Token Gap Recovery (2/2 plans) — completed 2026-03-05
+- [x] Phase 21: Market Entity Extraction (2/2 plans) — completed 2026-03-08
+- [x] Phase 22: Org-Team Mapping (2/2 plans) — completed 2026-03-10
+- [x] Phase 23: Contextual Analyze Command (2/2 plans) — completed 2026-03-12
+- [x] Phase 24: Scoring Rewire (1/1 plan) — completed 2026-03-16
+- [x] Phase 25: Lift-Based Scoring v2 (2/2 plans) — completed 2026-03-22
 
-- [ ] **Phase 15: Gamma Events Ingestion** — Download and persist ~8,500 closed eSports events from Gamma API with full metadata
-- [ ] **Phase 16: Market Outcome Resolution** — Populate `markets.outcome` for all resolved markets using stored Gamma event data
-- [ ] **Phase 17: Deep Token Classification** — Enrich token catalog with game/tournament/team `node_path` from Gamma event tags
-- [ ] **Phase 18: End-to-End Validation** — Verify the scoring pipeline produces a real leaderboard on JBecker data
-- [ ] **Phase 19: Self-Healing Token Catalog** — Automatically detect and patch unclassifiable trades after every backfill run, ensuring no trade silently lacks game/category classification
-- [ ] **Phase 20: eSports Token Gap Recovery** — Recover the 156 null-token eSports markets (3,633 trades, 1,451 traders) by fetching token IDs from Gamma Events API and hardening the ingest path that caused the gap
+See `.planning/milestones/v1.2-ROADMAP.md` for full details.
 
-## Phase Details
-
-### Phase 15: Gamma Events Ingestion
-**Goal**: Gamma Events API data is downloaded and persisted locally, providing the authoritative source for market resolution and deep classification
-**Depends on**: Phase 14 (v1.1 complete)
-**Requirements**: GAMMA-01, GAMMA-02
-**Success Criteria** (what must be TRUE):
-  1. User can run a single CLI command that downloads all ~8,500 closed eSports events from `gamma-api.polymarket.com/events` in ~30 seconds
-  2. Downloaded events are persisted to the local database and survive process restart
-  3. Stored event records include `clobTokenIds` (linking to markets), `outcomePrices` (winning side), and hierarchical tags (game/tournament/team slugs)
-  4. Re-running the command is idempotent — no duplicate events created, existing data updated or skipped cleanly
-**Plans**: 2 plans
-Plans:
-- [ ] 15-01-PLAN.md — GammaEvent ORM model + GammaMarketClient bulk download method
-- [ ] 15-02-PLAN.md — Persistence layer + polymarket ingest-events CLI command
-
-### Phase 16: Market Outcome Resolution
-**Goal**: Every resolved market in the database has `markets.outcome` populated, enabling PnL calculations in the scoring pipeline
-**Depends on**: Phase 15
-**Requirements**: RESOL-01, RESOL-02
-**Success Criteria** (what must be TRUE):
-  1. User can run a resolution command that populates `markets.outcome` for all markets linked to stored Gamma events
-  2. Markets resolved as YES win have outcome encoded as `"YES"` (or the winning token ID); NO wins encoded as `"NO"`
-  3. `markets.outcome` is NULL only for markets with genuinely unresolved or missing Gamma data — not as a default
-  4. A summary is reported showing count of markets resolved vs. skipped
-**Plans**: 2 plans
-Plans:
-- [ ] 16-01-PLAN.md — Resolution logic (TDD): determine_winner(), classify_token_outcome(), resolve_market_outcomes()
-- [ ] 16-02-PLAN.md — polymarket resolve-outcomes CLI command wired to resolution logic
-
-### Phase 17: Deep Token Classification
-**Goal**: Token catalog entries carry `node_path` and `depth` at game, tournament, and team levels derived from Gamma event tags, enabling multi-depth expertise scoring to function correctly
-**Depends on**: Phase 15
-**Requirements**: CLASS-01, CLASS-02
-**Success Criteria** (what must be TRUE):
-  1. Token catalog entries previously stuck at `node_path=NULL` receive correct `node_path` values at game level (e.g., `esports/cs2`) or deeper
-  2. Token catalog `depth` field reflects actual classification depth: 1 for game-level, 2 for tournament-level, 3 for team-level tokens
-  3. Tokens linked to Gamma events with game + tournament + team tags receive `depth=3`; game-only tags receive `depth=1`
-  4. Classification is verifiable — user can query a known token ID and see its resolved `node_path` and `depth`
-**Plans**: 2 plans
-Plans:
-- [ ] 17-01-PLAN.md — Token classification logic (TDD) + classify-tokens CLI command
-- [ ] 17-02-PLAN.md — Code quality cleanup: counter naming, dead code integration, idempotency test
-
-### Phase 18: End-to-End Validation
-**Goal**: The full scoring pipeline produces a non-empty leaderboard with correctly computed win rates and expertise scores on real JBecker data
-**Depends on**: Phase 16, Phase 17
-**Requirements**: E2E-01, E2E-02
-**Success Criteria** (what must be TRUE):
-  1. `score` command produces at least one expertise score row (non-empty output) when run on JBecker-backfilled trader data
-  2. Leaderboard shows traders ranked by expertise score with win rates calculated from resolved market outcomes (not NULL)
-  3. A trader known to have traded resolved eSports markets appears in the leaderboard with a plausible score
-  4. No pipeline errors or empty-result aborts when resolution and classification data are present
-**Plans**: 2 plans
-Plans:
-- [ ] 18-01-PLAN.md — TDD resolve_positions() function + resolve-positions CLI command
-- [ ] 18-02-PLAN.md — Diagnostic + MarketClassification backfill + E2E score/leaderboard verification
-
-### Phase 19: Self-Healing Token Catalog
-**Goal**: After every backfill run, trades with no `token_catalog` entry are detected and patched automatically — first via local `gamma_events` join, then via Gamma API lookup — so no trade is permanently unclassifiable
-**Depends on**: Phase 18
-**Requirements**: CAT-01, CAT-02, CAT-03
-**Success Criteria** (what must be TRUE):
-  1. After `backfill` completes, any `trades.market_id` with no matching `token_catalog.condition_id` is detected automatically
-  2. For eSports markets: game/tournament/team `node_path` is resolved via local `gamma_events` join (no API call needed when data exists locally)
-  3. For markets not in `gamma_events`: a Gamma API lookup is attempted and results are persisted to `token_catalog`
-  4. Non-eSports markets (Sports, Politics, etc.) are inserted into `token_catalog` with their correct category but no `node_path` — ensuring they are known, not silently invisible
-  5. The existing 401-market backlog (10,850 trades) is patched on first run
-  6. Running the patch step again is idempotent — no duplicate rows, no unnecessary API calls
-**Plans**: 2 plans
-Plans:
-- [ ] 19-01-PLAN.md — 3-tier patch engine (TDD): src/catalog/patcher.py + 12 tests
-- [ ] 19-02-PLAN.md — CLI wiring: patch-catalog command + backfill auto-hook (both paths)
-
-### Phase 20: eSports Token Gap Recovery
-**Goal**: All 156 null-token eSports markets have token IDs populated and are fully classified in `token_catalog` with correct `node_path`, so 3,633 previously unclassifiable trades are properly attributed to traders' eSports specialization scores
-**Depends on**: Phase 19
-**Requirements**: GAP-01, GAP-02, GAP-03
-**Success Criteria** (what must be TRUE):
-  1. A recovery script/command fetches eSports events from Gamma API by tag and extracts per-market `conditionId` + `clobTokenIds` for the 156 null-token gaps
-  2. `markets.tokens` is populated for all recovered markets, enabling Tier 1 patcher to run
-  3. Patcher successfully classifies all recoverable markets in `token_catalog` with correct `node_path`
-  4. `ingest.py` populate-tokens block (~line 1777) is fixed to use events-based lookup instead of broken `?conditionId=` param — preventing recurrence
-  5. After recovery, `leaderboard` scores reflect the 3,633 newly classified trades (traders' eSports specialization scores update)
-  6. Zero eSports markets remain permanently stuck with `tokens=NULL` due to the broken ingest path
-**Plans**: 2 plans
-Plans:
-- [ ] 20-01-PLAN.md — Events-based token recovery: fetch by tag, populate markets.tokens, re-run patcher
-- [ ] 20-02-PLAN.md — Fix ingest.py populate-tokens block + re-score affected traders
-
-### Phase 21: Market Entity Extraction
-
-**Goal**: During `discover`, Claude API extracts {team_a, team_b, tournament, game, market_type} from each market's question text and stores entities per market in the `market_entities` table, normalized against taxonomy aliases
-**Depends on:** Phase 20
-**Requirements**: ENT-01, ENT-02, ENT-03, ENT-04, ENT-05
-**Plans:** 2 plans
-
-Plans:
-- [ ] 21-01-PLAN.md — MarketEntity ORM model + LLM extraction function (src/extraction/llm_extractor.py)
-- [ ] 21-02-PLAN.md — Taxonomy normalizer + wire extraction into discover command
-
-### Phase 22: Org-Team Mapping
-
-**Goal:** Build TraderTeamStats ORM model and query layer that joins positions to market_entities, computing per-team win/loss stats per trader. Wire into a `polymarket team-stats` CLI command. Establishes the LONG=team_a / SHORT=team_b direction convention for Phase 23.
-**Requirements**: MAP-01, MAP-02, MAP-03, MAP-04, MAP-05, MAP-06, MAP-07
-**Depends on:** Phase 21
-**Plans:** 2 plans
-
-Plans:
-- [ ] 22-01-PLAN.md — TraderTeamStats ORM model + get_team_stats_for_trader() query function (TDD, MAP-01..MAP-06)
-- [ ] 22-02-PLAN.md — polymarket team-stats CLI command + integration test (MAP-07)
-
-### Phase 23: Contextual Analyze Command
-
-**Goal:** Build `polymarket analyze` CLI command with two modes: batch mode (no flags) analyzes latest-discover-batch traders through their market_entities, and crawler mode (--crawl) exhausts all market_entities across all traders with pausable/resumable cursor state. Results are persisted to a new `entity_alpha` table (team/tournament/game dimensions). Alpha threshold: >= 5 resolved positions AND >= 60% win rate.
-**Requirements**: ANALYZE-01, ANALYZE-02, ANALYZE-03, ANALYZE-04, ANALYZE-05, ANALYZE-06, ANALYZE-07
-**Depends on:** Phase 22
-**Plans:** 2 plans
-
-Plans:
-- [ ] 23-01-PLAN.md — EntityAlpha ORM model + query layer (get_entity_alpha_for_trader, upsert_entity_alpha, build_batch_trader_list) + crawler cursor module (TDD, ANALYZE-01..06)
-- [ ] 23-02-PLAN.md — polymarket analyze CLI command: batch mode + crawler mode wired + integration test (ANALYZE-07)
-
-### Phase 24: Scoring Rewire
-
-**Goal:** Rewire scoring pipeline and position queries from `market_classifications` (1% coverage) to `market_entities` (full coverage), so that `compute-positions` and `score` process all traders rather than 89/6,105.
-**Depends on:** Phase 23
-**Plans:** 1 plan
-
-Plans:
-- [x] 24-01-PLAN.md — Rewire all scoring queries from TaxonomyNode/market_classifications to MarketEntity
-
-### Phase 25: Lift-Based Scoring v2
-
-**Goal:** Replace the entire old scoring engine (WR/concentration/recency/sample_size composite) with backtest-validated z(CLV) + z(ROI) + z(Sharpe) formula; rewire score/leaderboard/analyze CLI commands; rewire signal detection from ExpertiseScore to LiftScore Q5
-**Depends on:** Phase 24
-**Requirements**: LIFT-01, LIFT-02, LIFT-03
-**Plans:** 2/2 plans complete
-
-Plans:
-- [ ] 25-01-PLAN.md — LiftScore model + lift_metrics pure functions + scoring pipeline rewire + score/leaderboard CLI rewire
-- [ ] 25-02-PLAN.md — Signal detection rewire to LiftScore Q5 + price-context enrichment + analyze command rewrite as Q5 surface
+</details>
 
 ## Progress
 
@@ -214,14 +79,14 @@ Plans:
 | 12. Deep Niche Scoring | v1.1 | 3/3 | Complete | 2026-02-14 |
 | 13. Esports Token Catalog | v1.1 | 3/3 | Complete | 2026-02-16 |
 | 14. Timestamp Fix & Pipeline Decomp | v1.1 | 2/2 | Complete | 2026-02-16 |
-| 15. Gamma Events Ingestion | v1.2 | 0/2 | Planned | - |
-| 16. Market Outcome Resolution | v1.2 | 0/2 | Planned | - |
-| 17. Deep Token Classification | v1.2 | 0/2 | Planned | - |
-| 18. End-to-End Validation | v1.2 | 0/2 | Not started | - |
-| 19. Self-Healing Token Catalog | v1.2 | 0/2 | Planned | - |
-| 20. eSports Token Gap Recovery | v1.2 | 0/2 | Not started | - |
-| 21. Market Entity Extraction | v1.3 | 0/2 | Planned | - |
-| 22. Org-Team Mapping | v1.3 | 0/2 | In Progress | - |
-| 23. Contextual Analyze Command | v1.3 | 0/2 | Planned | - |
-| 24. Scoring Rewire | v1.3 | 1/1 | Complete | 2026-03-16 |
-| 25. Lift-Based Scoring v2 | 2/2 | Complete    | 2026-03-22 | - |
+| 15. Gamma Events Ingestion | v1.2 | 2/2 | Complete | 2026-02-22 |
+| 16. Market Outcome Resolution | v1.2 | 2/2 | Complete | 2026-02-23 |
+| 17. Deep Token Classification | v1.2 | 2/2 | Complete | 2026-02-24 |
+| 18. End-to-End Validation | v1.2 | 2/2 | Complete | 2026-02-26 |
+| 19. Self-Healing Token Catalog | v1.2 | 2/2 | Complete | 2026-03-01 |
+| 20. eSports Token Gap Recovery | v1.2 | 2/2 | Complete | 2026-03-05 |
+| 21. Market Entity Extraction | v1.2 | 2/2 | Complete | 2026-03-08 |
+| 22. Org-Team Mapping | v1.2 | 2/2 | Complete | 2026-03-10 |
+| 23. Contextual Analyze Command | v1.2 | 2/2 | Complete | 2026-03-12 |
+| 24. Scoring Rewire | v1.2 | 1/1 | Complete | 2026-03-16 |
+| 25. Lift-Based Scoring v2 | v1.2 | 2/2 | Complete | 2026-03-22 |
