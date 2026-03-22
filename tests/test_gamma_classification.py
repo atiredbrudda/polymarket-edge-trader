@@ -91,7 +91,6 @@ class TestClassifyTokensFromGammaEvents:
 
         assert result["token_update_attempts"] == 2
         mock_session.execute.assert_called_once()
-        mock_session.commit.assert_called_once()
 
     def test_skips_event_with_no_tags(self):
         """Event with tags=None is counted as skipped_no_tags."""
@@ -156,8 +155,8 @@ class TestClassifyTokensFromGammaEvents:
 
         assert result["skipped_no_tags"] == 1
 
-    def test_commits_session(self):
-        """Session is committed after updates."""
+    def test_caller_manages_commit(self):
+        """Session commit is caller's responsibility, not the function's."""
         mock_session = MagicMock()
 
         mock_event = MagicMock()
@@ -169,7 +168,7 @@ class TestClassifyTokensFromGammaEvents:
 
         classify_tokens_from_gamma_events(mock_session)
 
-        mock_session.commit.assert_called_once()
+        mock_session.commit.assert_not_called()
 
     def test_executes_bulk_update(self):
         """Bulk UPDATE is executed via session.execute with list of dicts."""
@@ -222,6 +221,7 @@ class TestClassifyTokensIdempotency:
             session.commit()
 
             result1 = classify_tokens_from_gamma_events(session)
+            session.commit()
 
             session.expire_all()
 
@@ -230,7 +230,8 @@ class TestClassifyTokensIdempotency:
             assert refreshed.depth == 1
 
             result2 = classify_tokens_from_gamma_events(session)
+            session.commit()
 
-            assert result1["classified"] == result2["classified"]
+            assert result1["token_update_attempts"] == result2["token_update_attempts"]
         finally:
             session.close()

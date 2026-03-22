@@ -64,11 +64,7 @@ from src.gamma.position_resolver import resolve_positions
 from src.org_mapping.queries import (
     get_team_stats_for_trader,
     compute_and_upsert_team_stats,
-    get_entity_alpha_for_trader,
-    upsert_entity_alpha,
-    build_batch_trader_list,
 )
-from src.org_mapping.crawler import load_cursor, save_cursor, clear_cursor
 
 
 def _get_dependencies(settings=None):
@@ -2545,48 +2541,48 @@ def _run_analyze_leaderboard_mode(console, session_factory, category):
     with get_session(session_factory) as session:
         entries = get_lift_leaderboard(session, category, top_n=20)
 
-    if not entries:
-        console.print(f"[yellow]No scores computed for '{category}'.[/yellow]")
-        console.print("[dim]Run 'polymarket score' first to compute lift scores.[/dim]")
-        return
+        if not entries:
+            console.print(f"[yellow]No scores computed for '{category}'.[/yellow]")
+            console.print("[dim]Run 'polymarket score' first to compute lift scores.[/dim]")
+            return
 
-    actionable_label = (
-        "[green]ACTIONABLE[/green]" if config.actionable else "[yellow]SIGNAL WEAK[/yellow]"
-    )
-    console.print(f"\nQ5 Traders — [bold]{category}[/bold]  Status: {actionable_label}")
-
-    table = Table(title=f"Q5 Leaderboard: {category.title()} (Top 20)")
-    table.add_column("Rank", style="bold", justify="right", width=4)
-    table.add_column("Trader", style="cyan", width=12)
-    table.add_column("Composite", justify="right", width=9)
-    table.add_column("CLV(z)", justify="right", width=7)
-    table.add_column("ROI(z)", justify="right", width=7)
-    table.add_column("Sharpe(z)", justify="right", width=9)
-    table.add_column("Q", justify="center", width=3)
-    table.add_column("Positions", justify="right", width=9)
-    table.add_column("PnL", justify="right", width=10)
-
-    for rank, entry in enumerate(entries, 1):
-        addr_display = entry.trader_address[:8] + "..."
-        q_style = "green" if entry.quintile == 5 else ("red" if entry.quintile == 1 else "white")
-        table.add_row(
-            str(rank),
-            addr_display,
-            f"{float(entry.composite_score):+.3f}",
-            f"{float(entry.clv_zscore):+.3f}",
-            f"{float(entry.roi_zscore):+.3f}",
-            f"{float(entry.sharpe_zscore):+.3f}",
-            f"[{q_style}]Q{entry.quintile}[/{q_style}]",
-            str(entry.position_count),
-            f"{float(entry.total_pnl):+.1f}",
+        actionable_label = (
+            "[green]ACTIONABLE[/green]" if config.actionable else "[yellow]SIGNAL WEAK[/yellow]"
         )
+        console.print(f"\nQ5 Traders — [bold]{category}[/bold]  Status: {actionable_label}")
 
-    console.print(table)
-    q5_count = sum(1 for e in entries if e.quintile == 5)
-    console.print(f"\n  Q5 traders shown: [bold green]{q5_count}[/bold green]")
-    console.print(
-        "[dim]Use 'polymarket analyze --signals' to see active consensus signals.[/dim]"
-    )
+        table = Table(title=f"Q5 Leaderboard: {category.title()} (Top 20)")
+        table.add_column("Rank", style="bold", justify="right", width=4)
+        table.add_column("Trader", style="cyan", width=12)
+        table.add_column("Composite", justify="right", width=9)
+        table.add_column("CLV(z)", justify="right", width=7)
+        table.add_column("ROI(z)", justify="right", width=7)
+        table.add_column("Sharpe(z)", justify="right", width=9)
+        table.add_column("Q", justify="center", width=3)
+        table.add_column("Positions", justify="right", width=9)
+        table.add_column("PnL", justify="right", width=10)
+
+        for rank, entry in enumerate(entries, 1):
+            addr_display = entry.trader_address[:8] + "..."
+            q_style = "green" if entry.quintile == 5 else ("red" if entry.quintile == 1 else "white")
+            table.add_row(
+                str(rank),
+                addr_display,
+                f"{float(entry.composite_score):+.3f}",
+                f"{float(entry.clv_zscore):+.3f}",
+                f"{float(entry.roi_zscore):+.3f}",
+                f"{float(entry.sharpe_zscore):+.3f}",
+                f"[{q_style}]Q{entry.quintile}[/{q_style}]",
+                str(entry.position_count),
+                f"{float(entry.total_pnl):+.1f}",
+            )
+
+        console.print(table)
+        q5_count = sum(1 for e in entries if e.quintile == 5)
+        console.print(f"\n  Q5 traders shown: [bold green]{q5_count}[/bold green]")
+        console.print(
+            "[dim]Use 'polymarket analyze --signals' to see active consensus signals.[/dim]"
+        )
 
 
 def _run_analyze_signals_mode(console, session_factory, category):
