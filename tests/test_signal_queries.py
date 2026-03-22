@@ -14,7 +14,7 @@ import pytest
 from sqlalchemy import create_engine
 from sqlalchemy.orm import Session
 
-from src.db.models import Base, SignalSnapshot, Position, ExpertiseScore, Market, Trader
+from src.db.models import Base, SignalSnapshot, Position, LiftScore, Market, Trader
 from src.signals.queries import (
     get_latest_signals,
     get_signal_history,
@@ -54,62 +54,63 @@ def sample_data(session):
     ]
     session.add_all(traders)
 
-    # ExpertiseScores (latest snapshots)
+    # LiftScore rows — Q5 for experts, Q3 for novice (simulates pre-quintiling)
+    window_start = now - timedelta(days=30)
     scores = [
-        ExpertiseScore(
+        LiftScore(
             trader_address="0xExpert1",
-            game_slug="esports.cs2",
-            raw_score=Decimal("85.5"),
-            percentile_rank=Decimal("95.0"),
-            win_rate_component=Decimal("34.0"),
-            concentration_component=Decimal("21.0"),
-            recency_component=Decimal("17.0"),
-            sample_size_component=Decimal("13.5"),
-            consistency_multiplier=Decimal("1.0"),
-            specialization_label="CS2 Specialist",
-            resolved_market_count=20,
+            category="esports",
+            composite_score=Decimal("2.500"),
+            clv_raw=Decimal("0.05"), clv_zscore=Decimal("1.5"),
+            roi_raw=Decimal("0.12"), roi_zscore=Decimal("1.0"),
+            sharpe_raw=Decimal("2.1"), sharpe_zscore=Decimal("1.0"),
+            quintile=5,
+            position_count=20,
+            total_pnl=Decimal("500"),
+            capital_deployed=Decimal("5000"),
+            window_start=window_start, window_end=now,
             computed_at=now - timedelta(hours=1),
         ),
-        ExpertiseScore(
+        LiftScore(
             trader_address="0xExpert2",
-            game_slug="esports.dota2",
-            raw_score=Decimal("78.2"),
-            percentile_rank=Decimal("88.0"),
-            win_rate_component=Decimal("31.0"),
-            concentration_component=Decimal("19.5"),
-            recency_component=Decimal("15.6"),
-            sample_size_component=Decimal("12.1"),
-            consistency_multiplier=Decimal("1.0"),
-            specialization_label="Dota2 Specialist",
-            resolved_market_count=15,
+            category="esports",
+            composite_score=Decimal("2.100"),
+            clv_raw=Decimal("0.04"), clv_zscore=Decimal("1.2"),
+            roi_raw=Decimal("0.10"), roi_zscore=Decimal("0.9"),
+            sharpe_raw=Decimal("1.8"), sharpe_zscore=Decimal("0.9"),
+            quintile=5,
+            position_count=15,
+            total_pnl=Decimal("400"),
+            capital_deployed=Decimal("4000"),
+            window_start=window_start, window_end=now,
             computed_at=now - timedelta(hours=2),
         ),
-        ExpertiseScore(
+        LiftScore(
             trader_address="0xExpert3",
-            game_slug="esports.lol",
-            raw_score=Decimal("72.0"),
-            percentile_rank=Decimal("80.0"),
-            win_rate_component=Decimal("28.8"),
-            concentration_component=Decimal("18.0"),
-            recency_component=Decimal("14.4"),
-            sample_size_component=Decimal("10.8"),
-            consistency_multiplier=Decimal("1.0"),
-            specialization_label="LoL Specialist",
-            resolved_market_count=12,
+            category="esports",
+            composite_score=Decimal("1.900"),
+            clv_raw=Decimal("0.03"), clv_zscore=Decimal("1.0"),
+            roi_raw=Decimal("0.08"), roi_zscore=Decimal("0.7"),
+            sharpe_raw=Decimal("1.5"), sharpe_zscore=Decimal("0.8"),
+            quintile=5,
+            position_count=12,
+            total_pnl=Decimal("300"),
+            capital_deployed=Decimal("3000"),
+            window_start=window_start, window_end=now,
             computed_at=now - timedelta(hours=3),
         ),
-        ExpertiseScore(
+        LiftScore(
             trader_address="0xNovice1",
-            game_slug="esports.cs2",
-            raw_score=Decimal("45.0"),
-            percentile_rank=Decimal("30.0"),
-            win_rate_component=Decimal("18.0"),
-            concentration_component=Decimal("11.25"),
-            recency_component=Decimal("9.0"),
-            sample_size_component=Decimal("6.75"),
-            consistency_multiplier=Decimal("1.0"),
-            specialization_label="Generalist",
-            resolved_market_count=5,
+            category="esports",
+            composite_score=Decimal("0.200"),
+            clv_raw=Decimal("0.01"), clv_zscore=Decimal("0.1"),
+            roi_raw=Decimal("0.02"), roi_zscore=Decimal("0.1"),
+            sharpe_raw=Decimal("0.3"), sharpe_zscore=Decimal("0.1"),
+            quintile=3,
+            position_count=5,
+            total_pnl=Decimal("50"),
+            capital_deployed=Decimal("1000"),
+            window_start=window_start, window_end=now,
             computed_at=now - timedelta(hours=4),
         ),
     ]
@@ -357,10 +358,10 @@ class TestGetExpertPositionsForMarket:
     """Tests for get_expert_positions_for_market query function."""
 
     def test_filters_non_experts(self, session, sample_data):
-        """Should exclude traders with score <= min_score."""
-        result = get_expert_positions_for_market(session, "market1", min_score=Decimal("70"))
+        """Should exclude traders not in LiftScore Q5 (quintile != 5)."""
+        result = get_expert_positions_for_market(session, "market1")
 
-        # Should get 2 positions (0xExpert1 and 0xExpert2, exclude 0xNovice1 with score 45)
+        # Should get 2 positions (0xExpert1 and 0xExpert2, exclude 0xNovice1 with quintile=3)
         assert len(result) == 2
         addresses = {p.trader_address for p in result}
         assert addresses == {"0xExpert1", "0xExpert2"}
@@ -368,7 +369,7 @@ class TestGetExpertPositionsForMarket:
 
     def test_excludes_flat_positions(self, session, sample_data):
         """Should exclude FLAT direction positions."""
-        result = get_expert_positions_for_market(session, "market1", min_score=Decimal("70"))
+        result = get_expert_positions_for_market(session, "market1")
 
         # 0xExpert3 has a FLAT position in market1, should be excluded
         addresses = {p.trader_address for p in result}
@@ -379,7 +380,7 @@ class TestGetExpertPositionsForMarket:
 
     def test_returns_correct_market_positions(self, session, sample_data):
         """Should return positions only for the specified market."""
-        result = get_expert_positions_for_market(session, "market3", min_score=Decimal("70"))
+        result = get_expert_positions_for_market(session, "market3")
 
         # Market 3 has 2 expert positions (0xExpert1 and 0xExpert3)
         assert len(result) == 2

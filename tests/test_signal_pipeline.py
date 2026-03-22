@@ -17,7 +17,7 @@ import pytest
 from sqlalchemy import create_engine
 from sqlalchemy.orm import sessionmaker
 
-from src.db.models import Base, Market, Trader, Position, ExpertiseScore, SignalSnapshot
+from src.db.models import Base, Market, Trader, Position, LiftScore, SignalSnapshot
 from src.signals.pipeline import (
     refresh_market_signal,
     refresh_all_signals,
@@ -25,6 +25,31 @@ from src.signals.pipeline import (
     assess_herding,
     SignalResult,
 )
+
+
+def make_lift_score(trader_address, now, quintile=5, composite_score=None):
+    """Helper to create a LiftScore fixture for a trader."""
+    if composite_score is None:
+        composite_score = Decimal("2.0") if quintile == 5 else Decimal("0.5")
+    window_start = now - timedelta(days=30)
+    return LiftScore(
+        trader_address=trader_address,
+        category="esports",
+        composite_score=composite_score,
+        clv_raw=Decimal("0.05"),
+        clv_zscore=Decimal("1.0"),
+        roi_raw=Decimal("0.10"),
+        roi_zscore=Decimal("1.0"),
+        sharpe_raw=Decimal("2.0"),
+        sharpe_zscore=Decimal("1.0"),
+        quintile=quintile,
+        position_count=20,
+        total_pnl=Decimal("200"),
+        capital_deployed=Decimal("2000"),
+        window_start=window_start,
+        window_end=now,
+        computed_at=now - timedelta(hours=1),
+    )
 
 
 @pytest.fixture
@@ -79,30 +104,9 @@ def test_refresh_market_signal_detects_consensus(session):
         )
         session.add(position)
 
-    # Create expertise scores (all >70 to qualify as experts)
-    scores_data = [
-        ("0xTrader0", Decimal("75")),
-        ("0xTrader1", Decimal("80")),
-        ("0xTrader2", Decimal("85")),
-        ("0xTrader3", Decimal("78")),
-    ]
-
-    for trader_address, raw_score in scores_data:
-        score = ExpertiseScore(
-            trader_address=trader_address,
-            game_slug="esports.cs2",
-            raw_score=raw_score,
-            percentile_rank=Decimal("50"),
-            win_rate_component=Decimal("0"),
-            concentration_component=Decimal("0"),
-            recency_component=Decimal("0"),
-            sample_size_component=Decimal("0"),
-            consistency_multiplier=Decimal("1"),
-            specialization_label="specialist/specialist",
-            resolved_market_count=10,
-            computed_at=now - timedelta(hours=1),
-        )
-        session.add(score)
+    # Create Q5 LiftScore rows for all traders
+    for addr in ["0xTrader0", "0xTrader1", "0xTrader2", "0xTrader3"]:
+        session.add(make_lift_score(addr, now, quintile=5))
 
     session.commit()
 
@@ -166,23 +170,9 @@ def test_refresh_market_signal_no_consensus(session):
         )
         session.add(position)
 
-    # Create expertise scores
+    # Create Q5 LiftScore rows for 2 traders
     for i in range(2):
-        score = ExpertiseScore(
-            trader_address=f"0xTrader{i}",
-            game_slug="esports.cs2",
-            raw_score=Decimal("80"),
-            percentile_rank=Decimal("50"),
-            win_rate_component=Decimal("0"),
-            concentration_component=Decimal("0"),
-            recency_component=Decimal("0"),
-            sample_size_component=Decimal("0"),
-            consistency_multiplier=Decimal("1"),
-            specialization_label="specialist/specialist",
-            resolved_market_count=10,
-            computed_at=now - timedelta(hours=1),
-        )
-        session.add(score)
+        session.add(make_lift_score(f"0xTrader{i}", now, quintile=5))
 
     session.commit()
 
@@ -235,23 +225,9 @@ def test_refresh_market_signal_signal_lost(session):
         )
         session.add(position)
 
-    # Create expertise scores
+    # Create Q5 LiftScore rows for 3 traders
     for i in range(3):
-        score = ExpertiseScore(
-            trader_address=f"0xTrader{i}",
-            game_slug="esports.cs2",
-            raw_score=Decimal("80"),
-            percentile_rank=Decimal("50"),
-            win_rate_component=Decimal("0"),
-            concentration_component=Decimal("0"),
-            recency_component=Decimal("0"),
-            sample_size_component=Decimal("0"),
-            consistency_multiplier=Decimal("1"),
-            specialization_label="specialist/specialist",
-            resolved_market_count=10,
-            computed_at=now - timedelta(hours=2),
-        )
-        session.add(score)
+        session.add(make_lift_score(f"0xTrader{i}", now, quintile=5))
 
     session.commit()
 
@@ -317,23 +293,9 @@ def test_refresh_market_signal_first_mover_tracked(session):
         )
         session.add(position)
 
-    # Create expertise scores
+    # Create Q5 LiftScore rows for 3 traders
     for i in range(3):
-        score = ExpertiseScore(
-            trader_address=f"0xTrader{i}",
-            game_slug="esports.cs2",
-            raw_score=Decimal("80"),
-            percentile_rank=Decimal("50"),
-            win_rate_component=Decimal("0"),
-            concentration_component=Decimal("0"),
-            recency_component=Decimal("0"),
-            sample_size_component=Decimal("0"),
-            consistency_multiplier=Decimal("1"),
-            specialization_label="specialist/specialist",
-            resolved_market_count=10,
-            computed_at=now - timedelta(hours=1),
-        )
-        session.add(score)
+        session.add(make_lift_score(f"0xTrader{i}", now, quintile=5))
 
     session.commit()
 
@@ -381,21 +343,7 @@ def test_refresh_market_signal_herding_stub(session):
         )
         session.add(position)
 
-        score = ExpertiseScore(
-            trader_address=f"0xTrader{i}",
-            game_slug="esports.cs2",
-            raw_score=Decimal("80"),
-            percentile_rank=Decimal("50"),
-            win_rate_component=Decimal("0"),
-            concentration_component=Decimal("0"),
-            recency_component=Decimal("0"),
-            sample_size_component=Decimal("0"),
-            consistency_multiplier=Decimal("1"),
-            specialization_label="specialist/specialist",
-            resolved_market_count=10,
-            computed_at=now - timedelta(hours=1),
-        )
-        session.add(score)
+        session.add(make_lift_score(f"0xTrader{i}", now, quintile=5))
 
     session.commit()
 
@@ -446,21 +394,7 @@ def test_refresh_all_signals_batch(session):
             )
             session.add(position)
 
-            score = ExpertiseScore(
-                trader_address=trader_address,
-                game_slug="esports.cs2",
-                raw_score=Decimal("80"),
-                percentile_rank=Decimal("50"),
-                win_rate_component=Decimal("0"),
-                concentration_component=Decimal("0"),
-                recency_component=Decimal("0"),
-                sample_size_component=Decimal("0"),
-                consistency_multiplier=Decimal("1"),
-                specialization_label="specialist/specialist",
-                resolved_market_count=10,
-                computed_at=now - timedelta(hours=1),
-            )
-            session.add(score)
+            session.add(make_lift_score(trader_address, now, quintile=5))
 
     session.commit()
 
@@ -515,21 +449,7 @@ def test_refresh_all_signals_window_filter(session):
             )
             session.add(position)
 
-            score = ExpertiseScore(
-                trader_address=trader_address,
-                game_slug="esports.cs2",
-                raw_score=Decimal("80"),
-                percentile_rank=Decimal("50"),
-                win_rate_component=Decimal("0"),
-                concentration_component=Decimal("0"),
-                recency_component=Decimal("0"),
-                sample_size_component=Decimal("0"),
-                consistency_multiplier=Decimal("1"),
-                specialization_label="specialist/specialist",
-                resolved_market_count=10,
-                computed_at=now - timedelta(hours=1),
-            )
-            session.add(score)
+            session.add(make_lift_score(trader_address, now, quintile=5))
 
     session.commit()
 
@@ -646,21 +566,7 @@ def test_get_ranked_signals_time_window(session):
             )
             session.add(position)
 
-            score = ExpertiseScore(
-                trader_address=trader_address,
-                game_slug="esports.cs2",
-                raw_score=Decimal("80"),
-                percentile_rank=Decimal("50"),
-                win_rate_component=Decimal("0"),
-                concentration_component=Decimal("0"),
-                recency_component=Decimal("0"),
-                sample_size_component=Decimal("0"),
-                consistency_multiplier=Decimal("1"),
-                specialization_label="specialist/specialist",
-                resolved_market_count=10,
-                computed_at=now - timedelta(hours=1),
-            )
-            session.add(score)
+            session.add(make_lift_score(trader_address, now, quintile=5))
 
     session.commit()
 
@@ -746,21 +652,7 @@ def test_signal_snapshot_append_only(session):
         )
         session.add(position)
 
-        score = ExpertiseScore(
-            trader_address=f"0xTrader{i}",
-            game_slug="esports.cs2",
-            raw_score=Decimal("80"),
-            percentile_rank=Decimal("50"),
-            win_rate_component=Decimal("0"),
-            concentration_component=Decimal("0"),
-            recency_component=Decimal("0"),
-            sample_size_component=Decimal("0"),
-            consistency_multiplier=Decimal("1"),
-            specialization_label="specialist/specialist",
-            resolved_market_count=10,
-            computed_at=now - timedelta(hours=1),
-        )
-        session.add(score)
+        session.add(make_lift_score(f"0xTrader{i}", now, quintile=5))
 
     session.commit()
 
@@ -787,16 +679,16 @@ def test_excludes_non_expert_positions(session):
     )
     session.add(market)
 
-    # Create traders: 3 LONG experts + 2 LONG non-experts
+    # Create traders: 3 LONG Q5 experts + 2 LONG non-experts (Q3)
     positions_data = [
-        ("0xExpert0", "LONG", Decimal("75")),  # Expert
-        ("0xExpert1", "LONG", Decimal("80")),  # Expert
-        ("0xExpert2", "LONG", Decimal("85")),  # Expert
-        ("0xNonExpert0", "LONG", Decimal("60")),  # Non-expert
-        ("0xNonExpert1", "LONG", Decimal("65")),  # Non-expert
+        ("0xExpert0", "LONG", 5),    # Q5 expert
+        ("0xExpert1", "LONG", 5),    # Q5 expert
+        ("0xExpert2", "LONG", 5),    # Q5 expert
+        ("0xNonExpert0", "LONG", 3),  # Q3 non-expert
+        ("0xNonExpert1", "LONG", 3),  # Q3 non-expert
     ]
 
-    for trader_address, direction, raw_score in positions_data:
+    for trader_address, direction, quintile in positions_data:
         trader = Trader(address=trader_address)
         session.add(trader)
 
@@ -812,21 +704,7 @@ def test_excludes_non_expert_positions(session):
         )
         session.add(position)
 
-        score = ExpertiseScore(
-            trader_address=trader_address,
-            game_slug="esports.cs2",
-            raw_score=raw_score,
-            percentile_rank=Decimal("50"),
-            win_rate_component=Decimal("0"),
-            concentration_component=Decimal("0"),
-            recency_component=Decimal("0"),
-            sample_size_component=Decimal("0"),
-            consistency_multiplier=Decimal("1"),
-            specialization_label="specialist/specialist",
-            resolved_market_count=10,
-            computed_at=now - timedelta(hours=1),
-        )
-        session.add(score)
+        session.add(make_lift_score(trader_address, now, quintile=quintile))
 
     session.commit()
 
@@ -859,6 +737,7 @@ def test_assess_herding_returns_not_analyzed(session):
         herding_status="not_analyzed",
         status="active",
         computed_at=now,
+        expert_avg_entry=None,
     )
 
     # Test assess_herding
