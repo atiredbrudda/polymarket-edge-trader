@@ -53,6 +53,7 @@ from src.alerts.telegram import TelegramAlerter
 from src.gamma.persist import upsert_gamma_events
 from src.extraction.llm_extractor import extract_entities, EntityResult
 from src.extraction.normalizer import normalize_entities
+from src.extraction.pattern_matcher import PatternMatcher
 from src.db.models import MarketEntity
 from src.gamma.resolution import resolve_market_outcomes
 from src.gamma.classification import (
@@ -1090,7 +1091,10 @@ def discover(niche, closing_within, verbose):
 
         traders_discovered = 0
         entities_extracted = 0
+        pattern_matches = 0
         with get_session(session_factory) as session:
+            matcher = PatternMatcher()
+            matcher.load_from_db(session)
             query = session.query(Market).filter_by(active=True)
             if niche:
                 from sqlalchemy import or_
@@ -1112,8 +1116,13 @@ def discover(niche, closing_within, verbose):
                     )
                     traders_discovered += len(new_traders)
 
-                    raw_result = extract_entities(market.question)
-                    normalized = normalize_entities(raw_result)
+                    raw_result = matcher.match(market.question)
+                    if raw_result:
+                        pattern_matches += 1
+                        normalized = normalize_entities(raw_result)
+                    else:
+                        raw_result = extract_entities(market.question)
+                        normalized = normalize_entities(raw_result)
                     existing = (
                         session.query(MarketEntity)
                         .filter_by(condition_id=market.condition_id)
@@ -1153,6 +1162,7 @@ def discover(niche, closing_within, verbose):
     console.print(f"  Detail markets:  {len(detail_markets)}")
     console.print(f"  New traders:     [green]{traders_discovered}[/green]")
     console.print(f"  Entities stored: [cyan]{entities_extracted}[/cyan]")
+    console.print(f"  Pattern matched: [green]{pattern_matches}[/green]  LLM calls: [yellow]{entities_extracted - pattern_matches}[/yellow]")
     console.print(
         "\n[dim]Run 'polymarket backfill' to fetch history for discovered traders.[/dim]"
     )
