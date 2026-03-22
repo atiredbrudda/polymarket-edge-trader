@@ -187,14 +187,14 @@ Plans:
 
 ### Phase 25: Lift-Based Scoring v2
 
-**Goal:** Replace raw win rate with avg lift (outcome − entry_price) as the core expertise metric; enrich consensus signals with price context (expert avg entry vs. live market line); add fade detection for reliably bad traders as contrarian signals.
+**Goal:** Replace the entire old scoring engine (WR/concentration/recency/sample_size composite) with backtest-validated z(CLV) + z(ROI) + z(Sharpe) formula; rewire score/leaderboard/analyze CLI commands; rewire signal detection from ExpertiseScore to LiftScore Q5
 **Depends on:** Phase 24
 **Requirements**: LIFT-01, LIFT-02, LIFT-03
 **Plans:** 2 plans
 
 Plans:
-- [ ] 25-01-PLAN.md — Lift metric computation + replace win_rate_component with avg_lift_component in scoring (P0); fade detection query + FadeSignal model (P2)
-- [ ] 25-02-PLAN.md — Price-context enrichment on consensus signals: expert avg entry + live CLOB market price (P1)
+- [ ] 25-01-PLAN.md — LiftScore model + lift_metrics pure functions + scoring pipeline rewire + score/leaderboard CLI rewire
+- [ ] 25-02-PLAN.md — Signal detection rewire to LiftScore Q5 + price-context enrichment + analyze command rewrite as Q5 surface
 
 ## Progress
 
