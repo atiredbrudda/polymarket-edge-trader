@@ -2,15 +2,15 @@
 gsd_state_version: 1.0
 milestone: v1.2
 milestone_name: Market Resolution & Deep Classification
-status: Phase 24 complete. Scoring pipeline rewired to MarketEntity.
-stopped_at: Phase 24 cleared
-last_updated: "2026-03-15T12:00:00.000Z"
-last_activity: "2026-03-15 — Phase 24 plan 01 complete: rewired 13 functions from MarketClassification/TaxonomyNode to MarketEntity in trader_discovery.py, queries.py, scoring_pipeline.py, ingest.py. All 26 modified tests pass. SUMMARY.md written."
+status: completed
+stopped_at: Completed 25-01-PLAN.md
+last_updated: "2026-03-22T13:14:13.334Z"
+last_activity: "2026-03-15 — Phase 24 plan 01 complete: rewired 13 functions to MarketEntity, all tests pass."
 progress:
-  total_phases: 24
-  completed_phases: 23
-  total_plans: 20
-  completed_plans: 19
+  total_phases: 11
+  completed_phases: 10
+  total_plans: 21
+  completed_plans: 20
   percent: 95
 ---
 
@@ -49,6 +49,8 @@ Recent decisions affecting v1.2:
 - Gamma Events API (`gamma-api.polymarket.com/events`) chosen as authoritative source for both market resolution and deep classification
 - One-time ~30s download (~10MB) is sufficient; no incremental polling needed for v1.2
 - Phase 17 (classification) depends on Phase 15 but not Phase 16 — can potentially parallelize 16+17
+- [Phase 25-01]: Equal-weight z(CLV)+z(ROI)+z(Sharpe) formula — no tuning needed per 348-experiment backtest
+- [Phase 25-01]: DELETE-then-INSERT LiftScore pattern (not append-only): leaderboard only needs latest snapshot
 
 ### Roadmap Evolution
 
@@ -81,7 +83,7 @@ None.
 
 ## Session Continuity
 
-Last session: 2026-03-15T12:00:00.000Z
-Stopped at: Phase 24 cleared
-Resume file: N/A
+Last session: 2026-03-22T13:14:13.331Z
+Stopped at: Completed 25-01-PLAN.md
+Resume file: None
 Next: Run polymarket compute-positions && polymarket score to validate full pipeline
