@@ -2476,20 +2476,31 @@ def team_stats(address, verbose):
 
 @cli.command("analyze")
 @click.option(
-    "--crawl", is_flag=True, help="Exhaust all known entities across all traders"
+    "--category",
+    "-c",
+    default="esports",
+    help="Market category to display (default: esports)",
+)
+@click.option(
+    "--signals",
+    is_flag=True,
+    help="Show active Q5 consensus signals with price context instead of leaderboard",
 )
 @click.option("--verbose", "-v", is_flag=True, help="Enable debug logging")
-def analyze(crawl, verbose):
-    """Compute entity-level alpha for traders.
+def analyze(category, signals, verbose):
+    """Show Q5 trader leaderboard or active consensus signals.
 
-    Batch mode (no flags): processes traders from the most recent discover run.
-    Crawler mode (--crawl): exhausts all market_entities across all traders.
+    Default mode: display Q5 leaderboard for the given category with
+    composite score, CLV, ROI, and Sharpe z-score breakdown.
 
-    Alpha threshold: >= 5 resolved positions AND >= 60% win rate on an entity.
+    Signals mode (--signals): show active Q5 consensus signals with
+    expert avg entry price context and sizing guidance.
 
+    \b
     Examples:
         polymarket analyze
-        polymarket analyze --crawl
+        polymarket analyze --category epl
+        polymarket analyze --signals
     """
     if verbose:
         logger.remove()
@@ -2498,91 +2509,145 @@ def analyze(crawl, verbose):
     console = Console()
     session_factory, _, _, _, _ = _get_dependencies()
 
-    if crawl:
-        _run_crawl_mode(console, session_factory)
+    from src.config.market_config import get_market_config
+
+    if signals:
+        _run_analyze_signals_mode(console, session_factory, category)
     else:
-        _run_batch_mode(console, session_factory)
+        _run_analyze_leaderboard_mode(console, session_factory, category)
 
 
-def _run_batch_mode(console, session_factory):
-    """Run batch mode: process latest discover batch traders."""
-    with get_session(session_factory) as session:
-        trader_addresses = build_batch_trader_list(session)
+def _run_analyze_leaderboard_mode(console, session_factory, category):
+    """Show Q5 leaderboard for the given category."""
+    from src.config.market_config import get_market_config
+    from src.pipeline.queries import get_lift_leaderboard
 
-        if not trader_addresses:
-            console.print("[yellow]No new traders in latest discover batch.[/yellow]")
-            return
-
-        alpha_count = 0
-        with console.status("[bold green]Analyzing batch...", spinner="dots") as status:
-            for idx, addr in enumerate(trader_addresses, 1):
-                status.update(
-                    f"[bold green]Processing {idx}/{len(trader_addresses)}: {addr[:10]}..."
-                )
-                upsert_entity_alpha(session, addr)
-                stats = get_entity_alpha_for_trader(session, addr)
-                has_alpha = any(
-                    s["total_resolved"] >= 5
-                    and s["win_rate"] is not None
-                    and s["win_rate"] >= Decimal("60.0")
-                    for s in stats
-                )
-                if has_alpha:
-                    alpha_count += 1
-                label = "1 alpha found" if has_alpha else "no alpha"
-                console.print(f"  {addr[:10]}... — {label}")
-
+    config = get_market_config(category)
+    if config is None:
         console.print(
-            f"[bold]Batch complete: {alpha_count}/{len(trader_addresses)} traders with alpha[/bold]"
+            f"[bold red]Error: Category '{category}' is not scorable.[/bold red]"
         )
+        console.print(
+            "\n[bold]Scorable categories:[/bold] esports, epl, politics, la-liga, ligue-1"
+        )
+        return
 
-
-def _run_crawl_mode(console, session_factory):
-    """Run crawler mode: process all traders with cursor-based resumption."""
     with get_session(session_factory) as session:
-        all_traders = (
-            session.execute(select(Trader.address).order_by(Trader.address))
-            .scalars()
-            .all()
+        entries = get_lift_leaderboard(session, category, top_n=20)
+
+    if not entries:
+        console.print(f"[yellow]No scores computed for '{category}'.[/yellow]")
+        console.print("[dim]Run 'polymarket score' first to compute lift scores.[/dim]")
+        return
+
+    actionable_label = (
+        "[green]ACTIONABLE[/green]" if config.actionable else "[yellow]SIGNAL WEAK[/yellow]"
+    )
+    console.print(f"\nQ5 Traders — [bold]{category}[/bold]  Status: {actionable_label}")
+
+    table = Table(title=f"Q5 Leaderboard: {category.title()} (Top 20)")
+    table.add_column("Rank", style="bold", justify="right", width=4)
+    table.add_column("Trader", style="cyan", width=12)
+    table.add_column("Composite", justify="right", width=9)
+    table.add_column("CLV(z)", justify="right", width=7)
+    table.add_column("ROI(z)", justify="right", width=7)
+    table.add_column("Sharpe(z)", justify="right", width=9)
+    table.add_column("Q", justify="center", width=3)
+    table.add_column("Positions", justify="right", width=9)
+    table.add_column("PnL", justify="right", width=10)
+
+    for rank, entry in enumerate(entries, 1):
+        addr_display = entry.trader_address[:8] + "..."
+        q_style = "green" if entry.quintile == 5 else ("red" if entry.quintile == 1 else "white")
+        table.add_row(
+            str(rank),
+            addr_display,
+            f"{float(entry.composite_score):+.3f}",
+            f"{float(entry.clv_zscore):+.3f}",
+            f"{float(entry.roi_zscore):+.3f}",
+            f"{float(entry.sharpe_zscore):+.3f}",
+            f"[{q_style}]Q{entry.quintile}[/{q_style}]",
+            str(entry.position_count),
+            f"{float(entry.total_pnl):+.1f}",
         )
 
-        if not all_traders:
-            console.print("[yellow]No traders in database.[/yellow]")
+    console.print(table)
+    q5_count = sum(1 for e in entries if e.quintile == 5)
+    console.print(f"\n  Q5 traders shown: [bold green]{q5_count}[/bold green]")
+    console.print(
+        "[dim]Use 'polymarket analyze --signals' to see active consensus signals.[/dim]"
+    )
+
+
+def _run_analyze_signals_mode(console, session_factory, category):
+    """Show active Q5 consensus signals with price context."""
+    from src.signals.queries import get_markets_by_expert_activity
+    from src.signals.pipeline import refresh_market_signal
+    from src.config.market_config import get_market_config
+
+    config = get_market_config(category)
+
+    with get_session(session_factory) as session:
+        markets = get_markets_by_expert_activity(session, window_hours=24, min_experts=1)
+
+        if not markets:
+            console.print("[yellow]No Q5 expert activity in last 24 hours.[/yellow]")
+            console.print("[dim]Run 'polymarket score' first to compute lift scores.[/dim]")
             return
 
-        cursor = load_cursor()
-        if cursor:
-            console.print(
-                f"[dim]Resuming from cursor: last trader {cursor['last_trader'][:10]}...[/dim]"
+        all_signals = []
+        for market_id, expert_count, latest_activity in markets:
+            results = refresh_market_signal(
+                session, market_id,
+                min_experts=3,
+                min_agreement_pct=Decimal("75"),
             )
-            remaining = [a for a in all_traders if a > cursor["last_trader"]]
-        else:
-            remaining = all_traders
+            all_signals.extend(results)
 
-        if not remaining:
-            console.print("[green]All traders already processed.[/green]")
-            clear_cursor()
-            return
+    if not all_signals:
+        console.print("[yellow]No active Q5 consensus signals detected.[/yellow]")
+        console.print("[dim]Q5 consensus requires: 3+ experts, 75%+ agreement.[/dim]")
+        return
 
-        total_upserted = 0
-        with console.status(
-            "[bold green]Crawling entities...", spinner="dots"
-        ) as status:
-            for idx, addr in enumerate(remaining, 1):
-                status.update(
-                    f"[bold green]Processing {idx}/{len(remaining)}: {addr[:10]}..."
-                )
-                count = upsert_entity_alpha(session, addr)
-                total_upserted += count
-                stats = get_entity_alpha_for_trader(session, addr)
-                last_entity = stats[0]["entity_type"] if stats else ""
-                last_game = stats[0]["game"] if stats else None
-                save_cursor(addr, last_entity, last_game, idx)
+    actionable_label = (
+        "[green]ACTIONABLE[/green]"
+        if config and config.actionable
+        else "[yellow]SIGNAL WEAK[/yellow]"
+    )
+    console.print(f"\nActive Q5 Consensus Signals  Status: {actionable_label}")
 
-        clear_cursor()
-        console.print(
-            f"[bold]Crawl complete: {total_upserted} entities upserted across {len(remaining)} traders[/bold]"
+    table = Table(title="Active Q5 Consensus Signals")
+    table.add_column("Market", style="cyan", width=16)
+    table.add_column("Direction", justify="center", width=9)
+    table.add_column("Q5 Count", justify="right", width=8)
+    table.add_column("Expert Avg Entry", justify="right", width=15)
+    table.add_column("Confidence", justify="right", width=10)
+    table.add_column("Actionable", justify="center", width=10)
+
+    for signal in sorted(all_signals, key=lambda s: s.confidence_score, reverse=True):
+        mkt_display = signal.market_id[:12] + "..."
+        dir_style = "green" if signal.direction == "LONG" else "red"
+        entry_display = (
+            f"{float(signal.expert_avg_entry):.3f}"
+            if signal.expert_avg_entry is not None
+            else "n/a"
         )
+        act_display = (
+            "[green]YES[/green]" if config and config.actionable else "[yellow]WEAK[/yellow]"
+        )
+        table.add_row(
+            mkt_display,
+            f"[{dir_style}]{signal.direction}[/{dir_style}]",
+            str(signal.expert_count),
+            entry_display,
+            f"{float(signal.confidence_score):.1f}",
+            act_display,
+        )
+
+    console.print(table)
+    console.print(
+        "\n[dim]Sizing guidance: 0-2 Q5 = 1% bankroll, 3+ Q5 = 2-3% bankroll[/dim]"
+    )
 
 
 if __name__ == "__main__":
