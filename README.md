@@ -1,6 +1,6 @@
-# Polymarket Smart Money Tracker
+# Polymarket Edge Tracker
 
-A category-agnostic intelligence pipeline that identifies expert niche traders on Polymarket, scores them using a backtest-validated lift formula, and surfaces consensus signals when multiple experts converge on positions.
+A category-agnostic intelligence pipeline that identifies edge traders on Polymarket — wallets whose entries consistently beat the market's implied probability — and surfaces consensus signals when multiple edge traders converge on the same position.
 
 **eSports is the first case study** — the architecture generalizes to any Polymarket category via taxonomy configuration.
 
@@ -289,7 +289,7 @@ pytest --cov=src    # With coverage
 ## Version History
 
 - **v1.2** (2026-03-22) — Gamma events integration, market resolution, deep classification, entity-level intelligence, lift-based scoring v2. 11 phases (15-25).
-- **v1.1** (2026-02-21) — Targeted scanning, pipeline decoupling, deep niche scoring, JBecker token catalog. 5 phases (10-14).
+- **v1.1** (2026-02-21) — Targeted scanning, pipeline decoupling, deep category scoring, JBecker token catalog. 5 phases (10-14).
 - **v1.0** (2026-02-13) — Foundation: API client, taxonomy, evaluation, scoring, signals, alerts, CLI, blockchain, JBecker dataset. 9 phases (1-9).
 
 ---
