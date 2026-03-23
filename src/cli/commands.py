@@ -1099,7 +1099,11 @@ def discover(niche, closing_within, verbose):
                     or_(*[Market.category.ilike(f"%{n}%") for n in niche])
                 )
             if end_date_max:
-                query = query.filter(Market.end_date <= end_date_max)
+                from datetime import datetime
+
+                query = query.filter(
+                    Market.end_date > datetime.utcnow(), Market.end_date <= end_date_max
+                )
             markets_orm = query.all()
             detail_markets = [
                 m for m in markets_orm if category_filter.requires_detail(m.category)
