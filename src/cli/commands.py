@@ -489,9 +489,7 @@ def leaderboard(category, top_n, verbose):
     )
 
     if not leaderboard_entries:
-        console.print(
-            f"[yellow]No scores found for category '{category}'.[/yellow]"
-        )
+        console.print(f"[yellow]No scores found for category '{category}'.[/yellow]")
         console.print(
             "[dim]Run 'polymarket score' to compute lift-based scores first.[/dim]"
         )
@@ -509,12 +507,20 @@ def leaderboard(category, top_n, verbose):
     table.add_column("Positions", justify="right", width=9)
     table.add_column("PnL", justify="right", width=10)
 
-    actionable_label = "[green]ACTIONABLE[/green]" if config.actionable else "[yellow]SIGNAL WEAK[/yellow]"
+    actionable_label = (
+        "[green]ACTIONABLE[/green]"
+        if config.actionable
+        else "[yellow]SIGNAL WEAK[/yellow]"
+    )
     console.print(f"\nCategory: [bold]{category}[/bold]  Status: {actionable_label}")
 
     for rank, entry in enumerate(leaderboard_entries, 1):
         addr_display = entry.trader_address[:8] + "..."
-        q_style = "green" if entry.quintile == 5 else ("red" if entry.quintile == 1 else "white")
+        q_style = (
+            "green"
+            if entry.quintile == 5
+            else ("red" if entry.quintile == 1 else "white")
+        )
         table.add_row(
             str(rank),
             addr_display,
@@ -1021,8 +1027,11 @@ def batch_analyze(addresses, address_file, verbose):
     default=None,
     help="Only scan markets closing within this time window (e.g., 48h, 2d)",
 )
+@click.option(
+    "--skip-llm", is_flag=True, help="Skip LLM entity extraction for faster discovery"
+)
 @click.option("--verbose", "-v", is_flag=True, help="Enable debug logging")
-def discover(niche, closing_within, verbose):
+def discover(niche, closing_within, skip_llm, verbose):
     """Discover traders from active markets without backfilling history.
 
     Finds new trader addresses from market trade data and stores them
@@ -1034,6 +1043,7 @@ def discover(niche, closing_within, verbose):
         polymarket discover
         polymarket discover --niche esports
         polymarket discover --niche esports --closing-within 48h
+        polymarket discover --niche esports --closing-within 1h --skip-llm
     """
     logger.info(
         f"DISCOVER command started (niches={niche}, closing_within={closing_within})"
@@ -1088,6 +1098,7 @@ def discover(niche, closing_within, verbose):
         traders_discovered = 0
         entities_extracted = 0
         pattern_matches = 0
+        llm_calls = 0
         with get_session(session_factory) as session:
             matcher = PatternMatcher()
             matcher.load_from_db(session)
@@ -1120,9 +1131,14 @@ def discover(niche, closing_within, verbose):
                     if raw_result:
                         pattern_matches += 1
                         normalized = normalize_entities(raw_result)
-                    else:
+                    elif not skip_llm:
                         raw_result = extract_entities(market.question)
                         normalized = normalize_entities(raw_result)
+                        llm_calls += 1
+                    else:
+                        from src.extraction.llm_extractor import EntityResult
+
+                        normalized = normalize_entities(EntityResult())
                     existing = (
                         session.query(MarketEntity)
                         .filter_by(condition_id=market.condition_id)
@@ -1162,7 +1178,14 @@ def discover(niche, closing_within, verbose):
     console.print(f"  Detail markets:  {len(detail_markets)}")
     console.print(f"  New traders:     [green]{traders_discovered}[/green]")
     console.print(f"  Entities stored: [cyan]{entities_extracted}[/cyan]")
-    console.print(f"  Pattern matched: [green]{pattern_matches}[/green]  LLM calls: [yellow]{entities_extracted - pattern_matches}[/yellow]")
+    if skip_llm:
+        console.print(
+            f"  Pattern matched: [green]{pattern_matches}[/green]  LLM calls: [yellow]Skipped[/yellow]"
+        )
+    else:
+        console.print(
+            f"  Pattern matched: [green]{pattern_matches}[/green]  LLM calls: [yellow]{llm_calls}[/yellow]"
+        )
     console.print(
         "\n[dim]Run 'polymarket backfill' to fetch history for discovered traders.[/dim]"
     )
@@ -1623,9 +1646,7 @@ def score(verbose):
         if not entries:
             continue
         q5_count = sum(1 for e in entries if e.quintile == 5)
-        console.print(
-            f"  {category:12s}: {len(entries):3d} traders, {q5_count} Q5"
-        )
+        console.print(f"  {category:12s}: {len(entries):3d} traders, {q5_count} Q5")
 
     console.print(
         "\n[dim]Run 'polymarket leaderboard --category esports' to view Q5 traders.[/dim]"
@@ -2547,13 +2568,19 @@ def _run_analyze_leaderboard_mode(console, session_factory, category):
 
         if not entries:
             console.print(f"[yellow]No scores computed for '{category}'.[/yellow]")
-            console.print("[dim]Run 'polymarket score' first to compute lift scores.[/dim]")
+            console.print(
+                "[dim]Run 'polymarket score' first to compute lift scores.[/dim]"
+            )
             return
 
         actionable_label = (
-            "[green]ACTIONABLE[/green]" if config.actionable else "[yellow]SIGNAL WEAK[/yellow]"
+            "[green]ACTIONABLE[/green]"
+            if config.actionable
+            else "[yellow]SIGNAL WEAK[/yellow]"
         )
-        console.print(f"\nQ5 Traders — [bold]{category}[/bold]  Status: {actionable_label}")
+        console.print(
+            f"\nQ5 Traders — [bold]{category}[/bold]  Status: {actionable_label}"
+        )
 
         table = Table(title=f"Q5 Leaderboard: {category.title()} (Top 20)")
         table.add_column("Rank", style="bold", justify="right", width=4)
@@ -2568,7 +2595,11 @@ def _run_analyze_leaderboard_mode(console, session_factory, category):
 
         for rank, entry in enumerate(entries, 1):
             addr_display = entry.trader_address[:8] + "..."
-            q_style = "green" if entry.quintile == 5 else ("red" if entry.quintile == 1 else "white")
+            q_style = (
+                "green"
+                if entry.quintile == 5
+                else ("red" if entry.quintile == 1 else "white")
+            )
             table.add_row(
                 str(rank),
                 addr_display,
@@ -2598,17 +2629,22 @@ def _run_analyze_signals_mode(console, session_factory, category):
     config = get_market_config(category)
 
     with get_session(session_factory) as session:
-        markets = get_markets_by_expert_activity(session, window_hours=24, min_experts=1)
+        markets = get_markets_by_expert_activity(
+            session, window_hours=24, min_experts=1
+        )
 
         if not markets:
             console.print("[yellow]No Q5 expert activity in last 24 hours.[/yellow]")
-            console.print("[dim]Run 'polymarket score' first to compute lift scores.[/dim]")
+            console.print(
+                "[dim]Run 'polymarket score' first to compute lift scores.[/dim]"
+            )
             return
 
         all_signals = []
         for market_id, expert_count, latest_activity in markets:
             results = refresh_market_signal(
-                session, market_id,
+                session,
+                market_id,
                 min_experts=3,
                 min_agreement_pct=Decimal("75"),
             )
@@ -2643,7 +2679,9 @@ def _run_analyze_signals_mode(console, session_factory, category):
             else "n/a"
         )
         act_display = (
-            "[green]YES[/green]" if config and config.actionable else "[yellow]WEAK[/yellow]"
+            "[green]YES[/green]"
+            if config and config.actionable
+            else "[yellow]WEAK[/yellow]"
         )
         table.add_row(
             mkt_display,
