@@ -81,7 +81,7 @@ def _get_dependencies(settings=None):
         Tuple of (session_factory, client, category_filter, alerter)
 
     Example:
-        session_factory, client, category_filter, alerter, _ = _get_dependencies()
+        session_factory, client, category_filter, alerter, _, _ = _get_dependencies()
         with get_session(session_factory) as session:
             # use session
     """
@@ -836,7 +836,7 @@ def research(address, output_format, limit, verbose):
     # Resolve address (try DB lookup if available, otherwise use as-is)
     full_address = address
     try:
-        session_factory, _, _, _, _ = _get_dependencies(settings)
+        session_factory, _, _, _, _, _ = _get_dependencies(settings)
         with get_session(session_factory) as session:
             resolved = find_trader_by_prefix(session, address)
             if resolved:
@@ -950,7 +950,7 @@ def batch_analyze(addresses, address_file, verbose):
         return
 
     # Get dependencies
-    session_factory, client, category_filter, _, _ = _get_dependencies(settings)
+    session_factory, client, category_filter, _, _, _ = _get_dependencies(settings)
 
     # Import pipeline
     from src.pipeline.ingest import IngestionPipeline
@@ -1723,7 +1723,7 @@ def score(verbose):
 
     start_time = time.time()
 
-    session_factory, _, _, _, _ = _get_dependencies()
+    session_factory, _, _, _, _, _ = _get_dependencies()
 
     with console.status("[bold green]Computing lift-based scores...", spinner="dots"):
         from src.pipeline.scoring_pipeline import compute_all_category_scores
@@ -1784,7 +1784,7 @@ def detect(window, verbose):
 
     start_time = time.time()
 
-    session_factory, _, _, _, _ = _get_dependencies()
+    session_factory, _, _, _, _, _ = _get_dependencies()
 
     with console.status("[bold green]Detecting signals...", spinner="dots"):
         from src.signals.pipeline import refresh_all_signals
@@ -1828,7 +1828,7 @@ def alert(window, verbose):
 
     console = Console()
 
-    session_factory, _, _, alerter, _ = _get_dependencies()
+    session_factory, _, _, alerter, _, _ = _get_dependencies()
 
     if alerter is None:
         console.print(
@@ -2182,7 +2182,7 @@ def reset_backfill(confirm, verbose):
 
     console = Console()
 
-    session_factory, _, _, _, _ = _get_dependencies()
+    session_factory, _, _, _, _, _ = _get_dependencies()
 
     with get_session(session_factory) as session:
         jbecker_count = (
@@ -2387,7 +2387,7 @@ def resolve_outcomes(verbose):
 
     try:
         settings = get_settings()
-        session_factory, _, _, _, _ = _get_dependencies(settings)
+        session_factory, _, _, _, _, _ = _get_dependencies(settings)
 
         console.print("[bold]Resolving market outcomes from Gamma event data...[/bold]")
 
@@ -2447,7 +2447,7 @@ def build_positions_cmd(verbose):
 
     try:
         settings = get_settings()
-        session_factory, _, _, _, _ = _get_dependencies(settings)
+        session_factory, _, _, _, _, _ = _get_dependencies(settings)
 
         console.print("[bold]Building positions from trade history...[/bold]")
 
@@ -2541,7 +2541,7 @@ def resolve_positions_cmd(verbose):
 
     try:
         settings = get_settings()
-        session_factory, _, _, _, _ = _get_dependencies(settings)
+        session_factory, _, _, _, _, _ = _get_dependencies(settings)
 
         console.print("[bold]Resolving positions from market outcomes...[/bold]")
 
@@ -2598,7 +2598,7 @@ def classify_tokens(verbose):
 
     try:
         settings = get_settings()
-        session_factory, _, _, _, _ = _get_dependencies(settings)
+        session_factory, _, _, _, _, _ = _get_dependencies(settings)
 
         console.print("[bold]Classifying tokens from Gamma event tags...[/bold]")
 
@@ -2662,7 +2662,7 @@ def backfill_classifications_cmd(verbose):
 
     try:
         settings = get_settings()
-        session_factory, _, _, _, _ = _get_dependencies(settings)
+        session_factory, _, _, _, _, _ = _get_dependencies(settings)
 
         console.print(
             "[bold]Backfilling MarketClassification taxonomy node IDs...[/bold]"
@@ -2707,7 +2707,7 @@ def team_stats(address, verbose):
         logger.add(sys.stderr, level="DEBUG")
 
     console = Console()
-    session_factory, _, _, _, _ = _get_dependencies()
+    session_factory, _, _, _, _, _ = _get_dependencies()
 
     with get_session(session_factory) as session:
         total_resolved = (
@@ -2796,7 +2796,7 @@ def analyze(category, signals, verbose):
         logger.add(sys.stderr, level="DEBUG")
 
     console = Console()
-    session_factory, _, _, _, _ = _get_dependencies()
+    session_factory, _, _, _, _, _ = _get_dependencies()
 
     from src.config.market_config import get_market_config
 
