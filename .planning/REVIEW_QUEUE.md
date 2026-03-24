@@ -18,28 +18,34 @@ Read this section and the AGENTS.md file in project root before starting work. R
 
 ## Pending Review
 
-### worker/27-01-hybrid-backfill-gap-fix-fix (27-01) — 2026-03-24
-
-- **Plan:** 27-01
-- **Branch:** worker/27-01-hybrid-backfill-gap-fix-fix
-- **Commits:** fa3f8d7..e3b24ee
-- **Files changed:**
-  - src/pipeline/ingest.py (MODIFIED — raw_api_count tracking, Graph escalation fix)
-  - tests/pipeline/test_ingest_jbecker.py (NEW tests — test_hybrid_graph_escalation_fires_on_raw_count, test_hybrid_graph_escalation_skipped_when_raw_count_low)
-  - .planning/phases/27-hybrid-backfill-gap-fix/27-01-SUMMARY.md (NEW)
-- **Worker notes:** 
-  - Fixed critical bug: Graph escalation was checking detail_count (post-dedup) instead of raw_api_count (pre-dedup)
-  - After JBecker trades already in DB, dedup reduces count below 100, so Graph never fired → 54-day data gap
-  - Fix: Track raw_api_count in ingest_trader_history, use that for >= 100 check in hybrid method
-  - Defensive fallback: .get("raw_api_count", api_stats.get("detail_count", 0)) for backward compatibility
-  - **COSMETIC CHANGES:** Test file has minor line reformatting (editor auto-format). Review functional changes only.
-- **Checklist:**
-  - [ ] All tests pass (pytest tests/pipeline/test_ingest_jbecker.py — pending, environmental timeout issue with SQLite in-memory DB)
-  - [x] No debug artifacts
-  - [x] SUMMARY.md written (27-01-SUMMARY.md)
-  - [x] Cosmetic changes present in test file — focus review on functional changes only
+(empty)
 
 ## Cleared (recent)
+
+### worker/27-01-hybrid-backfill-gap-fix-fix (27-01) — cleared 2026-03-24
+- **Plan:** 27-01
+- **Branch:** worker/27-01-hybrid-backfill-gap-fix-fix
+- **Cleared by:** Opus 4.6
+- **No reviewer fixes required.**
+- **Files in scope:**
+  - src/pipeline/ingest.py (MODIFIED — raw_api_count tracking, Graph escalation fix)
+  - tests/pipeline/test_ingest_jbecker.py (NEW tests — 2 Graph escalation tests + minor cosmetic reformatting)
+  - .planning/phases/27-hybrid-backfill-gap-fix/27-01-SUMMARY.md (NEW)
+- **Notes:** Correct fix — Graph escalation now checks raw_api_count (pre-dedup) instead of detail_count (post-dedup). 2/2 new tests pass (14/15 full suite, 1 pre-existing failure). Minor cosmetic line-wrapping in test file — noted but non-blocking.
+
+### worker/26-01-research (Phase 26: Plans 26-01 & 26-02) — cleared 2026-03-24
+- **Plans:** 26-01 (Research), 26-02 (Implementation)
+- **Branch:** worker/26-01-research
+- **Cleared by:** Opus 4.6
+- **Reviewer fixes (2):**
+  1. `src/cli/commands.py`: Reverted ~50 lines of cosmetic reformatting in `leaderboard()`, `score()`, `_run_analyze_leaderboard_mode()`, `_run_analyze_signals_mode()` — all outside discover command scope.
+  2. `src/cli/commands.py`: Removed `from datetime import datetime` inline import inside `discover()` — already imported at module level (line 17).
+- **Files in scope:**
+  - src/cli/commands.py (MODIFIED — --skip-llm flag, lower bound time filter, llm_calls counter; reviewer reverted cosmetic reformatting + inline import)
+  - .planning/phases/26-discover-command-optimization/26-01-SUMMARY.md (NEW)
+  - .planning/phases/26-discover-command-optimization/26-02-SUMMARY.md (NEW)
+  - .planning/phases/26-discover-command-optimization/26-01-RESEARCH.md (NEW)
+- **Notes:** Functional changes correct. `--skip-llm` flag skips LLM extraction, falls back to empty EntityResult. Lower bound `Market.end_date > datetime.utcnow()` filters out already-closed markets — root cause of 7-15min runtime. `llm_calls` counter replaces inaccurate `entities_extracted - pattern_matches` calculation. Performance: 7-15min → 76-118s.
 
 ### worker/24-01-scoring-rewire (24-01) — cleared 2026-03-16
 - **Plan:** 24-01

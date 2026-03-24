@@ -1021,8 +1021,11 @@ def batch_analyze(addresses, address_file, verbose):
     default=None,
     help="Only scan markets closing within this time window (e.g., 48h, 2d)",
 )
+@click.option(
+    "--skip-llm", is_flag=True, help="Skip LLM entity extraction for faster discovery"
+)
 @click.option("--verbose", "-v", is_flag=True, help="Enable debug logging")
-def discover(niche, closing_within, verbose):
+def discover(niche, closing_within, skip_llm, verbose):
     """Discover traders from active markets without backfilling history.
 
     Finds new trader addresses from market trade data and stores them
@@ -1034,6 +1037,7 @@ def discover(niche, closing_within, verbose):
         polymarket discover
         polymarket discover --niche esports
         polymarket discover --niche esports --closing-within 48h
+        polymarket discover --niche esports --closing-within 1h --skip-llm
     """
     logger.info(
         f"DISCOVER command started (niches={niche}, closing_within={closing_within})"
@@ -1088,6 +1092,7 @@ def discover(niche, closing_within, verbose):
         traders_discovered = 0
         entities_extracted = 0
         pattern_matches = 0
+        llm_calls = 0
         with get_session(session_factory) as session:
             matcher = PatternMatcher()
             matcher.load_from_db(session)
@@ -1099,7 +1104,9 @@ def discover(niche, closing_within, verbose):
                     or_(*[Market.category.ilike(f"%{n}%") for n in niche])
                 )
             if end_date_max:
-                query = query.filter(Market.end_date <= end_date_max)
+                query = query.filter(
+                    Market.end_date > datetime.utcnow(), Market.end_date <= end_date_max
+                )
             markets_orm = query.all()
             detail_markets = [
                 m for m in markets_orm if category_filter.requires_detail(m.category)
@@ -1116,9 +1123,14 @@ def discover(niche, closing_within, verbose):
                     if raw_result:
                         pattern_matches += 1
                         normalized = normalize_entities(raw_result)
-                    else:
+                    elif not skip_llm:
                         raw_result = extract_entities(market.question)
                         normalized = normalize_entities(raw_result)
+                        llm_calls += 1
+                    else:
+                        from src.extraction.llm_extractor import EntityResult
+
+                        normalized = normalize_entities(EntityResult())
                     existing = (
                         session.query(MarketEntity)
                         .filter_by(condition_id=market.condition_id)
@@ -1158,7 +1170,10 @@ def discover(niche, closing_within, verbose):
     console.print(f"  Detail markets:  {len(detail_markets)}")
     console.print(f"  New traders:     [green]{traders_discovered}[/green]")
     console.print(f"  Entities stored: [cyan]{entities_extracted}[/cyan]")
-    console.print(f"  Pattern matched: [green]{pattern_matches}[/green]  LLM calls: [yellow]{entities_extracted - pattern_matches}[/yellow]")
+    if skip_llm:
+        console.print(f"  Pattern matched: [green]{pattern_matches}[/green]  LLM calls: [yellow]Skipped[/yellow]")
+    else:
+        console.print(f"  Pattern matched: [green]{pattern_matches}[/green]  LLM calls: [yellow]{llm_calls}[/yellow]")
     console.print(
         "\n[dim]Run 'polymarket backfill' to fetch history for discovered traders.[/dim]"
     )
