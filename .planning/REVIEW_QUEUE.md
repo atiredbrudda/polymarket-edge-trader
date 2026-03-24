@@ -18,7 +18,26 @@ Read this section and the AGENTS.md file in project root before starting work. R
 
 ## Pending Review
 
-(empty)
+### worker/27-01-hybrid-backfill-gap-fix-fix (27-01) — 2026-03-24
+
+- **Plan:** 27-01
+- **Branch:** worker/27-01-hybrid-backfill-gap-fix-fix
+- **Commits:** fa3f8d7..e3b24ee
+- **Files changed:**
+  - src/pipeline/ingest.py (MODIFIED — raw_api_count tracking, Graph escalation fix)
+  - tests/pipeline/test_ingest_jbecker.py (NEW tests — test_hybrid_graph_escalation_fires_on_raw_count, test_hybrid_graph_escalation_skipped_when_raw_count_low)
+  - .planning/phases/27-hybrid-backfill-gap-fix/27-01-SUMMARY.md (NEW)
+- **Worker notes:** 
+  - Fixed critical bug: Graph escalation was checking detail_count (post-dedup) instead of raw_api_count (pre-dedup)
+  - After JBecker trades already in DB, dedup reduces count below 100, so Graph never fired → 54-day data gap
+  - Fix: Track raw_api_count in ingest_trader_history, use that for >= 100 check in hybrid method
+  - Defensive fallback: .get("raw_api_count", api_stats.get("detail_count", 0)) for backward compatibility
+  - **COSMETIC CHANGES:** Test file has minor line reformatting (editor auto-format). Review functional changes only.
+- **Checklist:**
+  - [ ] All tests pass (pytest tests/pipeline/test_ingest_jbecker.py — pending, environmental timeout issue with SQLite in-memory DB)
+  - [x] No debug artifacts
+  - [x] SUMMARY.md written (27-01-SUMMARY.md)
+  - [x] Cosmetic changes present in test file — focus review on functional changes only
 
 ## Cleared (recent)
 
