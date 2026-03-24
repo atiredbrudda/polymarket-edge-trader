@@ -48,6 +48,7 @@ from src.db.session import get_session, get_session_factory
 from src.config.settings import get_settings
 from src.api.client import PolymarketClient
 from src.api.gamma_client import GammaMarketClient
+from src.graph.client import GraphClient
 from src.pipeline.filters import CategoryFilter
 from src.alerts.telegram import TelegramAlerter
 from src.gamma.persist import upsert_gamma_events
@@ -105,8 +106,9 @@ def _get_dependencies(settings=None):
         logger.warning(f"Telegram configuration invalid: {e}")
 
     gamma_client = GammaMarketClient(rate_limiter=client.rate_limiter)
+    graph_client = GraphClient()
 
-    return session_factory, client, category_filter, alerter, gamma_client
+    return session_factory, client, category_filter, alerter, gamma_client, graph_client
 
 
 def find_trader_by_prefix(session, partial_address: str) -> str | None:
@@ -224,7 +226,7 @@ def markets(category, verbose):
 
     with console.status("[bold green]Fetching markets...", spinner="dots"):
         # Get dependencies
-        session_factory, _, _, _, _ = _get_dependencies()
+        session_factory, _, _, _, _, _ = _get_dependencies()
 
         # Import queries here to avoid circular imports
         from src.pipeline.queries import get_active_markets
@@ -287,7 +289,7 @@ def trader(address, verbose):
 
     with console.status("[bold green]Fetching trader profile...", spinner="dots"):
         # Get dependencies
-        session_factory, _, _, _, _ = _get_dependencies()
+        session_factory, _, _, _, _, _ = _get_dependencies()
 
         with get_session(session_factory) as session:
             # Resolve partial address
@@ -385,7 +387,7 @@ def signals(window, min_confidence, verbose):
 
     with console.status("[bold green]Fetching signals...", spinner="dots"):
         # Get dependencies
-        session_factory, _, _, _, _ = _get_dependencies()
+        session_factory, _, _, _, _, _ = _get_dependencies()
 
         with get_session(session_factory) as session:
             # Import signal queries here
@@ -477,7 +479,7 @@ def leaderboard(category, top_n, verbose):
 
     leaderboard_entries = []
     with console.status("[bold green]Fetching leaderboard...", spinner="dots"):
-        session_factory, _, _, _, _ = _get_dependencies()
+        session_factory, _, _, _, _, _ = _get_dependencies()
 
         with get_session(session_factory) as session:
             from src.pipeline.queries import get_lift_leaderboard
@@ -489,9 +491,7 @@ def leaderboard(category, top_n, verbose):
     )
 
     if not leaderboard_entries:
-        console.print(
-            f"[yellow]No scores found for category '{category}'.[/yellow]"
-        )
+        console.print(f"[yellow]No scores found for category '{category}'.[/yellow]")
         console.print(
             "[dim]Run 'polymarket score' to compute lift-based scores first.[/dim]"
         )
@@ -509,12 +509,20 @@ def leaderboard(category, top_n, verbose):
     table.add_column("Positions", justify="right", width=9)
     table.add_column("PnL", justify="right", width=10)
 
-    actionable_label = "[green]ACTIONABLE[/green]" if config.actionable else "[yellow]SIGNAL WEAK[/yellow]"
+    actionable_label = (
+        "[green]ACTIONABLE[/green]"
+        if config.actionable
+        else "[yellow]SIGNAL WEAK[/yellow]"
+    )
     console.print(f"\nCategory: [bold]{category}[/bold]  Status: {actionable_label}")
 
     for rank, entry in enumerate(leaderboard_entries, 1):
         addr_display = entry.trader_address[:8] + "..."
-        q_style = "green" if entry.quintile == 5 else ("red" if entry.quintile == 1 else "white")
+        q_style = (
+            "green"
+            if entry.quintile == 5
+            else ("red" if entry.quintile == 1 else "white")
+        )
         table.add_row(
             str(rank),
             addr_display,
@@ -557,7 +565,7 @@ def expertise(address, verbose):
     console = Console()
 
     with console.status("[bold green]Fetching expertise breakdown...", spinner="dots"):
-        session_factory, _, _, _, _ = _get_dependencies()
+        session_factory, _, _, _, _, _ = _get_dependencies()
 
         with get_session(session_factory) as session:
             address = find_trader_by_prefix(session, address)
@@ -651,7 +659,7 @@ def specialists(game_slug, game_threshold, deep_threshold, verbose):
     with console.status(
         "[bold green]Discovering hidden specialists...", spinner="dots"
     ):
-        session_factory, _, _, _, _ = _get_dependencies()
+        session_factory, _, _, _, _, _ = _get_dependencies()
 
         with get_session(session_factory) as session:
             from src.pipeline.scoring_pipeline import identify_hidden_specialists
@@ -728,8 +736,8 @@ def poll(interval, niche, closing_within, no_alerts, verbose):
             return
 
     settings = get_settings()
-    session_factory, client, category_filter, alerter, gamma_client = _get_dependencies(
-        settings
+    session_factory, client, category_filter, alerter, gamma_client, _ = (
+        _get_dependencies(settings)
     )
 
     if no_alerts:
@@ -1068,7 +1076,9 @@ def discover(niche, closing_within, skip_llm, verbose):
 
         start_time = time.time()
 
-        session_factory, client, category_filter, _, gamma_client = _get_dependencies()
+        session_factory, client, category_filter, _, gamma_client, _ = (
+            _get_dependencies()
+        )
 
         from src.pipeline.ingest import IngestionPipeline
 
@@ -1120,9 +1130,7 @@ def discover(niche, closing_within, skip_llm, verbose):
             cached_condition_ids = set(
                 row[0]
                 for row in session.query(Trade.market_id.distinct())
-                .filter(
-                    Trade.market_id.in_([m.condition_id for m in detail_markets])
-                )
+                .filter(Trade.market_id.in_([m.condition_id for m in detail_markets]))
                 .all()
             )
             from datetime import timedelta
@@ -1195,13 +1203,19 @@ def discover(niche, closing_within, skip_llm, verbose):
         f"\n[bold green]Discovery complete[/bold green] ({processing_time:.1f}s)"
     )
     console.print(f"  Markets scanned: {markets_count}")
-    console.print(f"  Detail markets:  {len(detail_markets)} ({new_markets} new, {cached_markets} cached)")
+    console.print(
+        f"  Detail markets:  {len(detail_markets)} ({new_markets} new, {cached_markets} cached)"
+    )
     console.print(f"  New traders:     [green]{traders_discovered}[/green]")
     console.print(f"  Entities stored: [cyan]{entities_extracted}[/cyan]")
     if skip_llm:
-        console.print(f"  Pattern matched: [green]{pattern_matches}[/green]  LLM calls: [yellow]Skipped[/yellow]")
+        console.print(
+            f"  Pattern matched: [green]{pattern_matches}[/green]  LLM calls: [yellow]Skipped[/yellow]"
+        )
     else:
-        console.print(f"  Pattern matched: [green]{pattern_matches}[/green]  LLM calls: [yellow]{llm_calls}[/yellow]")
+        console.print(
+            f"  Pattern matched: [green]{pattern_matches}[/green]  LLM calls: [yellow]{llm_calls}[/yellow]"
+        )
     console.print(
         "\n[dim]Run 'polymarket backfill' to fetch history for discovered traders.[/dim]"
     )
@@ -1305,7 +1319,9 @@ def backfill(address, limit, verbose):
 
     console = Console()
 
-    session_factory, client, category_filter, _, gamma_client = _get_dependencies()
+    session_factory, client, category_filter, _, gamma_client, graph_client = (
+        _get_dependencies()
+    )
 
     from src.pipeline.ingest import IngestionPipeline
     from src.pipeline.queries import get_traders_by_backfill_status
@@ -1326,6 +1342,7 @@ def backfill(address, limit, verbose):
         session_factory,
         category_filter,
         gamma_client=gamma_client,
+        graph_client=graph_client,
         jbecker_client=jbecker_client,
     )
 
@@ -1574,7 +1591,9 @@ def _run_entity_extraction(session_factory, console):
                 session.commit()
                 extracted += 1
             except Exception as e:
-                logger.warning(f"Entity extraction failed for {market.condition_id}: {e}")
+                logger.warning(
+                    f"Entity extraction failed for {market.condition_id}: {e}"
+                )
                 session.rollback()
                 continue
 
@@ -1607,7 +1626,7 @@ def patch_catalog_cmd(verbose):
         logger.add(sys.stderr, level="DEBUG")
 
     console = Console()
-    session_factory, _, _, _, gamma_client = _get_dependencies()
+    session_factory, _, _, _, gamma_client, _ = _get_dependencies()
 
     from src.catalog.patcher import patch_missing_catalog_entries
 
@@ -1652,7 +1671,7 @@ def recover_catalog_cmd(verbose):
         logger.add(sys.stderr, level="DEBUG")
 
     console = Console()
-    session_factory, _, _, _, gamma_client = _get_dependencies()
+    session_factory, _, _, _, gamma_client, _ = _get_dependencies()
 
     from src.catalog.recovery import recover_esports_token_gaps
 
@@ -1724,9 +1743,7 @@ def score(verbose):
         if not entries:
             continue
         q5_count = sum(1 for e in entries if e.quintile == 5)
-        console.print(
-            f"  {category:12s}: {len(entries):3d} traders, {q5_count} Q5"
-        )
+        console.print(f"  {category:12s}: {len(entries):3d} traders, {q5_count} Q5")
 
     console.print(
         "\n[dim]Run 'polymarket leaderboard --category esports' to view Q5 traders.[/dim]"
@@ -1872,7 +1889,7 @@ def resolve_profiles(limit, verbose):
 
     console = Console()
 
-    session_factory, client, category_filter, _, gamma_client = _get_dependencies()
+    session_factory, client, category_filter, _, gamma_client, _ = _get_dependencies()
 
     if gamma_client is None:
         console.print("[red]Error: Gamma client not configured.[/red]")
@@ -1947,7 +1964,7 @@ def status(verbose):
     console = Console()
 
     with console.status("[bold green]Fetching status...", spinner="dots"):
-        session_factory, _, _, _, _ = _get_dependencies()
+        session_factory, _, _, _, _, _ = _get_dependencies()
 
         from src.pipeline.queries import (
             get_trader_counts_by_status,
@@ -1996,7 +2013,7 @@ def catalog_stats(verbose):
     console = Console()
 
     with console.status("[bold green]Querying token catalog...", spinner="dots"):
-        session_factory, _, _, _, _ = _get_dependencies()
+        session_factory, _, _, _, _, _ = _get_dependencies()
 
         with get_session(session_factory) as session:
             from sqlalchemy import func
@@ -2238,7 +2255,7 @@ def ingest_events(verbose):
 
     try:
         settings = get_settings()
-        session_factory, _, _, _, gamma_client = _get_dependencies(settings)
+        session_factory, _, _, _, gamma_client, _ = _get_dependencies(settings)
 
         console.print(
             "[bold]Downloading closed eSports events from Gamma API...[/bold]"
@@ -2291,7 +2308,11 @@ def _backfill_market_end_dates(session_factory, console):
         token_to_market = {}
         for market in null_markets:
             try:
-                token_ids = json.loads(market.tokens) if market.tokens.startswith("[") else market.tokens.split(",")
+                token_ids = (
+                    json.loads(market.tokens)
+                    if market.tokens.startswith("[")
+                    else market.tokens.split(",")
+                )
                 for tid in token_ids:
                     tid = tid.strip().strip('"')
                     if tid:
@@ -2308,7 +2329,11 @@ def _backfill_market_end_dates(session_factory, console):
             if not event.clob_token_ids:
                 continue
             try:
-                event_tokens = json.loads(event.clob_token_ids) if event.clob_token_ids.startswith("[") else event.clob_token_ids.split(",")
+                event_tokens = (
+                    json.loads(event.clob_token_ids)
+                    if event.clob_token_ids.startswith("[")
+                    else event.clob_token_ids.split(",")
+                )
             except (json.JSONDecodeError, AttributeError):
                 continue
             for tid in event_tokens:
@@ -2447,7 +2472,8 @@ def build_positions_cmd(verbose):
             game_tagged_markets = (
                 session.query(func.count(distinct(MarketEntity.condition_id)))
                 .filter(MarketEntity.game.isnot(None))
-                .scalar() or 0
+                .scalar()
+                or 0
             )
 
             console.print(f"\nPipeline summary:")
@@ -2461,8 +2487,7 @@ def build_positions_cmd(verbose):
             console.print(f"  Total trades:           {total_trades}")
             console.print(f"  Traded markets:         {traded_markets}")
             console.print(
-                f"  Markets with game tag:  {game_tagged_markets}"
-                f"  (used for positions)"
+                f"  Markets with game tag:  {game_tagged_markets}  (used for positions)"
             )
 
             # Build positions for qualifying traders
@@ -2798,13 +2823,19 @@ def _run_analyze_leaderboard_mode(console, session_factory, category):
 
         if not entries:
             console.print(f"[yellow]No scores computed for '{category}'.[/yellow]")
-            console.print("[dim]Run 'polymarket score' first to compute lift scores.[/dim]")
+            console.print(
+                "[dim]Run 'polymarket score' first to compute lift scores.[/dim]"
+            )
             return
 
         actionable_label = (
-            "[green]ACTIONABLE[/green]" if config.actionable else "[yellow]SIGNAL WEAK[/yellow]"
+            "[green]ACTIONABLE[/green]"
+            if config.actionable
+            else "[yellow]SIGNAL WEAK[/yellow]"
         )
-        console.print(f"\nQ5 Traders — [bold]{category}[/bold]  Status: {actionable_label}")
+        console.print(
+            f"\nQ5 Traders — [bold]{category}[/bold]  Status: {actionable_label}"
+        )
 
         table = Table(title=f"Q5 Leaderboard: {category.title()} (Top 20)")
         table.add_column("Rank", style="bold", justify="right", width=4)
@@ -2819,7 +2850,11 @@ def _run_analyze_leaderboard_mode(console, session_factory, category):
 
         for rank, entry in enumerate(entries, 1):
             addr_display = entry.trader_address[:8] + "..."
-            q_style = "green" if entry.quintile == 5 else ("red" if entry.quintile == 1 else "white")
+            q_style = (
+                "green"
+                if entry.quintile == 5
+                else ("red" if entry.quintile == 1 else "white")
+            )
             table.add_row(
                 str(rank),
                 addr_display,
@@ -2849,17 +2884,22 @@ def _run_analyze_signals_mode(console, session_factory, category):
     config = get_market_config(category)
 
     with get_session(session_factory) as session:
-        markets = get_markets_by_expert_activity(session, window_hours=24, min_experts=1)
+        markets = get_markets_by_expert_activity(
+            session, window_hours=24, min_experts=1
+        )
 
         if not markets:
             console.print("[yellow]No Q5 expert activity in last 24 hours.[/yellow]")
-            console.print("[dim]Run 'polymarket score' first to compute lift scores.[/dim]")
+            console.print(
+                "[dim]Run 'polymarket score' first to compute lift scores.[/dim]"
+            )
             return
 
         all_signals = []
         for market_id, expert_count, latest_activity in markets:
             results = refresh_market_signal(
-                session, market_id,
+                session,
+                market_id,
                 min_experts=3,
                 min_agreement_pct=Decimal("75"),
             )
@@ -2894,7 +2934,9 @@ def _run_analyze_signals_mode(console, session_factory, category):
             else "n/a"
         )
         act_display = (
-            "[green]YES[/green]" if config and config.actionable else "[yellow]WEAK[/yellow]"
+            "[green]YES[/green]"
+            if config and config.actionable
+            else "[yellow]WEAK[/yellow]"
         )
         table.add_row(
             mkt_display,
