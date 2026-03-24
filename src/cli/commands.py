@@ -2308,13 +2308,16 @@ def _backfill_market_end_dates(session_factory, console):
         token_to_market = {}
         for market in null_markets:
             try:
-                token_ids = (
+                parsed = (
                     json.loads(market.tokens)
                     if market.tokens.startswith("[")
                     else market.tokens.split(",")
                 )
-                for tid in token_ids:
-                    tid = tid.strip().strip('"')
+                for item in parsed:
+                    if isinstance(item, dict):
+                        tid = item.get("token_id", "")
+                    else:
+                        tid = str(item).strip().strip('"')
                     if tid:
                         token_to_market[tid] = market
             except (json.JSONDecodeError, AttributeError):
