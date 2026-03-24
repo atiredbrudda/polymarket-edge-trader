@@ -1114,7 +1114,33 @@ def discover(niche, closing_within, skip_llm, verbose):
                 m for m in markets_orm if category_filter.requires_detail(m.category)
             ]
 
+            # Build set of condition_ids that already have trades (cached)
+            from sqlalchemy import func as sqlfunc
+
+            cached_condition_ids = set(
+                row[0]
+                for row in session.query(Trade.market_id.distinct())
+                .filter(
+                    Trade.market_id.in_([m.condition_id for m in detail_markets])
+                )
+                .all()
+            )
+            from datetime import timedelta
+
+            refresh_cutoff = datetime.utcnow() + timedelta(minutes=30)
+
             for market in detail_markets:
+                is_cached = market.condition_id in cached_condition_ids
+
+                if is_cached:
+                    cached_markets += 1
+                    # Skip cached markets unless closing within 30 min
+                    closing_soon = market.end_date and market.end_date <= refresh_cutoff
+                    if not closing_soon:
+                        continue
+                else:
+                    new_markets += 1
+
                 try:
                     new_traders = pipeline.discover_traders_from_market(
                         market.condition_id
@@ -1139,7 +1165,6 @@ def discover(niche, closing_within, skip_llm, verbose):
                         .first()
                     )
                     if existing:
-                        cached_markets += 1
                         existing.team_a = normalized.team_a
                         existing.team_b = normalized.team_b
                         existing.tournament = normalized.tournament
@@ -1147,7 +1172,6 @@ def discover(niche, closing_within, skip_llm, verbose):
                         existing.market_type = normalized.market_type
                         existing.extracted_at = datetime.utcnow()
                     else:
-                        new_markets += 1
                         entity_row = MarketEntity(
                             condition_id=market.condition_id,
                             team_a=normalized.team_a,
