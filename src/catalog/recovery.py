@@ -90,7 +90,9 @@ def _fetch_esports_events_index() -> dict[str, list[dict]]:
 
         offset += PAGE_SIZE
 
-    logger.debug(f"RECOVER-CATALOG: Fetched {len(events_index)} eSports markets from Gamma API")
+    logger.debug(
+        f"RECOVER-CATALOG: Fetched {len(events_index)} eSports markets from Gamma API"
+    )
     return events_index
 
 
@@ -125,12 +127,18 @@ def recover_esports_token_gaps(session: Session) -> dict[str, int]:
         "fallback": 0,
     }
 
-    gap_markets = session.execute(text("""
+    gap_markets = (
+        session.execute(
+            text("""
         SELECT DISTINCT m.condition_id
         FROM markets m
         JOIN trades t ON t.market_id = m.condition_id
         WHERE m.tokens IS NULL AND LOWER(m.category) = 'esports'
-    """)).scalars().all()
+    """)
+        )
+        .scalars()
+        .all()
+    )
 
     stats["found"] = len(gap_markets)
 
@@ -142,11 +150,19 @@ def recover_esports_token_gaps(session: Session) -> dict[str, int]:
 
     events_index = _fetch_esports_events_index()
 
-    markets_to_update = (
-        session.query(Market)
-        .filter(Market.condition_id.in_(gap_markets))
-        .all()
-    )
+    # Batch the IN clause query to avoid SQLite parameter limit
+    markets_to_update = []
+    batch_size = 500
+    for i in range(0, len(gap_markets), batch_size):
+        batch = gap_markets[i : i + batch_size]
+        batch_markets = (
+            session.query(Market).filter(Market.condition_id.in_(batch)).all()
+        )
+        markets_to_update.extend(batch_markets)
+        if i % 5000 == 0:
+            logger.debug(
+                f"  Loaded {len(markets_to_update)}/{len(gap_markets)} markets"
+            )
 
     for market in markets_to_update:
         tokens = events_index.get(market.condition_id)
