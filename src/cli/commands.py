@@ -1093,6 +1093,8 @@ def discover(niche, closing_within, skip_llm, verbose):
         entities_extracted = 0
         pattern_matches = 0
         llm_calls = 0
+        new_markets = 0
+        cached_markets = 0
         with get_session(session_factory) as session:
             matcher = PatternMatcher()
             matcher.load_from_db(session)
@@ -1137,6 +1139,7 @@ def discover(niche, closing_within, skip_llm, verbose):
                         .first()
                     )
                     if existing:
+                        cached_markets += 1
                         existing.team_a = normalized.team_a
                         existing.team_b = normalized.team_b
                         existing.tournament = normalized.tournament
@@ -1144,6 +1147,7 @@ def discover(niche, closing_within, skip_llm, verbose):
                         existing.market_type = normalized.market_type
                         existing.extracted_at = datetime.utcnow()
                     else:
+                        new_markets += 1
                         entity_row = MarketEntity(
                             condition_id=market.condition_id,
                             team_a=normalized.team_a,
@@ -1167,7 +1171,7 @@ def discover(niche, closing_within, skip_llm, verbose):
         f"\n[bold green]Discovery complete[/bold green] ({processing_time:.1f}s)"
     )
     console.print(f"  Markets scanned: {markets_count}")
-    console.print(f"  Detail markets:  {len(detail_markets)}")
+    console.print(f"  Detail markets:  {len(detail_markets)} ({new_markets} new, {cached_markets} cached)")
     console.print(f"  New traders:     [green]{traders_discovered}[/green]")
     console.print(f"  Entities stored: [cyan]{entities_extracted}[/cyan]")
     if skip_llm:
