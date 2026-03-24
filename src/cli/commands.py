@@ -2393,19 +2393,54 @@ def build_positions_cmd(verbose):
         settings = get_settings()
         session_factory, _, _, _, _ = _get_dependencies(settings)
 
-        console.print("[bold]Building positions from trades...[/bold]")
+        console.print("[bold]Building positions from trade history...[/bold]")
 
-        from src.discovery.trader_discovery import refresh_all_positions
+        from src.discovery.trader_discovery import (
+            discover_esports_traders,
+            refresh_all_positions,
+        )
+        from sqlalchemy import func, distinct
 
         with get_session(session_factory) as session:
-            stats = refresh_all_positions(session)
+            # Pipeline summary stats
+            total_traders = session.query(func.count(Trader.address)).scalar() or 0
+            traders_with_trades = (
+                session.query(func.count(distinct(Trade.trader_address))).scalar() or 0
+            )
+            qualifying = discover_esports_traders(
+                session,
+                min_trades=settings.trader_min_trades,
+                min_volume=settings.trader_min_volume,
+            )
+            total_trades = session.query(func.count(Trade.id)).scalar() or 0
+            traded_markets = (
+                session.query(func.count(distinct(Trade.market_id))).scalar() or 0
+            )
+            game_tagged_markets = (
+                session.query(func.count(distinct(MarketEntity.condition_id)))
+                .filter(MarketEntity.game.isnot(None))
+                .scalar() or 0
+            )
+
+            console.print(f"\nPipeline summary:")
+            console.print(f"  Total traders:          {total_traders}")
+            console.print(f"  Traders with trades:    {traders_with_trades}")
+            console.print(
+                f"  Qualifying traders:     {len(qualifying)}"
+                f"  (min {settings.trader_min_trades} trades,"
+                f" ${settings.trader_min_volume} volume in game-tagged markets)"
+            )
+            console.print(f"  Total trades:           {total_trades}")
+            console.print(f"  Traded markets:         {traded_markets}")
+            console.print(
+                f"  Markets with game tag:  {game_tagged_markets}"
+                f"  (used for positions)"
+            )
+
+            # Build positions for qualifying traders
+            stats = refresh_all_positions(session, qualifying)
             session.commit()
 
-        console.print(f"[green]Done.[/green]")
-        console.print(f"  Traders processed: {stats['traders_processed']}")
-        console.print(f"  Positions computed: {stats['positions_computed']}")
-        console.print(f"  Open positions:    {stats['positions_open']}")
-        console.print(f"  Flat positions:    {stats['positions_flat']}")
         logger.info(
             f"BUILD-POSITIONS completed: {stats['traders_processed']} traders, "
             f"{stats['positions_computed']} positions"
