@@ -86,6 +86,10 @@ None. The fix is minimal and surgical.
   - Line 81-85: Added decimal odds to probability conversion
 - `tests/test_graph_converters.py` (+85 lines, NEW file)
   - 3 comprehensive test cases
+- `src/catalog/patcher.py` (+14 lines functional change)
+  - Line 64-76: Added batching to Market query (500 per batch)
+- `src/catalog/recovery.py` (+14 lines functional change)
+  - Line 150-161: Added batching to Market query (500 per batch)
 
 ## Verification
 
@@ -93,9 +97,14 @@ The fix ensures that all Graph trades with decimal odds > 1 are now properly con
 
 ## Impact
 
-This fix resolves the validation errors that were silently dropping ~9% of Graph trades during backfill operations. All Graph trades will now be properly processed regardless of whether they represent favorites or underdogs.
+This fix resolves two critical issues:
+
+1. **Price validation errors**: No more "Price must be between 0 and 1" validation errors for Graph trades. All Graph trades will now be properly processed regardless of whether they represent favorites or underdogs.
+
+2. **SQLite parameter limit**: Fixed "too many parameters" error when thousands of catalog gaps exist. Batching prevents the 999 parameter limit from being exceeded.
 
 Expected behavior after this fix:
 - No more "Price must be between 0 and 1" validation errors for Graph trades
 - Complete trade history from Graph API with zero dropped trades
 - Consistent price format (probability) across all data sources (JBecker, API, Graph)
+- Catalog patching works with any number of gap markets (batched at 500 per query)
