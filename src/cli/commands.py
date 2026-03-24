@@ -1317,6 +1317,7 @@ def backfill(address, limit, verbose):
                 console.print(f"  Tiers used: {', '.join(stats.get('tiers_used', []))}")
                 console.print(f"  Detail trades: {stats.get('detail_count', 0)}")
                 _run_catalog_patch(session_factory, gamma_client, console)
+                _run_entity_extraction(session_factory, console)
             except Exception as e:
                 console.print(f"[red]Backfill failed: {e}[/red]")
                 logger.error(f"Single trader backfill failed: {e}")
@@ -1478,6 +1479,7 @@ def backfill(address, limit, verbose):
             f"BACKFILL completed: {success_count} ok, {error_count} failed ({processing_time:.1f}s)"
         )
         _run_catalog_patch(session_factory, gamma_client, console)
+        _run_entity_extraction(session_factory, console)
 
 
 def _run_catalog_patch(session_factory, gamma_client, console):
@@ -1493,6 +1495,66 @@ def _run_catalog_patch(session_factory, gamma_client, console):
             f" fallback={patch_stats['fallback']})"
         )
     return patch_stats
+
+
+def _run_entity_extraction(session_factory, console):
+    """Extract entities for markets that have trades but no market_entities row.
+
+    After backfill, traders may have trades in markets that were not seen during
+    discover (historical markets). This finds those gaps and runs pattern matcher
+    + LLM fallback to populate market_entities.
+    """
+    with get_session(session_factory) as session:
+        matcher = PatternMatcher()
+        matcher.load_from_db(session)
+
+        # Find markets with trades but no entity row
+        from sqlalchemy import func, and_
+
+        markets_with_trades = (
+            session.query(Market)
+            .join(Trade, Trade.market_id == Market.condition_id)
+            .outerjoin(MarketEntity, MarketEntity.condition_id == Market.condition_id)
+            .filter(MarketEntity.id == None)
+            .group_by(Market.id)
+            .all()
+        )
+
+        if not markets_with_trades:
+            return
+
+        extracted = 0
+        pattern_matches = 0
+        for market in markets_with_trades:
+            try:
+                raw_result = matcher.match(market.question)
+                if raw_result:
+                    pattern_matches += 1
+                    normalized = normalize_entities(raw_result)
+                else:
+                    raw_result = extract_entities(market.question)
+                    normalized = normalize_entities(raw_result)
+                entity_row = MarketEntity(
+                    condition_id=market.condition_id,
+                    team_a=normalized.team_a,
+                    team_b=normalized.team_b,
+                    tournament=normalized.tournament,
+                    game=normalized.game,
+                    market_type=normalized.market_type,
+                )
+                session.add(entity_row)
+                session.commit()
+                extracted += 1
+            except Exception as e:
+                logger.warning(f"Entity extraction failed for {market.condition_id}: {e}")
+                session.rollback()
+                continue
+
+        if extracted > 0:
+            console.print(
+                f"  Entities extracted: [cyan]{extracted} markets[/cyan]"
+                f" (pattern={pattern_matches}, llm={extracted - pattern_matches})"
+            )
 
 
 @cli.command("patch-catalog")
@@ -2169,10 +2231,72 @@ def ingest_events(verbose):
         )
         logger.info(f"INGEST-EVENTS completed: {count} events upserted")
 
+        _backfill_market_end_dates(session_factory, console)
+
     except Exception as e:
         logger.error(f"ingest-events failed: {e}")
         console.print(f"[red]Error: {e}[/red]")
         raise SystemExit(1)
+
+
+def _backfill_market_end_dates(session_factory, console):
+    """Fill NULL end_date on markets using gamma_events data.
+
+    Links gamma_events → markets via clob_token_ids ↔ tokens. For each
+    GammaEvent, parses its token IDs and finds markets whose tokens column
+    contains a matching ID. Copies gamma_event.end_date to market.end_date.
+    """
+    from src.db.models import GammaEvent
+
+    updated = 0
+    with get_session(session_factory) as session:
+        # Get markets with NULL end_date
+        null_markets = (
+            session.query(Market)
+            .filter(Market.end_date == None, Market.tokens != None)
+            .all()
+        )
+        if not null_markets:
+            return
+
+        # Build token_id → market lookup from markets.tokens
+        token_to_market = {}
+        for market in null_markets:
+            try:
+                token_ids = json.loads(market.tokens) if market.tokens.startswith("[") else market.tokens.split(",")
+                for tid in token_ids:
+                    tid = tid.strip().strip('"')
+                    if tid:
+                        token_to_market[tid] = market
+            except (json.JSONDecodeError, AttributeError):
+                continue
+
+        if not token_to_market:
+            return
+
+        # Scan gamma_events for matching token IDs
+        events = session.query(GammaEvent).filter(GammaEvent.end_date != None).all()
+        for event in events:
+            if not event.clob_token_ids:
+                continue
+            try:
+                event_tokens = json.loads(event.clob_token_ids) if event.clob_token_ids.startswith("[") else event.clob_token_ids.split(",")
+            except (json.JSONDecodeError, AttributeError):
+                continue
+            for tid in event_tokens:
+                tid = tid.strip().strip('"')
+                if tid in token_to_market:
+                    market = token_to_market[tid]
+                    market.end_date = event.end_date
+                    updated += 1
+                    # Remove from lookup so we don't update again
+                    for k, v in list(token_to_market.items()):
+                        if v is market:
+                            del token_to_market[k]
+
+        if updated > 0:
+            session.commit()
+            console.print(f"  Market end_dates backfilled: [cyan]{updated}[/cyan]")
 
 
 @cli.command("resolve-outcomes")
@@ -2236,6 +2360,59 @@ def resolve_outcomes(verbose):
 
     except Exception as e:
         logger.error(f"resolve-outcomes failed: {e}")
+        console.print(f"[red]Error: {e}[/red]")
+        raise SystemExit(1)
+
+
+@cli.command("build-positions")
+@click.option("--verbose", "-v", is_flag=True, help="Enable debug logging")
+def build_positions_cmd(verbose):
+    """Aggregate raw trades into positions for all qualifying traders.
+
+    Discovers eSports traders (min 5 trades + $500 volume in game-tagged
+    markets) and computes one Position row per (trader, market) pair from
+    their raw Trade rows.
+
+    Safe to re-run — positions are recomputed from trades each time.
+    Run after 'polymarket backfill' and before 'polymarket resolve-positions'.
+
+    \b
+    Examples:
+        polymarket build-positions
+        polymarket build-positions --verbose
+    """
+    logger.info("BUILD-POSITIONS command started")
+
+    if verbose:
+        logger.remove()
+        logger.add(sys.stderr, level="DEBUG")
+
+    console = Console()
+
+    try:
+        settings = get_settings()
+        session_factory, _, _, _, _ = _get_dependencies(settings)
+
+        console.print("[bold]Building positions from trades...[/bold]")
+
+        from src.discovery.trader_discovery import refresh_all_positions
+
+        with get_session(session_factory) as session:
+            stats = refresh_all_positions(session)
+            session.commit()
+
+        console.print(f"[green]Done.[/green]")
+        console.print(f"  Traders processed: {stats['traders_processed']}")
+        console.print(f"  Positions computed: {stats['positions_computed']}")
+        console.print(f"  Open positions:    {stats['positions_open']}")
+        console.print(f"  Flat positions:    {stats['positions_flat']}")
+        logger.info(
+            f"BUILD-POSITIONS completed: {stats['traders_processed']} traders, "
+            f"{stats['positions_computed']} positions"
+        )
+
+    except Exception as e:
+        logger.error(f"build-positions failed: {e}")
         console.print(f"[red]Error: {e}[/red]")
         raise SystemExit(1)
 
