@@ -43,18 +43,28 @@ Run this whenever you want fresh intelligence. Each step feeds the next.
 polymarket discover --niche esports
 
 # 2. Fetch full trade history for all pending traders
+#    (auto-runs: entity extraction for new markets, catalog gap patch)
 polymarket backfill
 
-# 3. Compute win/loss + PnL for each position using resolved outcomes
+# 3. Refresh closed events + backfill market end_dates from gamma data
+polymarket ingest-events
+
+# 4. Populate markets.outcome (YES/NO) for newly resolved markets
+polymarket resolve-outcomes
+
+# 5. Aggregate raw trades into positions per (trader, market) pair
+polymarket build-positions
+
+# 6. Compute win/loss + PnL for each position using resolved outcomes
 polymarket resolve-positions
 
-# 4. Compute lift-based scores (z(CLV)+z(ROI)+z(Sharpe)), 30-day rolling window
+# 7. Compute lift-based scores (z(CLV)+z(ROI)+z(Sharpe)), 30-day rolling window
 polymarket score
 
-# 5. Detect Q5 expert consensus on active markets
+# 8. Detect Q5 expert consensus on active markets
 polymarket detect
 
-# 6. Send Telegram alerts for new/strengthening signals
+# 9. Send Telegram alerts for new/strengthening signals
 polymarket alert
 ```
 
@@ -65,10 +75,10 @@ polymarket alert
 polymarket ingest-events && polymarket resolve-outcomes && polymarket classify-tokens && polymarket patch-catalog
 
 # Regular run
-polymarket discover --niche esports && polymarket backfill && polymarket resolve-positions && polymarket score && polymarket detect && polymarket alert
+polymarket discover --niche esports && polymarket backfill && polymarket ingest-events && polymarket resolve-outcomes && polymarket build-positions && polymarket resolve-positions && polymarket score && polymarket detect && polymarket alert
 
 # Re-score without re-discovering (after code changes, etc.)
-polymarket resolve-positions && polymarket score && polymarket detect
+polymarket build-positions && polymarket resolve-positions && polymarket score && polymarket detect
 ```
 
 ## Viewing Results
@@ -107,6 +117,7 @@ polymarket status
 | `classify-tokens` | Set token `node_path`/`depth` from Gamma event tags |
 | `patch-catalog` | Auto-fix token_catalog gaps (3-tier patcher) |
 | `recover-catalog` | Populate `markets.tokens` for null-token eSports markets |
+| `build-positions` | Aggregate raw trades into positions per (trader, market) pair |
 | `resolve-positions` | Compute win/loss + PnL per position |
 | `score` | Compute lift-based scores (z(CLV)+z(ROI)+z(Sharpe)) |
 | `detect` | Detect Q5 expert consensus signals |
