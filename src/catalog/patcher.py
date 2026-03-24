@@ -48,12 +48,18 @@ def patch_missing_catalog_entries(
     """
     stats = {"patched": 0, "local": 0, "api": 0, "fallback": 0}
 
-    missing = session.execute(text("""
+    missing = (
+        session.execute(
+            text("""
         SELECT DISTINCT t.market_id
         FROM trades t
         LEFT JOIN token_catalog tc ON t.market_id = tc.condition_id
         WHERE tc.condition_id IS NULL
-    """)).scalars().all()
+    """)
+        )
+        .scalars()
+        .all()
+    )
 
     if not missing:
         logger.info("PATCH-CATALOG: No catalog gaps detected")
@@ -61,10 +67,17 @@ def patch_missing_catalog_entries(
 
     logger.info(f"PATCH-CATALOG: Found {len(missing)} gaps to patch")
 
-    markets_map = {
-        m.condition_id: m
-        for m in session.query(Market).filter(Market.condition_id.in_(missing)).all()
-    }
+    # Batch the IN clause query to avoid SQLite parameter limit (999 params)
+    markets_map = {}
+    batch_size = 500
+    for i in range(0, len(missing), batch_size):
+        batch = missing[i : i + batch_size]
+        batch_markets = (
+            session.query(Market).filter(Market.condition_id.in_(batch)).all()
+        )
+        markets_map.update({m.condition_id: m for m in batch_markets})
+        if i % 5000 == 0:
+            logger.debug(f"  Loaded {len(markets_map)}/{len(missing)} markets")
 
     gamma_index = _build_gamma_event_index(session)
 
@@ -89,7 +102,9 @@ def patch_missing_catalog_entries(
         stats["patched"] += stats["local"]
         logger.debug(f"Tier 1 resolved {len(tier1_resolved)} via gamma_events")
 
-    tier2_api_resolved, tier2_failed = _try_tier2_api(session, tier2_batch, markets_map, gamma_client)
+    tier2_api_resolved, tier2_failed = _try_tier2_api(
+        session, tier2_batch, markets_map, gamma_client
+    )
 
     for cid in tier2_api_resolved:
         stats["api"] += 1
@@ -162,15 +177,17 @@ def _try_tier1_local(
         node_path, depth = _extract_classification(tags)
         niche_slug = _derive_niche_slug(market.category, node_path)
 
-        rows_to_insert.append({
-            "token_id": token_id,
-            "condition_id": market.condition_id,
-            "question": market.question,
-            "niche_slug": niche_slug,
-            "node_path": node_path,
-            "depth": depth,
-            "market_type": None,
-        })
+        rows_to_insert.append(
+            {
+                "token_id": token_id,
+                "condition_id": market.condition_id,
+                "question": market.question,
+                "niche_slug": niche_slug,
+                "node_path": node_path,
+                "depth": depth,
+                "market_type": None,
+            }
+        )
 
     if rows_to_insert:
         _insert_rows(session, rows_to_insert)
@@ -210,7 +227,7 @@ def _try_tier2_api(
         except (json.JSONDecodeError, TypeError):
             no_tokens.append(cid)
             continue
-        for entry in (tokens_data if isinstance(tokens_data, list) else []):
+        for entry in tokens_data if isinstance(tokens_data, list) else []:
             tid = entry.get("token_id")
             if tid and tid != "0":
                 token_to_cid[tid] = cid
@@ -218,7 +235,7 @@ def _try_tier2_api(
     token_ids = list(token_to_cid.keys())
 
     for i in range(0, len(token_ids), BATCH_SIZE):
-        batch_tokens = token_ids[i:i + BATCH_SIZE]
+        batch_tokens = token_ids[i : i + BATCH_SIZE]
         try:
             if gamma_client.rate_limiter is not None:
                 gamma_client.rate_limiter.acquire()
@@ -275,15 +292,17 @@ def _try_tier2_api(
             for token_id in clob_token_ids:
                 if not token_id or token_id == "0":
                     continue
-                rows_to_insert.append({
-                    "token_id": token_id,
-                    "condition_id": resp_cid,
-                    "question": question,
-                    "niche_slug": niche_slug,
-                    "node_path": node_path,
-                    "depth": depth,
-                    "market_type": None,
-                })
+                rows_to_insert.append(
+                    {
+                        "token_id": token_id,
+                        "condition_id": resp_cid,
+                        "question": question,
+                        "niche_slug": niche_slug,
+                        "node_path": node_path,
+                        "depth": depth,
+                        "market_type": None,
+                    }
+                )
 
             if rows_to_insert:
                 _insert_rows(session, rows_to_insert)
@@ -337,15 +356,17 @@ def _try_tier3_fallback(
             token_id = token_entry.get("token_id")
             if not token_id or token_id == "0":
                 continue
-            rows.append({
-                "token_id": token_id,
-                "condition_id": cid,
-                "question": market.question,
-                "niche_slug": niche_slug,
-                "node_path": None,
-                "depth": None,
-                "market_type": None,
-            })
+            rows.append(
+                {
+                    "token_id": token_id,
+                    "condition_id": cid,
+                    "question": market.question,
+                    "niche_slug": niche_slug,
+                    "node_path": None,
+                    "depth": None,
+                    "market_type": None,
+                }
+            )
 
         if rows:
             _insert_rows(session, rows)
@@ -361,7 +382,6 @@ def _derive_niche_slug(category: str | None, node_path: str | None) -> str:
     if category:
         return category.lower().strip() or "unknown"
     return "unknown"
-
 
 
 def _insert_rows(session: Session, rows: list[dict]) -> None:
