@@ -77,8 +77,12 @@ def graph_trade_to_api_response(
         # Taker takes opposite side of maker
         side = "SELL" if graph_trade["side"] == "BUY" else "BUY"
 
-    # Price (already decimal string from Graph)
+    # Price from Graph is in decimal odds format (can be > 1 for underdogs)
+    # Convert to probability format (0-1 range) expected by TradeResponse
     price = Decimal(graph_trade["price"])
+    if price > 1:
+        # Convert decimal odds to implied probability
+        price = Decimal("1") / price
 
     # Timestamp (Unix timestamp to datetime)
     timestamp = datetime.fromtimestamp(int(graph_trade["timestamp"]))
