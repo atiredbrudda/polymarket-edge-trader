@@ -18,7 +18,27 @@ Read this section and the AGENTS.md file in project root before starting work. R
 
 ## Pending Review
 
-(empty)
+### worker/26-01-research (Phase 26: Plans 26-01 & 26-02) — 2026-03-24
+
+- **Plans:** 26-01 (Research), 26-02 (Implementation)
+- **Branch:** worker/26-01-research
+- **Commits:** fa3f8d7..d3ce1eb
+- **Files changed:**
+  - src/cli/commands.py (MODIFIED — time filter fix, --skip-llm flag, terminal output)
+  - .planning/phases/26-discover-command-optimization/26-01-SUMMARY.md (NEW)
+  - .planning/phases/26-discover-command-optimization/26-02-SUMMARY.md (NEW)
+  - .planning/phases/26-discover-command-optimization/26-01-RESEARCH.md (NEW)
+- **Worker notes:** 
+  - **CRITICAL FINDING:** Time filter fix was missing from main — this was the root cause of 7-15 min slowness
+  - Applied time filter fix: Added lower bound `Market.end_date > datetime.utcnow()`
+  - Added `--skip-llm` flag: Skip LLM for 36% speedup
+  - Terminal output now shows: "Pattern matched: 11  LLM calls: 24" or "LLM calls: Skipped"
+  - Performance: 7-15 min → 118s (full) → 76s (skip-llm) = 6-12x faster
+  - Tests: 7/7 discovery tests pass, 4/4 LLM extractor tests pass
+- **Checklist:**
+  - [x] All tests pass (pytest tests/test_discovery.py tests/extraction/test_llm_extractor.py: 11 passed)
+  - [x] No debug artifacts
+  - [x] SUMMARY.md written (26-01-SUMMARY.md, 26-02-SUMMARY.md)
 
 ## Cleared (recent)
 
