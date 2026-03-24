@@ -19,25 +19,30 @@ Read this section and the AGENTS.md file in project root before starting work. R
 ## Pending Review
 
 ### worker/fix-graph-price-conversion (27-03) — 2026-03-24
-- **Plan:** 27-03 (unplanned fix discovered from user error logs)
+- **Plan:** 27-03 (unplanned fix discovered from user error logs + SQL parameter limit error)
 - **Branch:** worker/fix-graph-price-conversion
-- **Commits:** 3474da4 (single commit)
+- **Commits:** 48f7d13 (3 commits total)
 - **Files changed:**
   - src/graph/converters.py (MODIFIED — decimal odds to probability conversion)
   - tests/test_graph_converters.py (NEW — 3 comprehensive tests)
+  - src/catalog/patcher.py (MODIFIED — batch IN clause queries to 500 per batch)
+  - src/catalog/recovery.py (MODIFIED — batch IN clause queries to 500 per batch)
   - .planning/phases/27-hybrid-backfill-gap-fix/27-03-SUMMARY.md (NEW)
 - **Worker notes:** 
-  - Root cause: Graph subgraph returns decimal odds (can be > 1 for underdogs), but TradeResponse expects probability format (0-1 range)
-  - Fix: Convert decimal odds to implied probability using formula: probability = 1 / decimal_odds
-  - Impact: ~9% of Graph trades were silently dropped due to validation errors (188 of 2,024 trades)
-  - Test results: 3/3 new tests pass, 15/15 related tests pass
-  - Minimal functional change: +4 lines in converter, +85 lines new test file
+  - Root cause #1: Graph subgraph returns decimal odds (can be > 1 for underdogs), but TradeResponse expects probability format (0-1 range)
+  - Root cause #2: Catalog patcher/recovery used IN clauses with thousands of parameters, exceeding SQLite 999 limit
+  - Fix #1: Convert decimal odds to implied probability using formula: probability = 1 / decimal_odds
+  - Fix #2: Batch Market queries to 500 per batch in both patcher.py and recovery.py
+  - Impact #1: ~9% of Graph trades were silently dropped due to validation errors (188 of 2,024 trades)
+  - Impact #2: Backfill failed completely when thousands of catalog gaps existed
+  - Test results: 3/3 new tests pass, 20/20 catalog tests pass, 15/15 related tests pass
+  - Minimal functional changes across 4 files
 - **Checklist:**
-  - [x] Tests pass (pytest — 3 new tests + 15 related tests all pass)
+  - [x] Tests pass (pytest — all relevant test suites pass)
   - [x] No debug artifacts
   - [x] STATE.md NOT updated (reviewer-only per protocol rule 7)
   - [x] SUMMARY.md written (27-03-SUMMARY.md)
-  - [x] No cosmetic changes outside scope (only functional changes)
+  - [x] No cosmetic changes outside scope (only functional changes + unavoidable reformatting from batching)
 
 ### worker/27-02-graph-client-integration (27-02) — 2026-03-24
 - **Plan:** 27-02 (unplanned fix discovered during investigation)
