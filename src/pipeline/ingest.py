@@ -831,6 +831,7 @@ class IngestionPipeline:
         try:
             # FIXED: Fetch ALL trades for this trader from API
             all_trader_trades = self.client.get_trader_trades(trader_address)
+            stats["raw_api_count"] = len(all_trader_trades)
 
             if not all_trader_trades:
                 logger.info(f"No trades found for trader {trader_address[:8]}...")
@@ -840,6 +841,7 @@ class IngestionPipeline:
                     trader.backfill_complete = True
                     trader.last_active = datetime.utcnow()
                 session.commit()
+                stats["raw_api_count"] = 0
                 return stats
 
             # Extract unique market IDs from trades
@@ -2028,13 +2030,16 @@ class IngestionPipeline:
                     trader_address
                 )  # existing method
                 combined_stats["tiers_used"].append("api")
-                api_trade_count = api_stats.get("detail_count", 0)
+                raw_api_count = api_stats.get(
+                    "raw_api_count", api_stats.get("detail_count", 0)
+                )
+                combined_stats["raw_api_count"] = raw_api_count
 
                 # Tier 3: Graph ONLY if API maxed out (100 trades = likely more exist)
-                if api_trade_count >= 100 and fallback_to_graph and self.graph_client:
+                if raw_api_count >= 100 and fallback_to_graph and self.graph_client:
                     try:
                         logger.info(
-                            f"API maxed out (100 trades), using Graph for remaining gap"
+                            f"API returned {raw_api_count} raw trades (likely more exist), using Graph for complete gap fill"
                         )
                         graph_stats = self.ingest_trader_history_graph(trader_address)
                         combined_stats["tiers_used"].append("graph")

@@ -567,7 +567,9 @@ def test_build_token_cache_loads_from_db(in_memory_session):
     assert condition_cache["cond2"] == "Sports"
 
 
-def test_ingest_trader_history_jbecker_skips_db_scan_when_cache_provided(in_memory_session):
+def test_ingest_trader_history_jbecker_skips_db_scan_when_cache_provided(
+    in_memory_session,
+):
     """When token_cache is provided, DB scan for Market should be skipped."""
     from src.pipeline.ingest import IngestionPipeline
     from src.pipeline.filters import CategoryFilter
@@ -632,11 +634,11 @@ def test_ingest_trader_history_hybrid_passes_token_cache_through(in_memory_sessi
     test_cache = ({"tokenX": "condY"}, {"condY": "Sports"})
 
     with patch.object(
-        pipeline, "ingest_trader_history_jbecker", wraps=pipeline.ingest_trader_history_jbecker
+        pipeline,
+        "ingest_trader_history_jbecker",
+        wraps=pipeline.ingest_trader_history_jbecker,
     ) as mock_jbecker_method:
-        pipeline.ingest_trader_history_hybrid(
-            trader_address, token_cache=test_cache
-        )
+        pipeline.ingest_trader_history_hybrid(trader_address, token_cache=test_cache)
 
         # Verify token_cache was passed
         mock_jbecker_method.assert_called_once()
@@ -694,9 +696,7 @@ def test_token_cache_grows_during_processing(in_memory_session):
         ]
         mock_httpx_get.return_value = mock_response
 
-        pipeline.ingest_trader_history_jbecker(
-            trader_address, token_cache=token_cache
-        )
+        pipeline.ingest_trader_history_jbecker(trader_address, token_cache=token_cache)
 
     # Cache should now contain the discovered token
     assert "new_unknown_token_123" in token_cache[0]
@@ -841,3 +841,131 @@ def test_batch_token_lookup_processes_all_responses(in_memory_session):
     assert len(token_cache[0]) > 0  # Some tokens should be mapped
     assert "condition_1_a" in token_cache[1]  # Categories should be populated
     assert "condition_1_b" in token_cache[1]
+
+
+def test_hybrid_graph_escalation_fires_on_raw_count(in_memory_session):
+    """When API returns 100+ raw trades but dedup reduces detail_count below 100,
+    Graph escalation STILL fires because we check raw_api_count, not detail_count.
+    """
+    from src.pipeline.filters import CategoryFilter
+
+    mock_api_client = Mock()
+    mock_jbecker_client = Mock()
+    mock_graph_client = Mock()
+    category_filter = CategoryFilter(detail_categories=["eSports"])
+
+    pipeline = IngestionPipeline(
+        client=mock_api_client,
+        session_factory=in_memory_session,
+        category_filter=category_filter,
+        jbecker_client=mock_jbecker_client,
+        graph_client=mock_graph_client,
+    )
+
+    trader_address = "0xeffd76b6a4318d50c6f71a16b276c5b279445a86"
+
+    # Mock JBecker to return historical trades
+    mock_jbecker_client.query_trader_history.return_value = [SAMPLE_JBECKER_TRADE]
+
+    # Mock ingest_trader_history to return 150 raw trades but only 5 detail trades
+    # This simulates 145 duplicate trades being deduped out
+    with patch.object(pipeline, "ingest_trader_history") as mock_ingest:
+        mock_ingest.return_value = {"detail_count": 5, "raw_api_count": 150}
+
+        # Mock Graph to return additional trades
+        with patch.object(pipeline, "ingest_trader_history_graph") as mock_graph:
+            mock_graph.return_value = {"detail_count": 500, "trades_from_graph": 2000}
+
+            # Ensure trader exists
+            session = in_memory_session()
+            trader = Trader(address=trader_address.lower())
+            session.add(trader)
+
+            # Add a trade to DB so latest_timestamp query succeeds
+            trade = Trade(
+                market_id="test_market",
+                trader_address=trader_address.lower(),
+                side="BUY",
+                size=Decimal("1.0"),
+                price=Decimal("0.5"),
+                timestamp=datetime(2024, 1, 1),
+                trade_id="0x123",
+            )
+            session.add(trade)
+            session.commit()
+            session.close()
+
+            # Hybrid ingestion with gap filling enabled
+            stats = pipeline.ingest_trader_history_hybrid(
+                trader_address,
+                prefer_jbecker=True,
+                fill_gap_with_api=True,
+                fallback_to_graph=True,
+            )
+
+            # Graph SHOULD be called because raw_api_count (150) >= 100
+            assert "graph" in stats["tiers_used"]
+            assert stats["raw_api_count"] == 150
+            mock_graph.assert_called_once_with(trader_address)
+
+
+def test_hybrid_graph_escalation_skipped_when_raw_count_low(in_memory_session):
+    """When API returns fewer than 100 raw trades, Graph escalation does NOT fire."""
+    from src.pipeline.filters import CategoryFilter
+
+    mock_api_client = Mock()
+    mock_jbecker_client = Mock()
+    mock_graph_client = Mock()
+    category_filter = CategoryFilter(detail_categories=["eSports"])
+
+    pipeline = IngestionPipeline(
+        client=mock_api_client,
+        session_factory=in_memory_session,
+        category_filter=category_filter,
+        jbecker_client=mock_jbecker_client,
+        graph_client=mock_graph_client,
+    )
+
+    trader_address = "0xeffd76b6a4318d50c6f71a16b276c5b279445a86"
+
+    # Mock JBecker to return historical trades
+    mock_jbecker_client.query_trader_history.return_value = [SAMPLE_JBECKER_TRADE]
+
+    # Mock ingest_trader_history to return only 30 raw trades
+    with patch.object(pipeline, "ingest_trader_history") as mock_ingest:
+        mock_ingest.return_value = {"detail_count": 5, "raw_api_count": 30}
+
+        # Mock Graph (should NOT be called)
+        with patch.object(pipeline, "ingest_trader_history_graph") as mock_graph:
+            mock_graph.return_value = {"detail_count": 500, "trades_from_graph": 2000}
+
+            # Ensure trader exists
+            session = in_memory_session()
+            trader = Trader(address=trader_address.lower())
+            session.add(trader)
+
+            # Add a trade to DB so latest_timestamp query succeeds
+            trade = Trade(
+                market_id="test_market",
+                trader_address=trader_address.lower(),
+                side="BUY",
+                size=Decimal("1.0"),
+                price=Decimal("0.5"),
+                timestamp=datetime(2024, 1, 1),
+                trade_id="0x123",
+            )
+            session.add(trade)
+            session.commit()
+            session.close()
+
+            # Hybrid ingestion with gap filling enabled
+            stats = pipeline.ingest_trader_history_hybrid(
+                trader_address,
+                prefer_jbecker=True,
+                fill_gap_with_api=True,
+                fallback_to_graph=True,
+            )
+
+            # Graph should NOT be called because raw_api_count (30) < 100
+            assert "graph" not in stats["tiers_used"]
+            mock_graph.assert_not_called()
