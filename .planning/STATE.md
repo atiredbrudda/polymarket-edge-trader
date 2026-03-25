@@ -1,16 +1,16 @@
 ---
 gsd_state_version: 1.0
-milestone: v1.2
-milestone_name: Market Resolution & Deep Classification
-status: shipped
-stopped_at: Milestone v1.2 archived
-last_updated: "2026-03-22T16:30:00.000Z"
-last_activity: "2026-03-22 — v1.2 milestone archived. 11 phases, 21 plans shipped."
+milestone: v1.3
+milestone_name: Graph Trade Integration & Position Building
+status: in_progress
+stopped_at: Phase 28 in progress
+last_updated: "2026-03-25T01:20:00.000Z"
+last_activity: "2026-03-25 — Phase 28: Fixed Graph trade market_id resolution, migrated 182K trades"
 progress:
-  total_phases: 11
-  completed_phases: 11
-  total_plans: 21
-  completed_plans: 21
+  total_phases: 1
+  completed_phases: 0
+  total_plans: 4
+  completed_plans: 4
   percent: 100
 ---
 
@@ -21,14 +21,14 @@ progress:
 See: .planning/PROJECT.md (updated 2026-03-22)
 
 **Core value:** Surface where smart money is moving in niche prediction markets so the user can see what informed traders are doing and factor that into their own thinking.
-**Current focus:** Planning next milestone
+**Current focus:** Fixing Graph trade market_id linkage to enable position building
 
 ## Current Position
 
-Milestone: v1.2 Market Resolution & Deep Classification — SHIPPED 2026-03-22
-All 11 phases (15-25) complete, 21 plans delivered.
+Milestone: v1.3 Graph Trade Integration & Position Building — IN PROGRESS
+Phase 28 complete (4/4 plans), ready for review.
 
-Progress: [████████████████████] 100% (v1.2 — shipped)
+Progress: [████████████████████] 100% (Phase 28 complete)
 
 ## Performance Metrics
 

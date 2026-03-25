@@ -23,7 +23,7 @@ def test_graph_trade_price_under_one():
         "price": "0.5",
     }
 
-    result = graph_trade_to_api_response(graph_trade, "0xTrader123")
+    result = graph_trade_to_api_response(graph_trade, "0xTrader123", None)
     assert result.price == Decimal("0.5")
 
 
@@ -45,7 +45,7 @@ def test_graph_trade_price_over_one():
         "price": "2.0",
     }
 
-    result = graph_trade_to_api_response(graph_trade, "0xTrader123")
+    result = graph_trade_to_api_response(graph_trade, "0xTrader123", None)
     assert result.price == Decimal("0.5")
 
 
@@ -76,9 +76,79 @@ def test_graph_trade_price_decimal_odds():
             "price": decimal_odds,
         }
 
-        result = graph_trade_to_api_response(graph_trade, "0xTrader123")
+        result = graph_trade_to_api_response(graph_trade, "0xTrader123", None)
         # Check that price is converted to valid probability (0-1 range)
         assert result.price > 0
         assert result.price < 1
         # Allow some tolerance for decimal precision
         assert abs(result.price - expected_probability) < Decimal("0.01")
+
+
+def test_market_id_resolves_from_catalog():
+    """Test that asset_id is looked up in token_to_condition cache."""
+    graph_trade = {
+        "id": "0xabc_0xdef",
+        "maker": "0xTrader123",
+        "taker": "0xOther456",
+        "makerAmountFilled": "500000",
+        "takerAmountFilled": "1000000",
+        "makerAssetId": "123",
+        "takerAssetId": "456",
+        "fee": "1000",
+        "timestamp": "1234567890",
+        "blockNumber": "82466624",
+        "transactionHash": "0xabc123",
+        "side": "BUY",
+        "price": "0.5",
+    }
+
+    cache = {"123": "0xabc123_condition"}
+    result = graph_trade_to_api_response(graph_trade, "0xTrader123", cache)
+    assert result.market == "0xabc123_condition"
+
+
+def test_market_id_fallback_when_not_in_catalog():
+    """Test fallback to synthetic ID when token not in cache."""
+    graph_trade = {
+        "id": "0xabc_0xdef",
+        "maker": "0xTrader123",
+        "taker": "0xOther456",
+        "makerAmountFilled": "500000",
+        "takerAmountFilled": "1000000",
+        "makerAssetId": "999",
+        "takerAssetId": "456",
+        "fee": "1000",
+        "timestamp": "1234567890",
+        "blockNumber": "82466624",
+        "transactionHash": "0xabc123",
+        "side": "BUY",
+        "price": "0.5",
+    }
+
+    cache = {"123": "0xabc123_condition"}
+    result = graph_trade_to_api_response(graph_trade, "0xTrader123", cache)
+    assert result.market.startswith("graph_")
+    assert "0xabc123" in result.market
+    assert "999" in result.market
+
+
+def test_market_id_no_cache_passed():
+    """Test fallback when cache is None."""
+    graph_trade = {
+        "id": "0xabc_0xdef",
+        "maker": "0xTrader123",
+        "taker": "0xOther456",
+        "makerAmountFilled": "500000",
+        "takerAmountFilled": "1000000",
+        "makerAssetId": "123",
+        "takerAssetId": "456",
+        "fee": "1000",
+        "timestamp": "1234567890",
+        "blockNumber": "82466624",
+        "transactionHash": "0xabc123",
+        "side": "BUY",
+        "price": "0.5",
+    }
+
+    result = graph_trade_to_api_response(graph_trade, "0xTrader123", None)
+    assert result.market.startswith("graph_")
