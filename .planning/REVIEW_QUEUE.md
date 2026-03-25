@@ -17,8 +17,8 @@ Read this section and the AGENTS.md file in project root before starting work. R
 ### worker/29-token-catalog-todo — 2026-03-25
 - **Plan:** N/A (ad-hoc todo capture — Ground truth test set implementation)
 - **Branch:** worker/29-token-catalog-todo
-- **Commits:** 5ef40bb..ff77c11
-- **Files changed:**
+- **Commits:** 5ef40bb..efc63d3
+- **Files changed:****
   - src/graph/comparator.py (NEW — TradeComparator class, build_ground_truth_test_set function)
   - src/cli/commands.py (MODIFIED — compare-trades CLI command)
   - tests/graph/test_comparator.py (NEW — 16 comprehensive tests)
