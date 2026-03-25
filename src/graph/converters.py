@@ -71,19 +71,37 @@ def graph_trade_to_api_response(
     maker_amount = Decimal(graph_trade["makerAmountFilled"]) / Decimal("1000000")
     taker_amount = Decimal(graph_trade["takerAmountFilled"]) / Decimal("1000000")
 
-    # Determine trade details based on role
+    # Determine side based on role
     if is_maker:
-        # Trader is maker - they provided makerAmount
-        size = maker_amount
-        asset_id = graph_trade["makerAssetId"]
-        # Side from Graph already indicates maker's direction
         side = graph_trade["side"]  # BUY or SELL
     else:
-        # Trader is taker - they provided takerAmount
-        size = taker_amount
-        asset_id = graph_trade["takerAssetId"]
         # Taker takes opposite side of maker
         side = "SELL" if graph_trade["side"] == "BUY" else "BUY"
+
+    # Pick the conditional token (non-USDC asset).
+    # In Polymarket's CTF Exchange, one side is USDC (asset_id="0")
+    # and the other is the conditional token we need for market matching.
+    # The old logic picked asset_id by trader role, which grabbed "0"
+    # whenever the trader was on the USDC side — orphaning 48% of trades.
+    maker_asset = graph_trade["makerAssetId"]
+    taker_asset = graph_trade["takerAssetId"]
+    maker_is_token = maker_asset and maker_asset != "0"
+    taker_is_token = taker_asset and taker_asset != "0"
+
+    if maker_is_token and not taker_is_token:
+        asset_id = maker_asset
+        size = maker_amount
+    elif taker_is_token and not maker_is_token:
+        asset_id = taker_asset
+        size = taker_amount
+    elif maker_is_token and taker_is_token:
+        # Both non-zero (token-for-token swap): use trader's role
+        asset_id = maker_asset if is_maker else taker_asset
+        size = maker_amount if is_maker else taker_amount
+    else:
+        # Both zero — shouldn't happen, but don't crash
+        asset_id = "0"
+        size = maker_amount if is_maker else taker_amount
 
     # Price from Graph is in decimal odds format (can be > 1 for underdogs)
     # Convert to probability format (0-1 range) expected by TradeResponse
