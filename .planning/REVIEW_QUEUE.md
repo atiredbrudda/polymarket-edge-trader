@@ -12,6 +12,17 @@ Read this section and the AGENTS.md file in project root before starting work. R
 6. **Run `bash scripts/worker_validate.sh` before pushing.** If it shows regressions, fix them.
 7. **Do NOT update STATE.md.** Worker scope is: execute plan tasks, write SUMMARY.md, update REVIEW_QUEUE.md. STATE.md is reviewer-only.
 
+## Pending Review
+
+### worker/29-token-catalog-todo — 2026-03-25
+- **Plan:** N/A (ad-hoc todo capture)
+- **Branch:** worker/29-token-catalog-todo
+- **Commit:** 5ef40bb
+- **Files changed:**
+  - `.planning/todos/pending/2026-03-25-token-catalog-market-resolution-gap.md` (NEW — todo file)
+  - `.planning/STATE.md` (MODIFIED — added pending todo entry)
+- **Notes:** Docs-only todo capture. Testing-first approach: build ground truth comparison set (10 traders via API + Graph, split 5/5 for test/validation) before fixing catalog. This validates the actual divergence between sources before any catalog fix.
+
 ## Review Feedback
 
 (empty — no active feedback)

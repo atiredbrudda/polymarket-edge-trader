@@ -1,40 +1,47 @@
 ---
 created: 2026-03-25T13:49:16.667Z
-title: Fix token catalog coverage for market resolution gap
-area: data
+title: Build ground truth test set for Graph vs API trade comparison
+area: testing
 files:
-  - src/graph/converters.py
-  - data/polymarket.db
+  - src/graph/client.py
+  - src/api/client.py
+  - src/datasources/jbecker.py
 ---
 
 ## Problem
 
 The Graph converter fix (commit 561e9c7) successfully prevents grabbing USDC asset_id ("0") instead of conditional tokens. However, 60% of trades still can't be resolved to markets.
 
+Before fixing the token catalog, we need **ground truth validation** to:
+1. Confirm the actual divergence between Graph and API/JBecker trade data
+2. Understand exactly where market_id resolution fails
+3. Have a test set to validate fixes against
+
 Current state:
 - Total trades: 2,447,277
 - Trades with `graph_` prefix (unresolved): 1,464,508 (60%)
 - Trades matched to markets: 964,936 (40%)
 
-The converter correctly extracts the conditional token asset_id, but the token catalog lookup isn't finding condition_ids for those assets. This is a **separate issue from the asset_id selection bug** — it's about missing market metadata.
-
-Daily resolution rates show inconsistency:
-```
-2026-03-25: 15.2%
-2026-03-24: 26.6%
-2026-03-23: 18.7%
-2026-03-16: 28.5%
-2026-03-13: 35.3%
-```
-
 ## Solution
 
-Investigate and fix the token catalog lookup pipeline:
-1. Verify how conditional token IDs are mapped to condition_ids
-2. Check if markets table has all required condition_id entries
-3. Identify why 1,054,260 unique market_ids in trades don't match the 155,568 condition_ids in markets table
-4. Either:
-   - Expand market ingestion to cover missing condition_ids, OR
-   - Improve the token catalog lookup logic in the converter
+**Build a comparison test set:**
 
-Priority: High — this blocks accurate position tracking and PnL calculations for 60% of trades.
+1. **Pull 10 traders via both sources:**
+   - Use existing API/JBecker pipeline (trusted format)
+   - Pull same traders via Graph (new source)
+
+2. **Split the data:**
+   - First 5 traders → test/case study (build solution)
+   - Last 5 traders → validation (confirm solution works)
+
+3. **Compare outputs:**
+   - Match trades by market, side, timestamp, size
+   - Identify exactly where Graph trades diverge
+   - Verify market_id resolution is the actual problem
+
+4. **Once Graph matches API format:**
+   - Slot Graph data into existing pipeline
+   - Then fix catalog coverage with confidence
+
+Priority: High — this testing foundation is required before any catalog fix.
+
