@@ -72,38 +72,125 @@ class TradeComparator:
         """Normalize a trade dict for comparison.
 
         Args:
-            trade: Trade dict from either source
+            trade: Trade dict or Pydantic model from either source
             source: 'graph' or 'api' or 'jbecker'
 
         Returns:
             Normalized dict with standard fields
         """
+
+        # Helper to get attribute from dict or Pydantic model
+        def get_val(key: str, default=None):
+            if isinstance(trade, dict):
+                return trade.get(key, default)
+            else:
+                # Pydantic model
+                return getattr(trade, key, default)
+
         if source == "graph":
             # Graph trade format from orderFilledEvents
+            maker_asset = get_val("makerAssetId", "")
+            taker_asset = get_val("takerAssetId", "")
+            is_maker_token = maker_asset and maker_asset != "0"
+            is_taker_token = taker_asset and taker_asset != "0"
+
+            # Pick the conditional token (non-USDC asset)
+            if is_maker_token and not is_taker_token:
+                asset_id = maker_asset
+                size = float(get_val("makerAmountFilled", 0)) / 1e6
+            elif is_taker_token and not is_maker_token:
+                asset_id = taker_asset
+                size = float(get_val("takerAmountFilled", 0)) / 1e6
+            elif is_maker_token and is_taker_token:
+                # Both non-zero: use maker's asset
+                asset_id = maker_asset
+                size = float(get_val("makerAmountFilled", 0)) / 1e6
+            else:
+                # Both zero — shouldn't happen
+                asset_id = "0"
+                size = float(get_val("makerAmountFilled", 0)) / 1e6
+
             return {
-                "market": trade.get("makerAssetId", "")
-                if trade.get("makerAssetId") != "0"
-                else trade.get("takerAssetId", ""),
-                "side": trade.get("side", ""),
-                "timestamp": int(trade.get("timestamp", 0)),
-                "size": float(trade.get("makerAmountFilled", 0)) / 1e6
-                if float(trade.get("makerAssetId", "0")) != 0
-                else float(trade.get("takerAmountFilled", 0)) / 1e6,
-                "price": float(trade.get("price", 0)),
+                "market": str(asset_id),
+                "side": str(get_val("side", "")).upper(),
+                "timestamp": int(get_val("timestamp", 0)),
+                "size": size,
+                "price": float(get_val("price", 0)),
                 "raw": trade,
             }
-        elif source in ("api", "jbecker"):
-            # API/JBecker format
+        elif source == "jbecker":
+            # JBecker parquet format (snake_case)
+            maker_asset = str(get_val("maker_asset_id", ""))
+            taker_asset = str(get_val("taker_asset_id", ""))
+            is_maker_token = maker_asset and maker_asset != "0"
+            is_taker_token = taker_asset and taker_asset != "0"
+
+            # Pick the conditional token (non-USDC asset)
+            if is_maker_token and not is_taker_token:
+                asset_id = maker_asset
+                size = float(get_val("maker_amount", 0)) / 1e6
+                is_maker = True
+            elif is_taker_token and not is_maker_token:
+                asset_id = taker_asset
+                size = float(get_val("taker_amount", 0)) / 1e6
+                is_maker = False
+            elif is_maker_token and is_taker_token:
+                # Both non-zero: use maker's asset
+                asset_id = maker_asset
+                size = float(get_val("maker_amount", 0)) / 1e6
+                is_maker = True
+            else:
+                asset_id = "0"
+                size = float(get_val("maker_amount", 0)) / 1e6
+                is_maker = True
+
+            # Derive side from trader role
+            maker = str(get_val("maker", "")).lower()
+            taker = str(get_val("taker", "")).lower()
+
+            # For comparison purposes, just flag as BUY/SELL based on role
+            side = "BUY" if is_maker else "SELL"
+
+            # Timestamp handling
+            ts = get_val("timestamp")
+            if ts is None:
+                fetched = get_val("_fetched_at")
+                if hasattr(fetched, "timestamp"):
+                    timestamp = int(fetched.timestamp())
+                else:
+                    timestamp = 0
+            else:
+                timestamp = int(ts) if ts else 0
+
+            # Calculate price (maker_amount / taker_amount)
+            maker_amt = float(get_val("maker_amount", 0)) / 1e6
+            taker_amt = float(get_val("taker_amount", 0)) / 1e6
+            price = maker_amt / taker_amt if taker_amt > 0 else 0.5
+
             return {
-                "market": trade.get("market", trade.get("asset_id", "")),
-                "side": trade.get("side", ""),
-                "timestamp": int(trade.get("timestamp", 0))
-                if isinstance(trade.get("timestamp"), (int, float))
-                else int(trade.get("timestamp").timestamp())
-                if trade.get("timestamp")
-                else 0,
-                "size": float(trade.get("size", 0)),
-                "price": float(trade.get("price", 0)),
+                "market": str(asset_id),
+                "side": side,
+                "timestamp": timestamp,
+                "size": size,
+                "price": price,
+                "raw": trade,
+            }
+        elif source in ("api", "polymarket"):
+            # API TradeResponse format (Pydantic model)
+            ts_val = get_val("timestamp")
+            if isinstance(ts_val, (int, float)):
+                timestamp = int(ts_val)
+            elif hasattr(ts_val, "timestamp"):
+                timestamp = int(ts_val.timestamp())
+            else:
+                timestamp = 0
+
+            return {
+                "market": str(get_val("market", get_val("asset_id", ""))),
+                "side": str(get_val("side", "")).upper(),
+                "timestamp": timestamp,
+                "size": float(get_val("size", 0)),
+                "price": float(get_val("price", 0)),
                 "raw": trade,
             }
         else:

@@ -57,14 +57,31 @@ Implemented a comprehensive comparison tool to validate divergence between The G
 
 ## Test Results
 
+**Actual test set generated on 2026-03-25:**
+- 10 traders compared between Graph and JBecker dataset
+- 5 traders compared between Graph and Polymarket API
+
+**Key Finding: 0% match rate between all sources**
+
 ```
-tests/graph/test_comparator.py — 16/16 passed (100%)
-- TestComparisonResult: 1 test
-- TestTradeComparator: 12 tests
-- TestBuildGroundTruthTestSet: 3 tests
+Graph vs JBecker:
+- Graph trades: 850-1061 per trader
+- JBecker trades: 0-1000 per trader (many traders not in dataset)
+- Matched: 0 (0%)
+- Reason: Different time periods (JBecker = historical, Graph = current)
+
+Graph vs Polymarket API:
+- Graph trades: 1000 per trader
+- API trades: 100 per trader (API limit)
+- Matched: 0 (0%)
+- Reason: Token IDs completely different between sources
 ```
 
-No regressions in existing test suite.
+**Sample token ID mismatch:**
+- Graph asset_id: `17417526494821526257983399437117840024762295229719067091246535531572645490479`
+- API market: Different format entirely
+
+This confirms the **token catalog coverage gap** is the root cause — the token IDs from Graph don't exist in the catalog built from API data.
 
 ## Deviations from Plan
 
