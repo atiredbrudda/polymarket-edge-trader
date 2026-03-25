@@ -59,7 +59,7 @@ All v1.2 decisions recorded with outcomes.
 
 ### Pending Todos
 
-None.
+- [2026-03-25-token-catalog-market-resolution-gap](todos/pending/2026-03-25-token-catalog-market-resolution-gap.md) — Fix token catalog coverage for market resolution gap (data)
 
 ### Blockers/Concerns
 
