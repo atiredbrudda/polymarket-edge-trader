@@ -17,7 +17,7 @@ Read this section and the AGENTS.md file in project root before starting work. R
 ### worker/29-token-catalog-todo — 2026-03-25
 - **Plan:** N/A (ad-hoc todo capture — Ground truth test set implementation)
 - **Branch:** worker/29-token-catalog-todo
-- **Commits:** 5ef40bb..1eef200
+- **Commits:** 5ef40bb..39f99fa
 - **Files changed:**
   - src/graph/comparator.py (NEW — TradeComparator class, build_ground_truth_test_set function)
   - src/cli/commands.py (MODIFIED — compare-trades CLI command)
@@ -35,6 +35,7 @@ Read this section and the AGENTS.md file in project root before starting work. R
     - Graph vs JBecker: 0% match (different time periods)
     - Graph vs API: 0% match (token IDs completely different)
     - Confirms token catalog coverage gap — Graph token IDs not in catalog built from API
+  - **Full report:** `.planning/test_reports/2026-03-25-ground-truth-test-execution.md`
 - **Checklist:**
   - [x] Tests pass (source .venv/bin/activate && pytest — 16/16 passing)
   - [x] No debug artifacts
