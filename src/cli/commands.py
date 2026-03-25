@@ -66,6 +66,7 @@ from src.org_mapping.queries import (
     get_team_stats_for_trader,
     compute_and_upsert_team_stats,
 )
+from src.graph.comparator import build_ground_truth_test_set
 
 
 def _get_dependencies(settings=None):
@@ -3022,6 +3023,135 @@ def _run_analyze_signals_mode(console, session_factory, category):
     console.print(
         "\n[dim]Sizing guidance: 0-2 Q5 = 1% bankroll, 3+ Q5 = 2-3% bankroll[/dim]"
     )
+
+
+@cli.command("compare-trades")
+@click.option(
+    "--traders",
+    type=str,
+    required=True,
+    help="Comma-separated list of trader addresses (10 traders recommended: 5 for test, 5 for validation)",
+)
+@click.option(
+    "--output-dir",
+    type=Path,
+    default=Path("./data/graph_api_comparison"),
+    help="Output directory for comparison results (default: ./data/graph_api_comparison)",
+)
+@click.option(
+    "--source-b",
+    type=click.Choice(["api", "jbecker"]),
+    default="api",
+    help="Source B to compare against Graph (default: api)",
+)
+def compare_trades(traders: str, output_dir: Path, source_b: str):
+    """Compare trades between Graph and API/JBecker sources.
+
+    Builds a ground truth test set by pulling the same traders from both
+    The Graph and Polymarket API (or JBecker dataset), then compares
+    outputs to identify divergence points.
+
+    Example:
+
+    \b
+        polymarket compare-trades --traders 0xabc,0xdef,0x123,...
+        polymarket compare-trades --traders $(cat traders.txt) --output-dir ./comparison
+    """
+    from src.config.settings import get_settings
+    from src.datasources.jbecker import JBeckerDataset
+
+    settings = get_settings()
+    console = Console()
+
+    # Parse trader addresses
+    trader_addresses = [a.strip() for a in traders.split(",") if a.strip()]
+
+    if len(trader_addresses) < 2:
+        console.print("[red]Error: Provide at least 2 trader addresses[/red]")
+        return
+
+    if len(trader_addresses) != 10:
+        console.print(
+            f"[yellow]Warning: Recommended 10 traders (5 test + 5 validation), "
+            f"got {len(trader_addresses)}[/yellow]"
+        )
+
+    console.print(
+        f"Building ground truth test set with {len(trader_addresses)} traders..."
+    )
+    console.print(f"Output directory: {output_dir}")
+
+    # Initialize clients
+    try:
+        graph_client = GraphClient(settings=settings)
+    except Exception as e:
+        console.print(f"[red]Failed to initialize GraphClient: {e}[/red]")
+        return
+
+    if source_b == "api":
+        try:
+            api_client = PolymarketClient(settings=settings)
+            jbecker_dataset = None
+            console.print(f"Comparing Graph vs Polymarket API")
+        except Exception as e:
+            console.print(f"[red]Failed to initialize PolymarketClient: {e}[/red]")
+            return
+    else:
+        api_client = None
+        jbecker_path = settings.jbecker_data_path
+        jbecker_dataset = JBeckerDataset(jbecker_path)
+
+        if not jbecker_dataset.is_available():
+            console.print(f"[red]JBecker dataset not found at {jbecker_path}[/red]")
+            return
+        console.print(f"Comparing Graph vs JBecker dataset")
+
+    # Build test set
+    try:
+        summary = build_ground_truth_test_set(
+            trader_addresses=trader_addresses,
+            output_dir=output_dir,
+            graph_client=graph_client,
+            api_client=api_client,
+            jbecker_dataset=jbecker_dataset,
+        )
+
+        console.print("\n[green]Ground truth test set generated successfully![/green]")
+        console.print(f"\nTest set: {summary['test_traders']} traders")
+        console.print(f"Validation set: {summary['validation_traders']} traders")
+
+        # Show summary
+        console.print("\n=== Test Set Results ===")
+        for result in summary["test_results"]:
+            match_rate = (
+                result["matched"]
+                / max(result["graph_trades"], result["api_trades"], 1)
+                * 100
+            )
+            console.print(
+                f"  {result['trader']}: Graph={result['graph_trades']}, "
+                f"API={result['api_trades']}, Matched={result['matched']} ({match_rate:.1f}%), "
+                f"Divergences={result['market_divergences']}"
+            )
+
+        console.print("\n=== Validation Set Results ===")
+        for result in summary["validation_results"]:
+            match_rate = (
+                result["matched"]
+                / max(result["graph_trades"], result["api_trades"], 1)
+                * 100
+            )
+            console.print(
+                f"  {result['trader']}: Graph={result['graph_trades']}, "
+                f"API={result['api_trades']}, Matched={result['matched']} ({match_rate:.1f}%), "
+                f"Divergences={result['market_divergences']}"
+            )
+
+        console.print(f"\n[dim]Detailed results saved to {output_dir}[/dim]")
+
+    except Exception as e:
+        console.print(f"[red]Error generating test set: {e}[/red]")
+        raise
 
 
 if __name__ == "__main__":
