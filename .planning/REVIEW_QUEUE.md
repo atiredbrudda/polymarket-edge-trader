@@ -17,8 +17,8 @@ Read this section and the AGENTS.md file in project root before starting work. R
 ### worker/29-token-catalog-todo — 2026-03-25
 - **Plan:** N/A (ad-hoc todo capture — Ground truth test set implementation)
 - **Branch:** worker/29-token-catalog-todo
-- **Commits:** 5ef40bb..da11371
-- **Files changed:****
+- **Commits:** 5ef40bb..1eef200
+- **Files changed:**
   - src/graph/comparator.py (NEW — TradeComparator class, build_ground_truth_test_set function)
   - src/cli/commands.py (MODIFIED — compare-trades CLI command)
   - tests/graph/test_comparator.py (NEW — 16 comprehensive tests)
@@ -31,6 +31,10 @@ Read this section and the AGENTS.md file in project root before starting work. R
   - Compares on: market_id, side, timestamp (60s tolerance), size (1% tolerance)
   - Generates detailed divergence analysis for market_id resolution failures
   - All 16 tests pass, no debug artifacts, no cosmetic changes outside scope
+  - **ACTUAL TEST RUN:** Compared 10 traders from database
+    - Graph vs JBecker: 0% match (different time periods)
+    - Graph vs API: 0% match (token IDs completely different)
+    - Confirms token catalog coverage gap — Graph token IDs not in catalog built from API
 - **Checklist:**
   - [x] Tests pass (source .venv/bin/activate && pytest — 16/16 passing)
   - [x] No debug artifacts
