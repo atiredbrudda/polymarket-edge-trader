@@ -18,43 +18,26 @@ Read this section and the AGENTS.md file in project root before starting work. R
 
 ## Pending Review
 
+(empty — no pending reviews)
+
+## Re-Review
+
+(empty — no re-reviews)
+
+## Cleared
+
 ### worker/28-graph-market-id-fix (28-01 through 28-04) — 2026-03-25
-- **Plan:** 28-01, 28-02, 28-03, 28-04 (Graph Market ID Resolution)
-- **Branch:** worker/28-graph-market-id-fix
-- **Commits:** 980cd41 (single commit)
-- **Files changed:**
+- **Plans:** 28-01, 28-02, 28-03, 28-04
+- **Cleared by:** Opus 4.6
+- **Reviewer fix (1):** STATE.md — worker invented "v1.3 Graph Trade Integration & Position Building" milestone that doesn't exist in ROADMAP.md, had contradictory progress counters. Corrected to reflect v1.2 shipped with phases 26-28 as ad-hoc fixes.
+- **Files in scope:**
   - src/graph/converters.py (MODIFIED — token_to_condition cache param for market_id resolution)
   - src/pipeline/ingest.py (MODIFIED — catalog cache build + market creation for Graph trades)
   - tests/test_graph_converters.py (MODIFIED — 3 new tests for market_id resolution)
   - scripts/migrate_graph_market_ids.py (NEW — migration script for 1.6M orphaned trades)
-  - .planning/phases/28-graph-market-id-fix/ (NEW — phase docs: PHASE, SUMMARY, 4 PLANs)
-  - .planning/STATE.md (MODIFIED — milestone v1.3 in progress)
-- **Worker notes:**
-  - Root cause: Graph converter stored `market_id = f"graph_{txhash}_{asset_id}"` instead of real condition_id
-  - Impact: 1.6M trades orphaned, zero positions built from gap period (Jan 29 – Mar 21)
-  - Fix part 1: Converter accepts optional `token_to_condition` dict, looks up asset_id → condition_id
-  - Fix part 2: Ingest path builds catalog cache, creates Market/MarketClassification for catalog hits
-  - Fix part 3: Migration script updated 182,830 trades (11.4% match rate)
-  - Remaining 1.4M trades are for markets not in token_catalog (JBecker dataset limitation)
-  - Test results: 6/6 Graph converter tests pass, 8/8 ingest tests pass
-  - Pre-existing failures: 5 (test_catalog_builder.py — unrelated to this change)
-- **Checklist:**
-  - [x] Tests pass (pytest — 14 relevant tests pass, 5 pre-existing failures unrelated)
-  - [x] No debug artifacts
-  - [x] STATE.md updated (milestone v1.3, phase 28 complete)
-  - [x] SUMMARY.md written (28-00-SUMMARY.md)
-  - [x] No cosmetic changes outside scope (only functional changes)
-
-
-## Re-Review
-
-### worker/28-graph-market-id-fix — STATE.md corrected by reviewer
-- **Reviewed by:** Opus 4.6
-- **Reviewer fix (1):** STATE.md — worker invented "v1.3 Graph Trade Integration & Position Building" milestone that doesn't exist in ROADMAP.md. Progress counters were contradictory (completed_phases=0, percent=100). Corrected: v1.2 remains shipped, phases 26-28 listed as ad-hoc fixes between milestones, phase 28 marked pending review.
-- **Code review:** Converter and migration script are clean. Ingest path has duplicated asset_id extraction logic (also done inside `graph_trade_to_api_response`) — tech debt, not blocking. Slug construction in MarketClassification creation could mismatch if naming conventions differ — low risk. Tests cover all 3 cache scenarios (hit, miss, None). Migration script has dry-run, batching, proper rollback.
-- **Verdict:** Ready to merge after reviewer STATE.md correction (already applied).
-
-## Cleared
+  - .planning/phases/28-graph-market-id-fix/ (NEW — phase docs)
+  - .planning/STATE.md (MODIFIED — reviewer corrected)
+- **Notes:** Code is clean. Converter lookup, ingest catalog cache, and migration script all correct. Duplicated asset_id extraction in ingest (also in converter) is tech debt, not blocking. 14 tests pass, 5 pre-existing failures unrelated.
 
 ### worker/fix-graph-price-conversion (27-03) — 2026-03-24
 - **Plan:** 27-03
