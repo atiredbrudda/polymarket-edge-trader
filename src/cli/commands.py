@@ -2090,11 +2090,8 @@ def catalog_stats(verbose):
 @click.option(
     "--esports-only", is_flag=True, help="Only build eSports catalog (legacy mode)"
 )
-@click.option(
-    "--batch-size", default=50, type=int, help="Events per API request (default: 50)"
-)
 @click.option("--verbose", "-v", is_flag=True, help="Enable debug logging")
-def build_token_catalog_cmd(esports_only, batch_size, verbose):
+def build_token_catalog_cmd(esports_only, verbose):
     """Build complete token catalog from Gamma API.
 
     Fetches ALL events (active + closed) from Gamma API across all categories
@@ -2111,7 +2108,6 @@ def build_token_catalog_cmd(esports_only, batch_size, verbose):
         polymarket build-token-catalog                  # All categories
         polymarket build-token-catalog --esports-only   # eSports only
         polymarket build-token-catalog --verbose
-        polymarket build-token-catalog --batch-size 100
 
     Expected Impact:
         - eSports-only: ~136K tokens (11.4% coverage)

@@ -178,9 +178,9 @@ class TokenCatalogBuilder:
                             "condition_id": str(condition_id),
                             "question": str(question)[:500],
                             "niche_slug": category,
-                            "node_path": category,  # Store category as node_path for now
-                            "depth": 1,  # Category level
-                            "market_type": "prop",  # Default market type
+                            "node_path": None,
+                            "depth": None,
+                            "market_type": None,
                         }
                     )
 
