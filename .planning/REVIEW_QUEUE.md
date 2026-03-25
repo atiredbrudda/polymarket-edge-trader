@@ -21,7 +21,7 @@ Read this section and the AGENTS.md file in project root before starting work. R
 ### worker/30-graph-trade-resolution-phase1 — 2026-03-25
 - **Plan:** 30-01
 - **Branch:** worker/30-graph-trade-resolution-phase1
-- **Commits:** [pending — first commit]
+- **Commits:** 89ec26d..a8904da
 - **Files changed:**
   - src/catalog/builder.py (MODIFIED — all-categories mode, category extraction, +80 lines)
   - src/cli/commands.py (MODIFIED — build-token-catalog command, +80 lines)
