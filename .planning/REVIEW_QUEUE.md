@@ -15,13 +15,27 @@ Read this section and the AGENTS.md file in project root before starting work. R
 ## Pending Review
 
 ### worker/29-token-catalog-todo — 2026-03-25
-- **Plan:** N/A (ad-hoc todo capture)
+- **Plan:** N/A (ad-hoc todo capture — Ground truth test set implementation)
 - **Branch:** worker/29-token-catalog-todo
-- **Commit:** 5ef40bb
+- **Commits:** 5ef40bb..ff77c11
 - **Files changed:**
-  - `.planning/todos/pending/2026-03-25-token-catalog-market-resolution-gap.md` (NEW — todo file)
-  - `.planning/STATE.md` (MODIFIED — added pending todo entry)
-- **Notes:** Docs-only todo capture. Testing-first approach: build ground truth comparison set (10 traders via API + Graph, split 5/5 for test/validation) before fixing catalog. This validates the actual divergence between sources before any catalog fix.
+  - src/graph/comparator.py (NEW — TradeComparator class, build_ground_truth_test_set function)
+  - src/cli/commands.py (MODIFIED — compare-trades CLI command)
+  - tests/graph/test_comparator.py (NEW — 16 comprehensive tests)
+  - tests/graph/__init__.py (NEW — package marker)
+  - docs/graph_api_comparison_test_set.md (NEW — usage documentation)
+  - .planning/todos/pending/2026-03-25-token-catalog-market-resolution-gap.md (NEW — todo file)
+- **Worker notes:** 
+  - Testing-first approach: build ground truth comparison set (10 traders via API + Graph, split 5/5 for test/validation) before fixing catalog
+  - Validates actual divergence between sources before any catalog fix
+  - Compares on: market_id, side, timestamp (60s tolerance), size (1% tolerance)
+  - Generates detailed divergence analysis for market_id resolution failures
+  - All 16 tests pass, no debug artifacts, no cosmetic changes outside scope
+- **Checklist:**
+  - [x] Tests pass (source .venv/bin/activate && pytest — 16/16 passing)
+  - [x] No debug artifacts
+  - [x] STATE.md updated (current phase, plan number, last activity date)
+  - [x] Plan SUMMARY.md written (`29-01-SUMMARY.md`)
 
 ## Review Feedback
 
