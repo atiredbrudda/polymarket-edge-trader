@@ -1,10 +1,8 @@
-"""Token catalog builder using Gamma API eSports events.
+"""Token catalog builder using Gamma API events.
 
-Fetches all eSports events (tag_id=64) from Gamma API — both active and
-closed — and writes every clob token ID to token_catalog with
-niche_slug='esports'. Since Gamma's tag is Polymarket's own authoritative
-classification, no pattern matching is needed: every token here is
-guaranteed eSports.
+Fetches all events from Gamma API (across all categories) and extracts
+clob token ID to condition_id mappings for the token_catalog table.
+Supports both eSports-only mode (tag_id=64) and all-categories mode.
 """
 
 import json
@@ -22,21 +20,26 @@ PAGE_SIZE = 50
 
 
 class TokenCatalogBuilder:
-    """Builds token_catalog table from Gamma API eSports events.
+    """Builds token_catalog table from Gamma API events.
 
-    Fetches all events with tag_id=64 (eSports) — both active and closed —
-    extracts every clobTokenId, and writes to token_catalog with
-    niche_slug='esports'. No pattern matching needed since Gamma's tag is
-    authoritative.
+    Fetches events from Gamma API and extracts token→condition_id mappings.
+    Supports two modes:
+    - eSports-only (tag_id=64): Legacy mode, only eSports events
+    - All-categories: Fetches events from all categories (default for Phase 30)
 
     Args:
-        *args: Ignored (kept for backwards compatibility with old parquet-based
-               constructor that took markets_path and taxonomy_path).
-        **kwargs: Ignored.
+        esports_only: If True, only fetch eSports events (tag_id=64)
+                     If False, fetch all events across all categories
     """
 
-    def __init__(self, *args, **kwargs):
-        pass  # All data comes from Gamma API at build time
+    def __init__(self, esports_only: bool = False, **kwargs):
+        """Initialize builder.
+
+        Args:
+            esports_only: If True, only build eSports catalog (legacy mode)
+                         If False, build full catalog from all categories
+        """
+        self.esports_only = esports_only
 
     def is_built(self, session: Session) -> bool:
         """Check if catalog has been built (table is non-empty).
@@ -53,9 +56,10 @@ class TokenCatalogBuilder:
         return count > 0
 
     def _fetch_all_events(self, active: bool) -> list[dict]:
-        """Fetch all eSports events for one active state from Gamma API.
+        """Fetch all events for one active state from Gamma API.
 
-        Paginates until all results are collected.
+        Paginates until all results are collected. If esports_only mode,
+        filters by tag_id=64. Otherwise fetches all categories.
 
         Args:
             active: True for active events, False for closed events
@@ -69,12 +73,15 @@ class TokenCatalogBuilder:
         while True:
             params = {
                 "active": str(active).lower(),
-                "tag_id": ESPORTS_TAG_ID,
                 "limit": PAGE_SIZE,
                 "offset": offset,
                 "order": "startDate",
                 "ascending": "true",
             }
+            # Only add tag_id filter for eSports-only mode
+            if self.esports_only:
+                params["tag_id"] = ESPORTS_TAG_ID
+
             try:
                 resp = httpx.get(
                     f"{GAMMA_BASE_URL}/events",
@@ -99,11 +106,11 @@ class TokenCatalogBuilder:
         return all_events
 
     def build(self, session: Session) -> int:
-        """Fetch all eSports events from Gamma API and write to token_catalog.
+        """Fetch events from Gamma API and write to token_catalog.
 
         Clears any existing rows first (handles re-runs and corrupt state),
-        then fetches active + closed eSports events, extracts all token IDs,
-        and bulk-inserts with niche_slug='esports'.
+        then fetches events based on mode (esports_only or all-categories),
+        extracts all token IDs with category information, and bulk-inserts.
 
         Args:
             session: Active SQLAlchemy session (caller manages commit)
@@ -111,27 +118,32 @@ class TokenCatalogBuilder:
         Returns:
             Number of token rows inserted
         """
+        mode_str = "eSports-only" if self.esports_only else "all-categories"
+
         # Clear existing rows (handles corrupt state or re-runs cleanly)
         session.execute(text("DELETE FROM token_catalog"))
         session.commit()
-        logger.info("Cleared existing token_catalog rows")
+        logger.info(f"Cleared existing token_catalog rows ({mode_str} mode)")
 
-        logger.info("Fetching active eSports events from Gamma API...")
+        logger.info(f"Fetching active {mode_str} events from Gamma API...")
         active_events = self._fetch_all_events(active=True)
         logger.info(f"  Active events: {len(active_events)}")
 
-        logger.info("Fetching closed eSports events from Gamma API...")
+        logger.info(f"Fetching closed {mode_str} events from Gamma API...")
         closed_events = self._fetch_all_events(active=False)
         logger.info(f"  Closed events: {len(closed_events)}")
 
         all_events = active_events + closed_events
-        logger.info(f"Total eSports events fetched: {len(all_events)}")
+        logger.info(f"Total events fetched: {len(all_events)}")
 
         # Extract one token_catalog row per unique token ID
         token_rows = []
         seen_token_ids: set[str] = set()
 
         for event in all_events:
+            # Extract category from event tags or category field
+            category = self._extract_category(event)
+
             markets = event.get("markets") or []
             for market in markets:
                 condition_id = market.get("conditionId") or market.get("condition_id")
@@ -165,15 +177,15 @@ class TokenCatalogBuilder:
                             "token_id": token_str,
                             "condition_id": str(condition_id),
                             "question": str(question)[:500],
-                            "niche_slug": "esports",
-                            "node_path": None,
-                            "depth": None,
-                            "market_type": None,
+                            "niche_slug": category,
+                            "node_path": category,  # Store category as node_path for now
+                            "depth": 1,  # Category level
+                            "market_type": "prop",  # Default market type
                         }
                     )
 
         logger.info(
-            f"Extracted {len(token_rows)} unique eSports token rows, writing to SQLite"
+            f"Extracted {len(token_rows)} unique token rows ({mode_str}), writing to DB"
         )
 
         if not token_rows:
@@ -192,5 +204,31 @@ class TokenCatalogBuilder:
             token_rows,
         )
         session.commit()
-        logger.info(f"Token catalog built: {len(token_rows)} rows written")
+        logger.info(f"Token catalog built: {len(token_rows)} rows written ({mode_str})")
         return len(token_rows)
+
+    def _extract_category(self, event: dict) -> str:
+        """Extract category from event tags or category field.
+
+        Args:
+            event: Event dict from Gamma API
+
+        Returns:
+            Category string (e.g., 'esports', 'sports', 'politics', 'crypto')
+        """
+        # Try to get from tags first
+        tags = event.get("tags") or []
+        if tags and len(tags) > 0:
+            # Tags are typically dicts with 'name' or 'slug' field
+            tag = tags[0]
+            if isinstance(tag, dict):
+                tag_name = tag.get("name", tag.get("slug", ""))
+                if tag_name:
+                    return tag_name.lower().replace(" ", "_")
+
+        # Fallback to category field
+        category = event.get("category", "unknown")
+        if category:
+            return str(category).lower().replace(" ", "_")
+
+        return "unknown"
