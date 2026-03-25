@@ -1336,6 +1336,32 @@ class IngestionPipeline:
         }
 
         try:
+            # Step 1: Ensure catalog is built (one-time, ~25s, cached on instance)
+            self._ensure_catalog_built(session)
+
+            # Step 2: Build catalog cache for all tokens (not just esports)
+            # dict[token_id -> (condition_id, question, node_path, market_type)]
+            catalog_entries = session.query(
+                TokenCatalog.token_id,
+                TokenCatalog.condition_id,
+                TokenCatalog.question,
+                TokenCatalog.node_path,
+                TokenCatalog.market_type,
+            ).all()
+            catalog_token_cache: dict[str, tuple] = {
+                row.token_id: (
+                    row.condition_id,
+                    row.question,
+                    row.node_path,
+                    row.market_type,
+                )
+                for row in catalog_entries
+            }
+            token_to_condition: dict[str, str] = {
+                row.token_id: row.condition_id for row in catalog_entries
+            }
+            logger.info(f"Catalog cache loaded: {len(catalog_token_cache)} tokens")
+
             # Fetch ALL trades from The Graph (instant!)
             graph_trades = self.graph_client.get_trader_trades(trader_address)
             stats["trades_from_graph"] = len(graph_trades)
@@ -1350,25 +1376,85 @@ class IngestionPipeline:
                 session.commit()
                 return stats
 
-            # Convert Graph trades to API format
-            # Note: Graph gives us blockchain trades, we need to enrich with market metadata
-            market_metadata = {}
-            all_trades_with_category = []
+            # Convert Graph trades to API format with market classification
+            unknown_tokens: set[str] = set()
+            catalog_condition_ids: set[str] = set()
 
             for graph_trade in graph_trades:
-                # Extract asset IDs to find markets
-                # For now, we'll need to fetch market metadata from API
-                # The Graph gives us trades but not market details
-
-                # TODO: Map assetId to condition_id properly
-                # For now, skip market classification and store all as detail trades
-                # This is a temporary limitation - we could enhance Graph queries
-                # or maintain a local asset_id -> condition_id mapping
-
                 try:
-                    # Convert to API format
+                    # Extract asset_id for catalog lookup
+                    trader_addr_lower = trader_address.lower()
+                    maker = graph_trade["maker"].lower()
+                    taker = graph_trade["taker"].lower()
+                    is_maker = trader_addr_lower == maker
+                    asset_id = str(
+                        graph_trade["makerAssetId"]
+                        if is_maker
+                        else graph_trade["takerAssetId"]
+                    )
+
+                    # Check if token in catalog
+                    if asset_id in catalog_token_cache:
+                        condition_id, question, node_path, market_type = (
+                            catalog_token_cache[asset_id]
+                        )
+                        catalog_condition_ids.add(condition_id)
+
+                        # Create Market if not exists (idempotent with savepoint)
+                        sp = session.begin_nested()
+                        try:
+                            new_market = Market(
+                                condition_id=condition_id,
+                                question=question,
+                                category="eSports"
+                                if market_type == "esports"
+                                else "Other",
+                                active=False,
+                            )
+                            session.add(new_market)
+                            sp.commit()
+                        except IntegrityError:
+                            sp.rollback()
+
+                        # Create MarketClassification if not exists
+                        existing_cls = (
+                            session.query(MarketClassification)
+                            .filter_by(market_id=condition_id)
+                            .first()
+                        )
+                        if not existing_cls:
+                            taxonomy_node_id = None
+                            if node_path:
+                                slug_parts = node_path.replace(" ", "-").lower()
+                                slug = ".".join(
+                                    p.strip("-") for p in slug_parts.split(".")
+                                )
+                                node = (
+                                    session.query(TaxonomyNode)
+                                    .filter_by(slug=slug)
+                                    .first()
+                                )
+                                if node:
+                                    taxonomy_node_id = node.id
+
+                            sp = session.begin_nested()
+                            try:
+                                cls = MarketClassification(
+                                    market_id=condition_id,
+                                    taxonomy_node_id=taxonomy_node_id,
+                                    node_path=node_path,
+                                    market_type=market_type,
+                                )
+                                session.add(cls)
+                                sp.commit()
+                            except IntegrityError:
+                                sp.rollback()
+                    else:
+                        unknown_tokens.add(asset_id)
+
+                    # Convert to API format with token_to_condition lookup
                     trade_response = graph_trade_to_api_response(
-                        graph_trade, trader_address
+                        graph_trade, trader_address, token_to_condition
                     )
 
                     # Check if trade already exists (deduplication by trade ID)
@@ -1382,7 +1468,7 @@ class IngestionPipeline:
                         stats["already_in_db"] += 1
                         continue
 
-                    # Store as detail trade (no categorization for now)
+                    # Store trade with resolved market_id
                     trade = Trade(
                         market_id=trade_response.market,
                         trader_address=trade_response.trader,
@@ -1399,6 +1485,12 @@ class IngestionPipeline:
                 except Exception as e:
                     logger.warning(f"Failed to process Graph trade: {e}")
                     continue
+
+            # Log unknown tokens for manual review
+            if unknown_tokens:
+                logger.info(
+                    f"{len(unknown_tokens)} tokens not in catalog: {sorted(unknown_tokens)[:10]}..."
+                )
 
             # Mark trader as backfill complete
             trader = session.query(Trader).filter_by(address=trader_address).first()

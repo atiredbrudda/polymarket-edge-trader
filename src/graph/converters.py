@@ -1,13 +1,18 @@
 """Converters for transforming Graph data to internal formats."""
 
+import logging
 from datetime import datetime
 from decimal import Decimal
 
 from src.api.models import TradeResponse
 
+logger = logging.getLogger(__name__)
+
 
 def graph_trade_to_api_response(
-    graph_trade: dict, trader_address: str
+    graph_trade: dict,
+    trader_address: str,
+    token_to_condition: dict[str, str] | None = None,
 ) -> TradeResponse:
     """Convert Graph OrderFilledEvent to API TradeResponse format.
 
@@ -17,6 +22,9 @@ def graph_trade_to_api_response(
     Args:
         graph_trade: OrderFilledEvent dict from The Graph
         trader_address: The trader address we're querying for
+        token_to_condition: Optional dict mapping token_id -> condition_id.
+            If provided, asset_id is looked up to get real condition_id.
+            If not provided or asset_id not found, uses synthetic market_id.
 
     Returns:
         TradeResponse compatible with existing pipeline
@@ -87,11 +95,13 @@ def graph_trade_to_api_response(
     # Timestamp (Unix timestamp to datetime)
     timestamp = datetime.fromtimestamp(int(graph_trade["timestamp"]))
 
-    # Market ID: For Polymarket, we need the condition_id
-    # The assetId encodes the condition_id - we'll need to decode it
-    # For now, use a placeholder and let pipeline resolve it
-    # TODO: Decode condition_id from assetId if needed
-    market_id = f"graph_{graph_trade['transactionHash']}_{asset_id}"
+    # Market ID: Resolve condition_id from token_catalog if available
+    if token_to_condition and asset_id in token_to_condition:
+        market_id = token_to_condition[asset_id]
+    else:
+        market_id = f"graph_{graph_trade['transactionHash']}_{asset_id}"
+        if token_to_condition is not None:
+            logger.debug(f"Token {asset_id} not in catalog, using synthetic market_id")
 
     # Asset ticker: Determine YES/NO from asset_id parity
     # In Polymarket CTF: even assetId = NO, odd assetId = YES
