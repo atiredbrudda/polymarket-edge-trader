@@ -18,54 +18,37 @@ Read this section and the AGENTS.md file in project root before starting work. R
 
 ## Pending Review
 
-### worker/30-graph-trade-resolution-phase1 — 2026-03-25
-- **Plan:** 30-01
-- **Branch:** worker/30-graph-trade-resolution-phase1
-- **Commits:** 89ec26d..a8904da
-- **Files changed:**
-  - src/catalog/builder.py (MODIFIED — all-categories mode, category extraction, +80 lines)
-  - src/cli/commands.py (MODIFIED — build-token-catalog command, +80 lines)
-  - tests/test_catalog_builder.py (REWRITTEN — 12 comprehensive tests for new modes)
-  - .planning/phases/30-graph-trade-resolution/30-01-PLAN.md (NEW)
-  - .planning/phases/30-graph-trade-resolution/30-01-SUMMARY.md (NEW)
-- **Worker notes:** 
-  - Solves the token catalog coverage bottleneck: only 11.4% coverage because builder only fetched eSports events
-  - New all-categories mode fetches events from ALL categories (sports, politics, crypto, etc.) via Gamma API
-  - Expected catalog growth: 136K → 900K+ tokens (11.4% → 90%+ coverage)
-  - Category extracted from event tags with fallback to category field
-  - Clear-and-rebuild approach (not incremental) for consistency
-  - All 37 catalog tests pass, 0 regressions
-- **Checklist:**
-  - [x] Tests pass (pytest) — 12/12 new tests, 37/37 total catalog tests
-  - [x] No debug artifacts
-  - [x] SUMMARY.md written (30-01-SUMMARY.md)
-  - [ ] STATE.md updated (reviewer-only)
+(empty — no pending reviews)
 
-### worker/29-bulk-market-resolution — 2026-03-25
+## Rejected
+
+### worker/29-bulk-market-resolution — 2026-03-25 — REJECTED
 - **Plan:** 29-01
 - **Branch:** worker/29-bulk-market-resolution
-- **Commits:** e6ed409
-- **Files changed:**
-  - src/gamma/events_resolver.py (NEW — resolve_markets_from_closed_events, _determine_winner_index, _update_market_outcome)
-  - tests/test_gamma_events_resolver.py (NEW — 12 comprehensive tests)
-  - src/cli/commands.py (MODIFIED — resolve-markets-from-events CLI command, +70 lines)
-  - .planning/phases/29-bulk-market-resolution/29-01-SUMMARY.md (NEW)
-- **Worker notes:** 
-  - Solves the market resolution bottleneck: only 8.3% of markets had outcomes because resolve-outcomes only processed esports Gamma events
-  - New command fetches ALL closed events (all categories) from Gamma API and resolves markets based on outcomePrices
-  - API test confirmed working, but noticed some events have malformed end dates (data quality issue in Gamma API)
-  - Pre-existing test failure in tests/datasources/test_jbecker.py::test_query_uses_parameterized_sql — unrelated to this change (verified via git diff)
-- **Checklist:**
-  - [x] Tests pass (pytest) — 12/12 new tests pass
-  - [x] No debug artifacts
-  - [x] SUMMARY.md written (29-01-SUMMARY.md)
-  - [ ] STATE.md updated (reviewer-only)
+- **Reason:** Subsumed by Phase 30 roadmap (Phase 2). Multiple critical bugs:
+  1. `_update_market_outcome` hardcodes `outcome="YES"` — ignores winning_token_id, corrupts NO outcomes
+  2. `get_events(offset=)` will crash at runtime — `get_events` doesn't accept `offset`, already paginates internally
+  3. Unused imports (`json`, `Decimal`)
+  4. Duplicate test method (`test_skips_already_resolved_markets` appears twice)
+  5. 18 of 21 files are junk (phase 26 docs, uv.lock, tmp scripts, auto-research dump)
+- **Disposition:** Do not merge. Rewrite as Phase 30-02 under graph-trade-resolution roadmap.
 
 ## Re-Review
 
 (empty — no re-reviews)
 
 ## Cleared
+
+### worker/30-graph-trade-resolution-phase1 (30-01) — 2026-03-25
+- **Plan:** 30-01
+- **Cleared by:** Opus 4.6
+- **Reviewer fix (1):** node_path/depth/market_type were hardcoded to fake values (category, 1, "prop") — reverted to None for non-esports tokens.
+- **Reviewer fix (2):** Removed unused --batch-size CLI option (never wired to builder).
+- **Files in scope:**
+  - src/catalog/builder.py (MODIFIED — all-categories mode, category extraction)
+  - src/cli/commands.py (MODIFIED — build-token-catalog command)
+  - tests/test_catalog_builder.py (REWRITTEN — 12 tests for new modes)
+- **Notes:** Clean expansion of token catalog from esports-only to all-categories. 12/12 tests pass.
 
 ### worker/28-graph-market-id-fix (28-01 through 28-04) — 2026-03-25
 - **Plans:** 28-01, 28-02, 28-03, 28-04
