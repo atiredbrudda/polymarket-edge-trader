@@ -2086,6 +2086,74 @@ def catalog_stats(verbose):
     )
 
 
+@cli.command("build-token-catalog")
+@click.option(
+    "--esports-only", is_flag=True, help="Only build eSports catalog (legacy mode)"
+)
+@click.option("--verbose", "-v", is_flag=True, help="Enable debug logging")
+def build_token_catalog_cmd(esports_only, verbose):
+    """Build complete token catalog from Gamma API.
+
+    Fetches ALL events (active + closed) from Gamma API across all categories
+    and extracts token_id → condition_id mappings to the token_catalog table.
+
+    By default, fetches events from all categories (politics, crypto, sports,
+    esports, etc.) to maximize catalog coverage. Use --esports-only flag to
+    only fetch eSports events (legacy mode).
+
+    Safe to re-run — clears and rebuilds catalog each time (idempotent).
+
+    \b
+    Examples:
+        polymarket build-token-catalog                  # All categories
+        polymarket build-token-catalog --esports-only   # eSports only
+        polymarket build-token-catalog --verbose
+
+    Expected Impact:
+        - eSports-only: ~136K tokens (11.4% coverage)
+        - All-categories: 900K+ tokens (90%+ coverage target)
+    """
+    logger.info("BUILD-TOKEN-CATALOG command started")
+
+    if verbose:
+        logger.remove()
+        logger.add(sys.stderr, level="DEBUG")
+
+    console = Console()
+
+    mode_str = "eSports-only" if esports_only else "all-categories"
+    console.print(f"[bold]Building token catalog ({mode_str} mode)...[/bold]")
+
+    try:
+        from src.catalog.builder import TokenCatalogBuilder
+
+        settings = get_settings()
+        session_factory, _, _, _, _, _ = _get_dependencies(settings)
+
+        with get_session(session_factory) as session:
+            builder = TokenCatalogBuilder(esports_only=esports_only)
+            rows_inserted = builder.build(session)
+
+        if rows_inserted > 0:
+            console.print(
+                f"[green]Done.[/green] {rows_inserted:,} token rows inserted."
+            )
+        else:
+            console.print(
+                "[yellow]Warning:[/yellow] No tokens inserted. "
+                "Check Gamma API connectivity."
+            )
+
+        logger.info(
+            f"BUILD-TOKEN-CATALOG completed: {rows_inserted:,} rows ({mode_str})"
+        )
+
+    except Exception as e:
+        logger.error(f"build-token-catalog failed: {e}")
+        console.print(f"[red]Error: {e}[/red]")
+        raise SystemExit(1)
+
+
 @cli.command("build-index")
 @click.option(
     "--batch-size",
