@@ -152,3 +152,119 @@ def test_market_id_no_cache_passed():
 
     result = graph_trade_to_api_response(graph_trade, "0xTrader123", None)
     assert result.market.startswith("graph_")
+
+
+def test_maker_on_usdc_side_picks_taker_asset():
+    """When maker provides USDC (asset=0), use taker's conditional token."""
+    graph_trade = {
+        "id": "0xabc_0xdef",
+        "maker": "0xTrader123",
+        "taker": "0xOther456",
+        "makerAmountFilled": "500000",   # 0.5 USDC
+        "takerAmountFilled": "1000000",  # 1.0 tokens
+        "makerAssetId": "0",             # USDC side
+        "takerAssetId": "99887766",      # Conditional token
+        "fee": "1000",
+        "timestamp": "1234567890",
+        "blockNumber": "82466624",
+        "transactionHash": "0xabc123",
+        "side": "BUY",
+        "price": "0.5",
+    }
+
+    result = graph_trade_to_api_response(graph_trade, "0xTrader123", None)
+    # Should use taker's token (99887766), not maker's USDC (0)
+    assert "99887766" in result.market
+    assert result.market == "graph_0xabc123_99887766"
+
+
+def test_taker_on_usdc_side_picks_maker_asset():
+    """When taker provides USDC (asset=0), use maker's conditional token."""
+    graph_trade = {
+        "id": "0xabc_0xdef",
+        "maker": "0xOther456",
+        "taker": "0xTrader123",
+        "makerAmountFilled": "1000000",  # 1.0 tokens
+        "takerAmountFilled": "500000",   # 0.5 USDC
+        "makerAssetId": "99887766",      # Conditional token
+        "takerAssetId": "0",             # USDC side
+        "fee": "1000",
+        "timestamp": "1234567890",
+        "blockNumber": "82466624",
+        "transactionHash": "0xabc123",
+        "side": "SELL",
+        "price": "0.5",
+    }
+
+    result = graph_trade_to_api_response(graph_trade, "0xTrader123", None)
+    # Should use maker's token (99887766), not taker's USDC (0)
+    assert "99887766" in result.market
+    assert result.market == "graph_0xabc123_99887766"
+
+
+def test_usdc_side_resolves_from_catalog():
+    """Maker on USDC side should still resolve market_id via token catalog."""
+    graph_trade = {
+        "id": "0xabc_0xdef",
+        "maker": "0xTrader123",
+        "taker": "0xOther456",
+        "makerAmountFilled": "500000",
+        "takerAmountFilled": "1000000",
+        "makerAssetId": "0",
+        "takerAssetId": "99887766",
+        "fee": "1000",
+        "timestamp": "1234567890",
+        "blockNumber": "82466624",
+        "transactionHash": "0xabc123",
+        "side": "BUY",
+        "price": "0.5",
+    }
+
+    cache = {"99887766": "real_condition_id_abc"}
+    result = graph_trade_to_api_response(graph_trade, "0xTrader123", cache)
+    assert result.market == "real_condition_id_abc"
+
+
+def test_usdc_side_size_is_token_amount():
+    """Size should be the token amount, not the USDC amount."""
+    graph_trade = {
+        "id": "0xabc_0xdef",
+        "maker": "0xTrader123",
+        "taker": "0xOther456",
+        "makerAmountFilled": "500000",   # 0.5 USDC
+        "takerAmountFilled": "2000000",  # 2.0 tokens
+        "makerAssetId": "0",
+        "takerAssetId": "99887766",
+        "fee": "1000",
+        "timestamp": "1234567890",
+        "blockNumber": "82466624",
+        "transactionHash": "0xabc123",
+        "side": "BUY",
+        "price": "0.25",
+    }
+
+    result = graph_trade_to_api_response(graph_trade, "0xTrader123", None)
+    # Size should be 2.0 (token amount), not 0.5 (USDC amount)
+    assert result.size == Decimal("2")
+
+
+def test_both_assets_nonzero_uses_trader_role():
+    """When both assets are non-zero, fall back to trader's role."""
+    graph_trade = {
+        "id": "0xabc_0xdef",
+        "maker": "0xTrader123",
+        "taker": "0xOther456",
+        "makerAmountFilled": "500000",
+        "takerAmountFilled": "1000000",
+        "makerAssetId": "111",
+        "takerAssetId": "222",
+        "fee": "1000",
+        "timestamp": "1234567890",
+        "blockNumber": "82466624",
+        "transactionHash": "0xabc123",
+        "side": "BUY",
+        "price": "0.5",
+    }
+
+    result = graph_trade_to_api_response(graph_trade, "0xTrader123", None)
+    assert "111" in result.market  # maker's asset
