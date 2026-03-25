@@ -62,6 +62,7 @@ from src.gamma.classification import (
     backfill_market_classifications,
 )
 from src.gamma.position_resolver import resolve_positions
+from src.gamma.events_resolver import resolve_markets_from_closed_events
 from src.org_mapping.queries import (
     get_team_stats_for_trader,
     compute_and_upsert_team_stats,
@@ -2416,6 +2417,75 @@ def resolve_outcomes(verbose):
 
     except Exception as e:
         logger.error(f"resolve-outcomes failed: {e}")
+        console.print(f"[red]Error: {e}[/red]")
+        raise SystemExit(1)
+
+
+@cli.command("resolve-markets-from-events")
+@click.option("--verbose", "-v", is_flag=True, help="Enable debug logging")
+@click.option(
+    "--batch-size",
+    type=int,
+    default=200,
+    help="Events per API request (default: 200)",
+)
+def resolve_markets_from_events_cmd(verbose, batch_size):
+    """Resolve market outcomes by fetching ALL closed events from Gamma API.
+
+    Unlike 'resolve-outcomes' which only processes markets linked to existing
+    gamma_events rows (esports only), this command fetches closed events from
+    ALL categories (politics, crypto, sports, etc.) directly from the Gamma API.
+
+    This resolves the blind spot where markets created via Graph/JBecker paths
+    are marked active=True but have no outcome because they're not in the
+    Gamma events dataset.
+
+    For each closed event:
+    - Extracts outcomePrices from each market
+    - Determines winning token (price closest to 1.0, must be > 0.5)
+    - Sets market.outcome = 'YES' for winning token's market
+    - Sets market.active = False
+
+    Safe to re-run — idempotent. Only updates markets with outcome=NULL.
+
+    \b
+    Examples:
+        polymarket resolve-markets-from-events
+        polymarket resolve-markets-from-events --verbose
+        polymarket resolve-markets-from-events --batch-size 100
+    """
+    logger.info("RESOLVE-MARKETS-FROM-EVENTS command started")
+
+    if verbose:
+        logger.remove()
+        logger.add(sys.stderr, level="DEBUG")
+
+    console = Console()
+
+    try:
+        settings = get_settings()
+        session_factory, _, _, _, _, _ = _get_dependencies(settings)
+
+        console.print("[bold]Resolving markets from ALL closed Gamma events...[/bold]")
+
+        with get_session(session_factory) as session:
+            counts = resolve_markets_from_closed_events(session, batch_size=batch_size)
+
+        events_fetched = counts["events_fetched"]
+        markets_resolved = counts["markets_resolved"]
+        markets_updated = counts["markets_updated"]
+
+        console.print(
+            f"[green]Done.[/green] {markets_updated} markets updated "
+            f"({markets_resolved} processed, {events_fetched} events fetched)."
+        )
+        logger.info(
+            f"RESOLVE-MARKETS-FROM-EVENTS completed: {markets_updated} markets updated, "
+            f"{events_fetched} events fetched"
+        )
+
+    except Exception as e:
+        logger.error(f"resolve-markets-from-events failed: {e}")
         console.print(f"[red]Error: {e}[/red]")
         raise SystemExit(1)
 
