@@ -1,16 +1,16 @@
 ---
 gsd_state_version: 1.0
-milestone: v1.3
-milestone_name: Graph Trade Integration & Position Building
-status: in_progress
-stopped_at: Phase 28 in progress
-last_updated: "2026-03-25T01:20:00.000Z"
-last_activity: "2026-03-25 — Phase 28: Fixed Graph trade market_id resolution, migrated 182K trades"
+milestone: v1.2
+milestone_name: Market Resolution & Deep Classification
+status: shipped
+stopped_at: Ad-hoc fixes (phases 26-28) between milestones
+last_updated: "2026-03-25T12:00:00.000Z"
+last_activity: "2026-03-25 — Phase 28 (Graph market_id fix) pending review. Phases 26-27 merged."
 progress:
-  total_phases: 1
-  completed_phases: 0
-  total_plans: 4
-  completed_plans: 4
+  total_phases: 11
+  completed_phases: 11
+  total_plans: 21
+  completed_plans: 21
   percent: 100
 ---
 
@@ -21,14 +21,19 @@ progress:
 See: .planning/PROJECT.md (updated 2026-03-22)
 
 **Core value:** Surface where smart money is moving in niche prediction markets so the user can see what informed traders are doing and factor that into their own thinking.
-**Current focus:** Fixing Graph trade market_id linkage to enable position building
+**Current focus:** Clearing ad-hoc fix phases before next milestone
 
 ## Current Position
 
-Milestone: v1.3 Graph Trade Integration & Position Building — IN PROGRESS
-Phase 28 complete (4/4 plans), ready for review.
+Milestone: v1.2 Market Resolution & Deep Classification — SHIPPED 2026-03-22
+All 11 phases (15-25) complete, 21 plans delivered.
 
-Progress: [████████████████████] 100% (Phase 28 complete)
+Ad-hoc fixes between milestones:
+- Phase 26 (discover optimization): merged
+- Phase 27 (hybrid backfill gap fix): merged (27-02, 27-03 cleared)
+- Phase 28 (Graph market_id fix): pending review on worker/28-graph-market-id-fix
+
+Progress: [████████████████████] 100% (v1.2 — shipped)
 
 ## Performance Metrics
 
@@ -62,7 +67,7 @@ None.
 
 ## Session Continuity
 
-Last session: 2026-03-22
-Stopped at: Milestone v1.2 archived
+Last session: 2026-03-25
+Stopped at: Phase 28 pending review (worker/28-graph-market-id-fix)
 Resume file: None
-Next: `/gsd:new-milestone` to plan next milestone
+Next: Merge phase 28 after review, then `/gsd:new-milestone` to plan v1.3
