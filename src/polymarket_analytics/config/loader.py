@@ -11,14 +11,14 @@ class NicheConfig(BaseModel):
     """Configuration model for a Polymarket niche.
 
     Attributes:
-        tag_id: Polymarket tag ID for this niche (required)
+        tag_id: Polymarket tag ID for this niche (required, integer)
         slug: Niche slug for file naming, e.g., "esports" (required)
         min_positions: Minimum positions for trader qualification (default: 10, min: 1)
         scoring_window_days: Rolling window for score calculation (default: 30, min: 1)
         entity_fields: Entity types to extract from market questions (default: [])
     """
 
-    tag_id: str = Field(..., description="Polymarket tag ID for this niche")
+    tag_id: int = Field(..., description="Polymarket tag ID for this niche (integer)")
     slug: str = Field(..., description="Niche slug for file naming (e.g., 'esports')")
     min_positions: int = Field(
         default=10, ge=1, description="Minimum positions for trader qualification"
