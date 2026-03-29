@@ -151,20 +151,19 @@ def create_core_tables(db):
     """)
 
     # 9. signals - smart money consensus signals
-    db.table("signals").create(
-        {
-            "id": str,  # Primary key - hash
-            "market_id": str,  # Associated market
-            "direction": str,  # LONG/SHORT
-            "q5_count": int,  # Number of Q5 traders
-            "avg_score": float,  # Average composite score
-            "first_seen": str,  # ISO timestamp
-            "last_updated": str,  # ISO timestamp
-            "alerted": bool,  # Whether alert was sent
-        },
-        pk="id",
-        if_not_exists=True,
-    )
+    # Use raw SQL for NUMERIC affinity on avg_score column
+    db.execute("""
+        CREATE TABLE IF NOT EXISTS signals (
+            id TEXT PRIMARY KEY,
+            market_id TEXT,
+            direction TEXT,
+            q5_count INTEGER,
+            avg_score NUMERIC(10,6),
+            first_seen TEXT,
+            last_updated TEXT,
+            alerted INTEGER
+        )
+    """)
 
 
 def create_indexes(db):
