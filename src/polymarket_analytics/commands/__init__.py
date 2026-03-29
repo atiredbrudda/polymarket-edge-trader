@@ -6,6 +6,7 @@ from src.polymarket_analytics.commands.classify_tokens import classify_tokens
 from src.polymarket_analytics.commands.discover import discover
 from src.polymarket_analytics.commands.ingest_events import ingest_events
 from src.polymarket_analytics.commands.resolve_outcomes import resolve_outcomes
+from src.polymarket_analytics.commands.resolve_positions import resolve_positions
 from src.polymarket_analytics.commands.sanity_check import sanity_check
 
 __all__ = [
@@ -15,5 +16,6 @@ __all__ = [
     "discover",
     "ingest_events",
     "resolve_outcomes",
+    "resolve_positions",
     "sanity_check",
 ]
