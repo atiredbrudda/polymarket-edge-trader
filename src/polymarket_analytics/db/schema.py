@@ -32,6 +32,10 @@ def create_core_tables(db):
             "resolved": bool,  # Whether market is resolved
             "niche_slug": str,  # e.g., "esports", "politics"
             "created_at": str,  # ISO timestamp
+            "end_date": str,  # Market end date (ISO timestamp) - for 30-day scoring window
+            "category": str,  # Market category (e.g., "esports")
+            "active": bool,  # Whether market is currently active
+            "tokens": str,  # JSON blob of token IDs
         },
         pk="condition_id",
         if_not_exists=True,
@@ -41,15 +45,15 @@ def create_core_tables(db):
     db.table("market_entities").create(
         {
             "id": str,  # Primary key - hash of entity data
-            "market_id": str,  # FK to markets.condition_id
+            "condition_id": str,  # UNIQUE - FK to markets.condition_id (per GUIDE.md)
             "game": str,  # e.g., "CS2", "LoL"
-            "team": str,  # Team name
-            "player": str,  # Player name
-            "role": str,  # Player role (nullable)
-            "niche_slug": str,  # e.g., "esports"
+            "team_a": str,  # Team/player A name (per GUIDE.md)
+            "team_b": str,  # Team/player B name (per GUIDE.md)
+            "tournament": str,  # Tournament name (per GUIDE.md)
+            "market_type": str,  # Type of market (per GUIDE.md)
         },
         pk="id",
-        foreign_keys=[("market_id", "markets", "condition_id")],
+        foreign_keys=[("condition_id", "markets", "condition_id")],
         if_not_exists=True,
     )
 
@@ -93,9 +97,10 @@ def create_core_tables(db):
             "token_id": str,  # FK to token_catalog.token_id
             "timestamp": str,  # ISO timestamp
             "side": str,  # YES or NO
-            "price": float,  # Trade price
-            "size": float,  # Trade size
-            "market_id": str,  # Denormalized for queries
+            "price": str,  # NUMERIC(10,6) - Trade price (using str for NUMERIC affinity)
+            "size": str,  # NUMERIC(20,6) - Trade size (using str for NUMERIC affinity)
+            "market_id": str,  # Denormalized - markets.condition_id
+            "trader_address": str,  # Wallet address of trader (required for build-positions aggregation)
         },
         pk="trade_id",
         foreign_keys=[("token_id", "token_catalog", "token_id")],
@@ -167,6 +172,20 @@ def create_indexes(db):
     )
     db["token_catalog"].create_index(
         ["niche_slug"], if_not_exists=True, index_name="idx_token_niche"
+    )
+
+    # gamma_events indexes
+    db["gamma_events"].create_index(
+        ["condition_id"], if_not_exists=True, index_name="idx_gamma_condition"
+    )
+    db["gamma_events"].create_index(
+        ["niche_slug"], if_not_exists=True, index_name="idx_gamma_niche"
+    )
+    db["gamma_events"].create_index(
+        ["end_date"], if_not_exists=True, index_name="idx_gamma_end_date"
+    )
+    db["gamma_events"].create_index(
+        ["active"], if_not_exists=True, index_name="idx_gamma_active"
     )
 
     # trades indexes
