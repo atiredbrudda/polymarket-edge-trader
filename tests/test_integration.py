@@ -149,3 +149,56 @@ def test_foreign_key_enforcement(test_db: sqlite_utils.Database):
     assert "FOREIGN KEY constraint failed" in str(exc_info.value), (
         f"Expected FK constraint error, got: {exc_info.value}"
     )
+
+
+def test_schema_matches_guide(test_db: sqlite_utils.Database):
+    """Verify all tables have columns required by GUIDE.md.
+
+    This test fails immediately if schema diverges from GUIDE.md,
+    preventing downstream runtime failures.
+
+    Args:
+        test_db: Temporary database fixture
+
+    Asserts:
+        - trades has trader_address for build-positions
+        - markets has end_date for 30-day scoring window
+        - market_entities has team_a/team_b (not team)
+        - positions has outcome, trade_count, last_trade_timestamp
+        - lift_scores has category, position_count, total_pnl, computed_at
+        - gamma_events has outcome, end_date (not data JSON blob)
+    """
+    # trades must have trader_address for build-positions
+    trades_cols = [col.name for col in test_db["trades"].columns]
+    assert "trader_address" in trades_cols, "trades missing trader_address"
+
+    # markets must have end_date for score 30-day window
+    markets_cols = [col.name for col in test_db["markets"].columns]
+    assert "end_date" in markets_cols, "markets missing end_date"
+
+    # market_entities must have team_a/team_b (not team)
+    entities_cols = [col.name for col in test_db["market_entities"].columns]
+    assert "team_a" in entities_cols, "market_entities missing team_a"
+    assert "team_b" in entities_cols, "market_entities missing team_b"
+    assert "team" not in entities_cols, "market_entities should not have 'team' column"
+
+    # positions must have outcome and trade_count
+    positions_cols = [col.name for col in test_db["positions"].columns]
+    assert "outcome" in positions_cols, "positions missing outcome"
+    assert "trade_count" in positions_cols, "positions missing trade_count"
+    assert "last_trade_timestamp" in positions_cols, (
+        "positions missing last_trade_timestamp"
+    )
+
+    # lift_scores must have category, position_count, total_pnl, computed_at
+    lift_cols = [col.name for col in test_db["lift_scores"].columns]
+    assert "category" in lift_cols, "lift_scores missing category"
+    assert "position_count" in lift_cols, "lift_scores missing position_count"
+    assert "total_pnl" in lift_cols, "lift_scores missing total_pnl"
+    assert "computed_at" in lift_cols, "lift_scores missing computed_at"
+
+    # gamma_events must have normalized columns (not data JSON blob)
+    gamma_cols = [col.name for col in test_db["gamma_events"].columns]
+    assert "outcome" in gamma_cols, "gamma_events missing outcome"
+    assert "end_date" in gamma_cols, "gamma_events missing end_date"
+    assert "data" not in gamma_cols, "gamma_events should not have 'data' JSON blob"
