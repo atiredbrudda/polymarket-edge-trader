@@ -1,7 +1,7 @@
 # eSports niche configuration
 # First niche for Polymarket Smart Money Tracker
 
-tag_id: esports          # Polymarket tag ID for eSports markets
+tag_id: 64               # Polymarket tag ID for eSports markets (integer, from /tags/slug/esports)
 slug: esports            # File slug for config lookup
 min_positions: 30        # Minimum positions for trader to qualify for scoring
 scoring_window_days: 30  # Rolling window for CLV/ROI/Sharpe calculation
