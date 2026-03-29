@@ -51,6 +51,8 @@ def detect_convergence(db: sqlite_utils.Database, niche_slug: str) -> pd.DataFra
     # Convergence detection query
     # Pattern: GROUP BY market_id, direction with HAVING COUNT >= 2
     # Source: 06-RESEARCH.md Pattern 3, GUIDE.md hand-off rules
+    # CRITICAL: Filter to latest scoring run via MAX(computed_at) to avoid ghost signals
+    # from stale Q5 records (each score run appends new lift_scores rows)
     query = """
         SELECT
             p.market_id,
@@ -64,6 +66,9 @@ def detect_convergence(db: sqlite_utils.Database, niche_slug: str) -> pd.DataFra
         WHERE p.resolved = 0
           AND ls.quintile = 5
           AND ls.category = :niche_slug
+          AND ls.computed_at = (
+              SELECT MAX(computed_at) FROM lift_scores WHERE category = :niche_slug
+          )
           AND p.size > 0
         GROUP BY p.market_id, p.direction
         HAVING COUNT(DISTINCT p.trader_address) >= 2
@@ -98,7 +103,22 @@ def _assert_dependencies(db: sqlite_utils.Database, niche_slug: str) -> None:
         raise click.ClickException(
             "positions table does not exist. Run build-positions command first."
         )
-    # Note: We do NOT check for Q5 traders or open positions here.
-    # The SQL query will return an empty DataFrame if no data matches,
-    # which is correct behavior for edge cases (no Q5 traders yet, all
-    # positions resolved, etc.). Failing here would break edge case handling.
+
+    # Assert lift_scores has Q5 traders for this niche (latest scoring run only)
+    # Filter to MAX(computed_at) to avoid counting stale historical Q5 records
+    q5_count = db.execute(
+        """
+        SELECT COUNT(*) FROM lift_scores
+        WHERE quintile = 5 AND category = :niche_slug
+          AND computed_at = (
+              SELECT MAX(computed_at) FROM lift_scores WHERE category = :niche_slug
+          )
+        """,
+        {"niche_slug": niche_slug},
+    ).fetchone()[0]
+
+    if q5_count == 0:
+        raise click.ClickException(
+            f"No Q5 (top quintile) traders found for niche '{niche_slug}' in latest scoring run. "
+            "Run score command to compute lift_scores first."
+        )

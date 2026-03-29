@@ -178,4 +178,7 @@ def upsert_signals_batch(
             )
             upserted += 1
 
+    # Commit all changes to ensure persistence (fixes FLAGGED issue #2)
+    db.conn.commit()
+
     return upserted
