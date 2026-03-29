@@ -8,6 +8,7 @@ from src.polymarket_analytics.commands.ingest_events import ingest_events
 from src.polymarket_analytics.commands.resolve_outcomes import resolve_outcomes
 from src.polymarket_analytics.commands.resolve_positions import resolve_positions
 from src.polymarket_analytics.commands.sanity_check import sanity_check
+from src.polymarket_analytics.commands.score import score
 
 __all__ = [
     "backfill",
@@ -18,4 +19,5 @@ __all__ = [
     "resolve_outcomes",
     "resolve_positions",
     "sanity_check",
+    "score",
 ]
