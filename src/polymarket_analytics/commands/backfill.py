@@ -228,7 +228,7 @@ async def backfill_trader(
 
     # Mark trader as backfill complete
     if stats["ingested"] > 0 or stats["skipped"] > 0:
-        db["traders"].update({"address": trader_address, "backfill_complete": True})
+        db["traders"].update(trader_address, {"backfill_complete": True})
 
     return stats
 
