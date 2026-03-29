@@ -33,7 +33,11 @@ def detect_convergence(db: sqlite_utils.Database, niche_slug: str) -> pd.DataFra
         Returns empty DataFrame if no convergence found or dependencies missing.
 
     Raises:
-        click.ClickException: If required tables are missing or no Q5 traders exist
+        click.ClickException: If required tables are missing
+
+    Notes:
+        - Returns empty DataFrame if no Q5 traders or no convergence found (no crash)
+        - Returns empty DataFrame if no open positions exist (graceful handling)
 
     Notes:
         - Filters lift_scores by quintile=5 AND category=niche_slug
@@ -73,12 +77,15 @@ def detect_convergence(db: sqlite_utils.Database, niche_slug: str) -> pd.DataFra
 def _assert_dependencies(db: sqlite_utils.Database, niche_slug: str) -> None:
     """Assert all dependencies exist before running convergence detection.
 
+    Only validates table existence, not data presence. Returns gracefully
+    if tables exist but are empty (query will return empty DataFrame).
+
     Args:
         db: sqlite-utils Database instance
         niche_slug: Niche category to validate
 
     Raises:
-        click.ClickException: With clear message if any dependency missing
+        click.ClickException: With clear message if any required table missing
     """
     # Assert lift_scores table exists
     if not db["lift_scores"].exists():
@@ -91,32 +98,7 @@ def _assert_dependencies(db: sqlite_utils.Database, niche_slug: str) -> None:
         raise click.ClickException(
             "positions table does not exist. Run build-positions command first."
         )
-
-    # Assert lift_scores has Q5 traders for this niche
-    q5_count = db.execute(
-        """
-        SELECT COUNT(*) FROM lift_scores
-        WHERE quintile = 5 AND category = :niche_slug
-        """,
-        {"niche_slug": niche_slug},
-    ).fetchone()[0]
-
-    if q5_count == 0:
-        raise click.ClickException(
-            f"No Q5 (top quintile) traders found for niche '{niche_slug}'. "
-            "Run score command to compute lift_scores first."
-        )
-
-    # Assert positions has unresolved positions with size > 0
-    open_positions = db.execute(
-        """
-        SELECT COUNT(*) FROM positions
-        WHERE resolved = 0 AND size > 0
-        """
-    ).fetchone()[0]
-
-    if open_positions == 0:
-        raise click.ClickException(
-            "No open positions found (resolved=0 AND size>0). "
-            "Run build-positions command to aggregate positions from trades."
-        )
+    # Note: We do NOT check for Q5 traders or open positions here.
+    # The SQL query will return an empty DataFrame if no data matches,
+    # which is correct behavior for edge cases (no Q5 traders yet, all
+    # positions resolved, etc.). Failing here would break edge case handling.
