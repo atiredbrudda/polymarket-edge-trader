@@ -96,7 +96,7 @@ def write_lift_scores(
         }
 
         # Upsert using id as primary key
-        db["lift_scores"].upsert(record, pk="id", replace=True)
+        db["lift_scores"].upsert(record, pk="id", alter=True)
         upserted += 1
 
     return upserted
