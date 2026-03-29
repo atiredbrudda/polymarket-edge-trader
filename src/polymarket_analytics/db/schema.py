@@ -53,14 +53,19 @@ def create_core_tables(db):
         if_not_exists=True,
     )
 
-    # 4. gamma_events - market-moving events
+    # 4. gamma_events - raw market data from Gamma API
+    # Normalized columns for resolve-outcomes to read outcome field directly
     db.table("gamma_events").create(
         {
             "id": str,  # Primary key - hash
-            "event_type": str,  # Type of event
-            "market_condition_id": str,  # Associated market
-            "data": str,  # JSON blob
-            "timestamp": str,  # ISO timestamp
+            "condition_id": str,  # Market condition ID (FK to markets.condition_id)
+            "question": str,  # Market question text
+            "outcome": str,  # YES/NO/null after resolution
+            "end_date": str,  # ISO timestamp - when market closes
+            "tags": str,  # JSON array of tags from Gamma API
+            "active": bool,  # Whether market is currently active
+            "niche_slug": str,  # e.g., "esports" - set during ingest
+            "created_at": str,  # ISO timestamp - when ingested
         },
         pk="id",
         if_not_exists=True,
