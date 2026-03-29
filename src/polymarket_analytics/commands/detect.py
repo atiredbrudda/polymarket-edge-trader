@@ -57,20 +57,9 @@ async def _detect_async(ctx: Any, db_path: str) -> None:
             "positions table does not exist. Run build-positions command first."
         )
 
-    # Assert lift_scores has Q5 traders for this niche
-    q5_count = db.execute(
-        """
-        SELECT COUNT(*) FROM lift_scores
-        WHERE quintile = 5 AND category = :niche_slug
-        """,
-        {"niche_slug": niche},
-    ).fetchone()[0]
-
-    if q5_count == 0:
-        raise click.ClickException(
-            f"No Q5 (top quintile) traders found for niche '{niche}'. "
-            "Run score command to compute lift_scores first."
-        )
+    # Note: Q5 trader check removed — detect_convergence() calls _assert_dependencies()
+    # which validates Q5 traders with MAX(computed_at) filter for latest scoring run.
+    # Duplicate check here was misleading (passed on stale Q5, then real guard fired).
 
     # Run detection pipeline with Rich progress
     start_time = datetime.now(timezone.utc)
