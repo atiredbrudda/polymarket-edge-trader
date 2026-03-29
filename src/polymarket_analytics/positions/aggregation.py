@@ -4,10 +4,27 @@ This module aggregates raw trades into one position per (trader, market) pair
 with direction, size, volume-weighted entry price, and timestamps.
 """
 
+import hashlib
+from typing import Any
+
 import click
 
 
-def build_positions_from_trades(db, niche_slug: str) -> int:
+def _generate_position_id(trader_address: str, market_id: str) -> str:
+    """Generate deterministic position ID from trader_address and market_id.
+
+    Args:
+        trader_address: Trader wallet address
+        market_id: Market condition ID
+
+    Returns:
+        SHA256 hash (first 16 chars, lowercase hex) as stable position ID
+    """
+    combined = f"{trader_address}{market_id}"
+    return hashlib.sha256(combined.encode()).hexdigest()[:16]
+
+
+def build_positions_from_trades(db: Any, niche_slug: str) -> int:
     """Build positions from trades using SQL GROUP BY aggregation.
 
     Args:
@@ -49,49 +66,63 @@ def build_positions_from_trades(db, niche_slug: str) -> int:
             "Run discover command to extract entities for these markets."
         )
 
-    # Execute SQL INSERT...SELECT with GROUP BY
-    query = """
-        INSERT INTO positions (
-            id, trader_address, market_id, direction, size, avg_entry_price,
-            entry_timestamp, last_trade_timestamp, trade_count, resolved, outcome, pnl
-        )
+    # Get all trades grouped by (trader, market)
+    trades_query = """
         SELECT
-            lower(hex(sha256(trader_address || market_id))) AS id,
             trader_address,
             market_id,
-            CASE
-                WHEN SUM(CASE WHEN side = 'BUY' THEN size ELSE -size END) > 0.000001 THEN 'LONG'
-                WHEN SUM(CASE WHEN side = 'BUY' THEN size ELSE -size END) < -0.000001 THEN 'SHORT'
-                ELSE 'FLAT'
-            END AS direction,
-            ABS(SUM(CASE WHEN side = 'BUY' THEN size ELSE -size END)) AS size,
-            SUM(size * price) / SUM(size) AS avg_entry_price,
-            MIN(timestamp) AS entry_timestamp,
-            MAX(timestamp) AS last_trade_timestamp,
-            COUNT(*) AS trade_count,
-            0 AS resolved,
-            NULL AS outcome,
-            NULL AS pnl
+            SUM(CASE WHEN side = 'BUY' THEN size ELSE -size END) as net_size,
+            SUM(size * price) / SUM(size) as avg_entry_price,
+            MIN(timestamp) as entry_timestamp,
+            MAX(timestamp) as last_trade_timestamp,
+            COUNT(*) as trade_count
         FROM trades t
         JOIN market_entities me ON me.condition_id = t.market_id
         WHERE me.game IS NOT NULL
         GROUP BY trader_address, market_id
-        ON CONFLICT(id) DO UPDATE SET
-            direction = excluded.direction,
-            size = excluded.size,
-            avg_entry_price = excluded.avg_entry_price,
-            entry_timestamp = excluded.entry_timestamp,
-            last_trade_timestamp = excluded.last_trade_timestamp,
-            trade_count = excluded.trade_count,
-            resolved = 0,
-            outcome = NULL,
-            pnl = NULL
     """
 
-    # Execute query
-    db.execute(query)
+    # Process each (trader, market) pair
+    positions = []
+    for row in db.query(trades_query):
+        trader_address = row["trader_address"]
+        market_id = row["market_id"]
+        net_size = float(row["net_size"])
 
-    # Get count of positions
-    position_count = db.execute("SELECT COUNT(*) FROM positions").fetchone()[0]
+        # Determine direction with epsilon tolerance
+        epsilon = 0.000001
+        if net_size > epsilon:
+            direction = "LONG"
+        elif net_size < -epsilon:
+            direction = "SHORT"
+        else:
+            direction = "FLAT"
 
-    return position_count
+        # Size is absolute net size
+        size = abs(net_size)
+
+        # Generate deterministic position ID
+        position_id = _generate_position_id(trader_address, market_id)
+
+        positions.append(
+            {
+                "id": position_id,
+                "trader_address": trader_address,
+                "market_id": market_id,
+                "direction": direction,
+                "size": size,
+                "avg_entry_price": float(row["avg_entry_price"]),
+                "entry_timestamp": row["entry_timestamp"],
+                "last_trade_timestamp": row["last_trade_timestamp"],
+                "trade_count": int(row["trade_count"]),
+                "resolved": 0,
+                "outcome": None,
+                "pnl": None,
+            }
+        )
+
+    # Upsert positions (idempotent)
+    for position in positions:
+        db["positions"].upsert(position, pk="id")
+
+    return len(positions)
