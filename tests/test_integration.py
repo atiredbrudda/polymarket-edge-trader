@@ -2,6 +2,7 @@
 
 Tests:
 - TCAT-03: Zero synthetic market_ids in trades table
+- TCAT-04: classify_tokens CLI uses clobTokenIds from Gamma API
 - Token catalog ingestion from fixtures
 - Foreign key enforcement for orphan trades
 """
@@ -202,3 +203,91 @@ def test_schema_matches_guide(test_db: sqlite_utils.Database):
     assert "outcome" in gamma_cols, "gamma_events missing outcome"
     assert "end_date" in gamma_cols, "gamma_events missing end_date"
     assert "data" not in gamma_cols, "gamma_events should not have 'data' JSON blob"
+
+
+def test_classify_tokens_uses_clob_token_ids(test_db: sqlite_utils.Database, tmp_path):
+    """TCAT-04: classify_tokens CLI correctly reads clobTokenIds from Gamma API.
+
+    This test mocks the Gamma API response with realistic clobTokenIds
+    and asserts that the stored token IDs match (not synthetic fallback).
+
+    Args:
+        test_db: Temporary database fixture
+        tmp_path: pytest tmp_path fixture for test database
+
+    Asserts:
+        - Token IDs in catalog match clobTokenIds from mock API
+        - No synthetic token IDs generated when clobTokenIds present
+    """
+    from unittest.mock import AsyncMock, patch
+
+    db_path = tmp_path / "test.db"
+
+    # Initialize schema
+    from src.polymarket_analytics.db.schema import init_database
+
+    db = init_database(db_path)
+
+    # Create markets table (dependency for classify_tokens)
+    db["markets"].insert(
+        {
+            "condition_id": "0x123abc",
+            "question": "Test market",
+            "outcome": None,
+            "resolved": False,
+            "niche_slug": "esports",
+            "created_at": "2025-01-01T00:00:00Z",
+            "end_date": "2025-12-31T23:59:59Z",
+            "category": "esports",
+            "active": True,
+            "tokens": "[]",
+        },
+        pk="condition_id",
+    )
+
+    # Mock Gamma API response with realistic clobTokenIds
+    mock_market = {
+        "conditionId": "0x123abc",
+        "question": "Team A vs Team B",
+        "outcomes": "YES,NO",
+        "clobTokenIds": ["12345678901234567890", "98765432109876543210"],
+        "category": "esports",
+        "tags": [],
+    }
+
+    # Mock config object
+    class MockConfig:
+        slug = "esports"
+        tag_id = 3001
+
+    class MockContext:
+        obj = {"config": MockConfig()}
+
+    # Run classify_tokens with mocked API
+    from src.polymarket_analytics.commands.classify_tokens import _classify_tokens_async
+
+    async def run_test():
+        with patch(
+            "src.polymarket_analytics.api.gamma.GammaAPIClient.fetch_markets",
+            new_callable=AsyncMock,
+        ) as mock_fetch:
+            mock_fetch.return_value = [mock_market]
+            await _classify_tokens_async(MockContext(), str(db_path))
+
+    import asyncio
+
+    asyncio.run(run_test())
+
+    # Assert token IDs match clobTokenIds (not synthetic)
+    stored_tokens = [row["token_id"] for row in db["token_catalog"].rows]
+
+    expected_tokens = ["12345678901234567890", "98765432109876543210"]
+    assert stored_tokens == expected_tokens, (
+        f"Expected real token IDs {expected_tokens}, got {stored_tokens}"
+    )
+
+    # Assert no synthetic IDs were generated
+    for token_id in stored_tokens:
+        assert ":0" not in token_id and ":1" not in token_id, (
+            f"Synthetic token ID found: {token_id}"
+        )

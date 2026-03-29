@@ -5,6 +5,7 @@ table with condition_id mappings for all markets in the niche.
 """
 
 import asyncio
+import json
 from datetime import datetime
 from pathlib import Path
 
@@ -80,21 +81,34 @@ async def _classify_tokens_async(ctx, db_path: str):
             outcomes = market.get("outcomes", "YES,NO")
             category = market.get("category", niche_slug)
             tags = market.get("tags", [])
-            outcome_tokens = market.get("outcomeTokens", [])
+
+            # Gamma API returns token IDs in clobTokenIds field (not outcomeTokens)
+            clob_token_ids = market.get("clobTokenIds", [])
+            # Handle case where it's a JSON string
+            if isinstance(clob_token_ids, str):
+                try:
+                    clob_token_ids = json.loads(clob_token_ids)
+                except (json.JSONDecodeError, ValueError):
+                    clob_token_ids = []
 
             # Determine market_type from outcomes
             outcome_list = outcomes.split(",") if outcomes else []
             market_type = "binary" if outcome_list == ["YES", "NO"] else "categorical"
 
             # Build node_path from category/tags
-            # Example: "esports/cs2/match_winner" or "esports/{category}"
             node_path = f"{niche_slug}/{category}"
 
-            # For binary markets, use outcomeTokens if available, otherwise generate token IDs
-            if outcome_tokens and len(outcome_tokens) == 2:
-                token_ids = outcome_tokens
+            # Use real token IDs from clobTokenIds, fallback only if empty
+            if clob_token_ids and len(clob_token_ids) >= 2:
+                token_ids = clob_token_ids[:2]  # Take first 2 for binary markets
             else:
-                # Generate token IDs from condition_id (YES=0, NO=1 index)
+                # Fallback: generate synthetic IDs (will never match real trades)
+                # Log warning so user knows catalog won't work with real data
+                click.echo(
+                    f"Warning: No clobTokenIds for {condition_id[:16]}... - "
+                    "using synthetic token IDs (won't match real trades)",
+                    err=True,
+                )
                 token_ids = [
                     f"{condition_id}:0",
                     f"{condition_id}:1",

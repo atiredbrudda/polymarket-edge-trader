@@ -51,7 +51,7 @@ async def _resolve_outcomes_async(ctx, db_path: str):
         )
 
     # Update markets.outcome from gamma_events for resolved markets
-    # Uses SQL UPDATE with subquery to join gamma_events
+    # Only update when outcome IS NOT NULL (closed + actually resolved)
     result = db.execute(
         """
         UPDATE markets
@@ -66,6 +66,7 @@ async def _resolve_outcomes_async(ctx, db_path: str):
             SELECT condition_id FROM gamma_events
             WHERE niche_slug = :niche_slug
               AND active = 0
+              AND outcome IS NOT NULL
         )
         AND niche_slug = :niche_slug
         """,
