@@ -1,0 +1,18 @@
+[project]
+name = "polymarket-analytics"
+version = "0.1.0"
+description = "Polymarket Smart Money Tracker - Detect when multiple proven traders are positioned in the same new market"
+readme = "README.md"
+requires-python = ">=3.11"
+dependencies = [
+    "aiolimiter>=1.2.1",
+    "click>=8.3.1",
+    "httpx>=0.28.1",
+    "pydantic>=2.12.5",
+    "pytest>=9.0.2",
+    "pyyaml>=6.0.3",
+    "sqlite-utils>=3.39",
+]
+
+[tool.uv]
+packages = ["src/polymarket_analytics"]
