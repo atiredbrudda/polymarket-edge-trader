@@ -51,16 +51,19 @@ def upsert_signal(
         - On update: preserves first_seen, resets alerted=0
     """
     # Check for existing signal with same (market_id, direction)
-    existing = db.execute(
-        """
+    existing_rows = list(
+        db.query(
+            """
         SELECT id, first_seen FROM signals
         WHERE market_id = :market_id AND direction = :direction
         """,
-        {"market_id": market_id, "direction": direction},
-    ).fetchone()
+            {"market_id": market_id, "direction": direction},
+        )
+    )
 
-    if existing:
+    if existing_rows:
         # Update existing signal, preserve first_seen
+        existing = existing_rows[0]
         signal_id = existing["id"]
         # Use raw SQL for NUMERIC(10,6) avg_score precision
         db.execute(
