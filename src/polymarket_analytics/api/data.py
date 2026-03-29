@@ -17,17 +17,18 @@ class DataAPIClient:
     """Async client for Polymarket Data API with rate limiting.
 
     The Data API provides access to trades, holders, and leaderboard data.
-    This client handles rate limiting (15 req/s) and batches condition IDs
+    This client handles rate limiting (20 req/s) and batches condition IDs
     to avoid URL length limits.
 
     Attributes:
-        limiter: AsyncLimiter instance for rate limiting (15 req/s)
+        limiter: AsyncLimiter instance for rate limiting (20 req/s)
         client: httpx.AsyncClient for HTTP requests
 
     Example:
         >>> client = DataAPIClient()
         >>> trades = await client.fetch_trades(["0x123...", "0x456..."])
         >>> holders = await client.fetch_holders(["0x123..."])
+        >>> user_trades = await client.fetch_user_trades("0xabc...")
     """
 
     def __init__(self, limiter: Optional[AsyncLimiter] = None):
@@ -35,9 +36,9 @@ class DataAPIClient:
 
         Args:
             limiter: Optional AsyncLimiter instance. If not provided,
-                     creates one with 15 req/s limit (for /trades endpoint).
+                     creates one with 20 req/s limit (Data API limit).
         """
-        self.limiter = limiter or AsyncLimiter(max_rate=15, time_period=1)
+        self.limiter = limiter or AsyncLimiter(max_rate=20, time_period=1)
         self._client: Optional[httpx.AsyncClient] = None
         self._batch_size = 50  # Batch condition IDs to avoid URL length limits
 
@@ -142,3 +143,60 @@ class DataAPIClient:
             all_holders.extend(holders_data)
 
         return all_holders
+
+    async def fetch_user_trades(
+        self, trader_address: str, limit: int = 1000
+    ) -> List[dict]:
+        """Fetch all trades for a specific trader address.
+
+        Uses offset-based pagination (not cursor-based like CLOB API).
+        Fetches trades where the trader is the proxyWallet.
+
+        Args:
+            trader_address: Trader wallet address (0x-prefixed)
+            limit: Max trades per request (default: 1000)
+
+        Returns:
+            List of trade dicts with fields:
+            - proxyWallet: Trader wallet address
+            - side: BUY or SELL
+            - asset: Outcome token ID
+            - conditionId: Market condition ID
+            - size: Trade size
+            - price: Trade price
+            - timestamp: Unix timestamp
+            - outcome: YES or NO
+            - outcomeIndex: 0 or 1
+
+        Raises:
+            httpx.HTTPStatusError: If API request fails
+        """
+        client = await self._get_client()
+        all_trades: List[dict] = []
+        offset = 0
+
+        while True:
+            async with self.limiter:
+                response = await client.get(
+                    f"{DATA_BASE_URL}/trades",
+                    params={
+                        "user": trader_address.lower(),
+                        "limit": limit,
+                        "offset": offset,
+                    },
+                )
+                response.raise_for_status()
+
+            trades = response.json()
+            if not trades:
+                break
+
+            all_trades.extend(trades)
+
+            # If we got fewer than limit, we've reached the end
+            if len(trades) < limit:
+                break
+
+            offset += limit
+
+        return all_trades
