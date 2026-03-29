@@ -157,5 +157,8 @@ def resolve_position_pnl(db: Any, niche_slug: str) -> int:
         """
     )
 
+    # Commit the transaction to persist changes
+    db.conn.commit()
+
     # Return count of positions resolved
     return resolvable_count
