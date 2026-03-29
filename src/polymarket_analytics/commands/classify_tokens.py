@@ -39,7 +39,10 @@ async def _classify_tokens_async(ctx, db_path: str):
     click.echo(f"Building token catalog for niche: {niche_slug}")
 
     # Initialize database
-    db = init_database(Path(db_path))
+    db_path_obj = Path(db_path)
+    if not db_path_obj.parent.exists():
+        db_path_obj.parent.mkdir(parents=True, exist_ok=True)
+    db = init_database(db_path_obj)
 
     # Assert dependency: markets table exists (RESL-01)
     if not db.table_exists("markets"):
@@ -68,6 +71,7 @@ async def _classify_tokens_async(ctx, db_path: str):
         click.echo(f"Fetched {len(markets)} markets from Gamma API")
 
         # Build token_catalog entries from markets
+        # Each binary market has two real token IDs (YES and NO tokens)
         token_catalog_records = []
 
         for market in markets:
@@ -76,6 +80,7 @@ async def _classify_tokens_async(ctx, db_path: str):
             outcomes = market.get("outcomes", "YES,NO")
             category = market.get("category", niche_slug)
             tags = market.get("tags", [])
+            outcome_tokens = market.get("outcomeTokens", [])
 
             # Determine market_type from outcomes
             outcome_list = outcomes.split(",") if outcomes else []
@@ -85,25 +90,48 @@ async def _classify_tokens_async(ctx, db_path: str):
             # Example: "esports/cs2/match_winner" or "esports/{category}"
             node_path = f"{niche_slug}/{category}"
 
-            # token_catalog record
-            token_catalog_records.append(
-                {
-                    "token_id": condition_id,  # Same as condition_id for binary markets
-                    "condition_id": condition_id,
-                    "question": question,
-                    "niche_slug": niche_slug,
-                    "node_path": node_path,
-                    "market_type": market_type,
-                    "created_at": datetime.now().isoformat(),
-                }
-            )
+            # For binary markets, use outcomeTokens if available, otherwise generate token IDs
+            if outcome_tokens and len(outcome_tokens) == 2:
+                token_ids = outcome_tokens
+            else:
+                # Generate token IDs from condition_id (YES=0, NO=1 index)
+                token_ids = [
+                    f"{condition_id}:0",
+                    f"{condition_id}:1",
+                ]
 
-        # Insert into token_catalog
-        db["token_catalog"].upsert_all(
-            token_catalog_records,
-            pk="token_id",
-            alter=True,
-        )
+            # Insert one row per token (YES and NO)
+            for idx, token_id in enumerate(token_ids):
+                outcome_name = (
+                    outcome_list[idx] if idx < len(outcome_list) else f"OUTCOME_{idx}"
+                )
+                token_catalog_records.append(
+                    {
+                        "token_id": token_id,
+                        "condition_id": condition_id,
+                        "question": question,
+                        "niche_slug": niche_slug,
+                        "node_path": node_path,
+                        "market_type": market_type,
+                        "created_at": datetime.now().isoformat(),
+                    }
+                )
+
+        # Insert into token_catalog using raw SQL to preserve created_at on re-runs
+        for record in token_catalog_records:
+            db.execute(
+                """
+                INSERT INTO token_catalog (token_id, condition_id, question, niche_slug, node_path, market_type, created_at)
+                VALUES (:token_id, :condition_id, :question, :niche_slug, :node_path, :market_type, :created_at)
+                ON CONFLICT(token_id) DO UPDATE SET
+                    condition_id = excluded.condition_id,
+                    question = excluded.question,
+                    niche_slug = excluded.niche_slug,
+                    node_path = excluded.node_path,
+                    market_type = excluded.market_type
+                """,
+                record,
+            )
 
         click.echo(
             f"Built token catalog with {len(token_catalog_records)} entries for niche '{niche_slug}'"

@@ -49,7 +49,10 @@ async def _ingest_events_async(ctx, db_path: str):
         )
 
     # Initialize database
-    db = init_database(Path(db_path))
+    db_path_obj = Path(db_path)
+    if not db_path_obj.parent.exists():
+        db_path_obj.parent.mkdir(parents=True, exist_ok=True)
+    db = init_database(db_path_obj)
 
     # Create Gamma API client
     client = GammaAPIClient()
@@ -85,13 +88,28 @@ async def _ingest_events_async(ctx, db_path: str):
             closed = market.get("closed", False)
             category = market.get("category", niche_slug)
 
-            # Extract outcome for binary markets (YES from "YES,NO")
-            outcome_list = outcomes.split(",") if outcomes else []
-            outcome = (
-                outcome_list[0]
-                if len(outcome_list) == 2 and outcome_list[0] == "YES"
-                else None
-            )
+            # Extract outcome ONLY for resolved markets from the actual result field
+            # The "outcomes" field is the list of possible bets, NOT the result
+            # Use the "result" field (or similar) which contains the actual resolution
+            outcome = None
+            if closed or not active:
+                # Only set outcome for closed/resolved markets
+                result = market.get("result")
+                if result:
+                    # result may be "YES", "NO", or an outcome index/object
+                    if isinstance(result, str):
+                        outcome = result.upper()
+                    elif isinstance(result, int):
+                        # Map index to outcome name
+                        outcome_list = outcomes.split(",") if outcomes else []
+                        outcome = (
+                            outcome_list[result] if result < len(outcome_list) else None
+                        )
+                else:
+                    # Check for alternative resolution fields
+                    winner = market.get("winner")
+                    if winner:
+                        outcome = winner.upper() if isinstance(winner, str) else None
 
             # Generate hash ID for gamma_events
             event_id = hashlib.sha256(condition_id.encode()).hexdigest()
@@ -127,19 +145,42 @@ async def _ingest_events_async(ctx, db_path: str):
                 }
             )
 
-        # Insert into gamma_events
-        db["gamma_events"].upsert_all(
-            gamma_events_records,
-            pk="id",
-            alter=True,
-        )
+        # Insert into gamma_events using raw SQL to preserve created_at
+        for record in gamma_events_records:
+            db.execute(
+                """
+                INSERT INTO gamma_events (id, condition_id, question, outcome, end_date, tags, active, niche_slug, created_at)
+                VALUES (:id, :condition_id, :question, :outcome, :end_date, :tags, :active, :niche_slug, :created_at)
+                ON CONFLICT(id) DO UPDATE SET
+                    condition_id = excluded.condition_id,
+                    question = excluded.question,
+                    outcome = excluded.outcome,
+                    end_date = excluded.end_date,
+                    tags = excluded.tags,
+                    active = excluded.active,
+                    niche_slug = excluded.niche_slug
+                """,
+                record,
+            )
 
-        # Insert into markets
-        db["markets"].upsert_all(
-            markets_records,
-            pk="condition_id",
-            alter=True,
-        )
+        # Insert into markets using raw SQL to preserve created_at
+        for record in markets_records:
+            db.execute(
+                """
+                INSERT INTO markets (condition_id, question, outcome, resolved, niche_slug, created_at, end_date, category, active, tokens)
+                VALUES (:condition_id, :question, :outcome, :resolved, :niche_slug, :created_at, :end_date, :category, :active, :tokens)
+                ON CONFLICT(condition_id) DO UPDATE SET
+                    question = excluded.question,
+                    outcome = excluded.outcome,
+                    resolved = excluded.resolved,
+                    niche_slug = excluded.niche_slug,
+                    end_date = excluded.end_date,
+                    category = excluded.category,
+                    active = excluded.active,
+                    tokens = excluded.tokens
+                """,
+                record,
+            )
 
         click.echo(f"Ingested {len(markets)} markets for niche '{niche_slug}'")
         click.echo(f"  - gamma_events: {len(gamma_events_records)} records")

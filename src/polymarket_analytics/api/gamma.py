@@ -1,0 +1,123 @@
+"""Gamma API client for fetching Polymarket eSports markets.
+
+This module provides a rate-limited async client for the Polymarket Gamma API,
+handling pagination and error handling for market ingestion.
+"""
+
+from typing import List, Optional
+
+import httpx
+from aiolimiter import AsyncLimiter
+
+GAMMA_BASE_URL = "https://gamma-api.polymarket.com"
+
+
+class GammaAPIClient:
+    """Async client for Polymarket Gamma API with rate limiting.
+
+    Attributes:
+        limiter: AsyncLimiter instance for rate limiting (30 req/s)
+        client: httpx.AsyncClient for HTTP requests
+    """
+
+    def __init__(self, limiter: Optional[AsyncLimiter] = None):
+        """Initialize Gamma API client.
+
+        Args:
+            limiter: Optional AsyncLimiter instance. If not provided,
+                     creates one with 30 req/s limit.
+        """
+        self.limiter = limiter or AsyncLimiter(max_rate=30, time_period=1)
+        self._client: Optional[httpx.AsyncClient] = None
+
+    async def _get_client(self) -> httpx.AsyncClient:
+        """Get or create the httpx AsyncClient."""
+        if self._client is None or self._client.is_closed:
+            self._client = httpx.AsyncClient(timeout=30.0)
+        return self._client
+
+    async def close(self):
+        """Close the HTTP client."""
+        if self._client and not self._client.is_closed:
+            await self._client.aclose()
+
+    async def get_tag_id(self, slug: str) -> int:
+        """Fetch tag_id from Gamma API by slug.
+
+        Args:
+            slug: Tag slug (e.g., "esports")
+
+        Returns:
+            Tag ID as integer (REQUIRED - not string)
+
+        Raises:
+            httpx.HTTPStatusError: If tag not found or API error
+        """
+        client = await self._get_client()
+        async with self.limiter:
+            response = await client.get(f"{GAMMA_BASE_URL}/tags/slug/{slug}")
+            response.raise_for_status()
+            data = response.json()
+            return int(data["id"])
+
+    async def fetch_markets(self, tag_id: int, limit: int = 100) -> List[dict]:
+        """Fetch all markets for a given tag_id with pagination.
+
+        Handles offset pagination until no more results are returned.
+        Preserves all market fields including conditionId (0x-prefixed 64-hex).
+
+        Args:
+            tag_id: Tag ID (integer) to fetch markets for
+            limit: Number of markets per page (default: 100)
+
+        Returns:
+            List of market objects with fields:
+            - conditionId: 0x-prefixed 64-hex string (PRIMARY KEY)
+            - question: Market question text
+            - outcomes: Comma-separated outcomes (e.g., "YES,NO")
+            - outcomePrices: Current prices
+            - active: Whether market is accepting trades
+            - closed: Whether market is closed
+            - endDate: Market close time (ISO timestamp)
+            - tags: Tag objects
+            - result: Resolution info (for resolved markets)
+
+        Raises:
+            httpx.HTTPStatusError: If API request fails
+        """
+        client = await self._get_client()
+        all_markets: List[dict] = []
+        offset = 0
+
+        while True:
+            async with self.limiter:
+                response = await client.get(
+                    f"{GAMMA_BASE_URL}/markets",
+                    params={"tag_id": tag_id, "limit": limit, "offset": offset},
+                )
+                response.raise_for_status()
+
+            markets = response.json()
+            if not markets:
+                break
+
+            all_markets.extend(markets)
+            offset += limit
+
+        return all_markets
+
+
+async def fetch_tag_id(slug: str) -> int:
+    """Convenience function to fetch tag_id for a slug.
+
+    Args:
+        slug: Tag slug (e.g., "esports")
+
+    Returns:
+        Tag ID as integer
+    """
+    client = GammaAPIClient()
+    try:
+        return await client.get_tag_id(slug)
+    finally:
+        await client.close()

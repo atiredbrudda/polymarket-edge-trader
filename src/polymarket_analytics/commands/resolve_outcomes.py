@@ -5,6 +5,7 @@ by reading from the gamma_events table.
 """
 
 import asyncio
+from pathlib import Path
 import click
 
 from src.polymarket_analytics.cli import cli
@@ -35,7 +36,10 @@ async def _resolve_outcomes_async(ctx, db_path: str):
     click.echo(f"Resolving outcomes for niche: {niche_slug}")
 
     # Initialize database (creates schema if not exists)
-    db = init_database(db_path)
+    db_path_obj = Path(db_path)
+    if not db_path_obj.parent.exists():
+        db_path_obj.parent.mkdir(parents=True, exist_ok=True)
+    db = init_database(db_path_obj)
 
     # Assert gamma_events has data (RESL-01)
     # Check if gamma_events table has any rows
@@ -69,6 +73,6 @@ async def _resolve_outcomes_async(ctx, db_path: str):
     )
 
     # Get count of updated rows
-    updated_count = result.changes
+    updated_count = result.rowcount
 
     click.echo(f"Resolved {updated_count} markets for niche '{niche_slug}'")
