@@ -1,0 +1,12 @@
+# eSports niche configuration
+# First niche for Polymarket Smart Money Tracker
+
+tag_id: esports          # Polymarket tag ID for eSports markets
+slug: esports            # File slug for config lookup
+min_positions: 30        # Minimum positions for trader to qualify for scoring
+scoring_window_days: 30  # Rolling window for CLV/ROI/Sharpe calculation
+entity_fields:           # Entity types to extract from market questions
+  - game                 # e.g., "CS2", "LoL", "Dota 2"
+  - team                 # e.g., "FaZe", "NAVI", "T1"
+  - player               # e.g., "s1mple", "Faker"
+  - tournament           # e.g., "IEM Katowice", "Worlds 2025"
