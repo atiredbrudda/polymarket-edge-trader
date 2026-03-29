@@ -141,13 +141,16 @@ def calculate_sharpe(positions_df: pd.DataFrame) -> pd.DataFrame:
         Uses sample std (ddof=1) per statistics convention.
         Returns 0.0 for single position or zero volatility.
         """
+        import numpy as np
+
         if len(returns) < 2:
             return 0.0  # Not enough data for sample std
 
         mean_return = returns.mean()
         std_return = returns.std(ddof=1)  # Sample standard deviation
 
-        if std_return == 0 or pd.isna(std_return):
+        # Check for zero or near-zero std (floating point tolerance)
+        if np.isclose(std_return, 0.0) or pd.isna(std_return):
             return 0.0  # Zero volatility or NaN
 
         return mean_return / std_return
