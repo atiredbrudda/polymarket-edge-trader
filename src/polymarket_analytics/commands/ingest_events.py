@@ -11,10 +11,13 @@ from datetime import datetime
 from pathlib import Path
 
 import click
+from rich.console import Console
 
-from src.polymarket_analytics.cli import cli
-from src.polymarket_analytics.db.schema import init_database
-from src.polymarket_analytics.api.gamma import GammaAPIClient
+from polymarket_analytics.cli import cli
+from polymarket_analytics.db.schema import init_database
+from polymarket_analytics.api.gamma import GammaAPIClient
+
+console = Console()
 
 
 @cli.command()
@@ -62,8 +65,12 @@ async def _ingest_events_async(ctx, db_path: str):
         tag_id = config.tag_id
         click.echo(f"Fetching markets for tag_id: {tag_id}")
 
-        # Fetch markets from Gamma API
-        markets = await client.fetch_markets(tag_id)
+        # Fetch markets from Gamma API with page progress
+        def on_page(page: int, total: int) -> None:
+            console.print(f"  Fetching... page {page} ({total} markets so far)", end="\r")
+
+        markets = await client.fetch_markets(tag_id, on_page=on_page)
+        console.print()  # newline after \r progress
 
         # Assert data fetched (RESL-02)
         if not markets:
@@ -88,28 +95,38 @@ async def _ingest_events_async(ctx, db_path: str):
             closed = market.get("closed", False)
             category = market.get("category", niche_slug)
 
-            # Extract outcome ONLY for resolved markets from the actual result field
-            # The "outcomes" field is the list of possible bets, NOT the result
-            # Use the "result" field (or similar) which contains the actual resolution
+            # Determine outcome for resolved markets.
+            # Gamma API encodes resolution in outcomePrices: ["1","0"] = first outcome won.
+            # Falls back to result/winner fields if present.
             outcome = None
             if closed or not active:
-                # Only set outcome for closed/resolved markets
                 result = market.get("result")
-                if result:
-                    # result may be "YES", "NO", or an outcome index/object
-                    if isinstance(result, str):
-                        outcome = result.upper()
-                    elif isinstance(result, int):
-                        # Map index to outcome name
-                        outcome_list = outcomes.split(",") if outcomes else []
-                        outcome = (
-                            outcome_list[result] if result < len(outcome_list) else None
+                winner = market.get("winner")
+                outcome_prices_raw = market.get("outcomePrices")
+
+                if result and isinstance(result, str):
+                    outcome = result.upper()
+                elif winner and isinstance(winner, str):
+                    outcome = winner.upper()
+                elif outcome_prices_raw:
+                    try:
+                        prices = (
+                            json.loads(outcome_prices_raw)
+                            if isinstance(outcome_prices_raw, str)
+                            else outcome_prices_raw
                         )
-                else:
-                    # Check for alternative resolution fields
-                    winner = market.get("winner")
-                    if winner:
-                        outcome = winner.upper() if isinstance(winner, str) else None
+                        if isinstance(outcomes, str) and outcomes.startswith("["):
+                            outcome_list = json.loads(outcomes)
+                        elif isinstance(outcomes, str):
+                            outcome_list = [o.strip() for o in outcomes.split(",")]
+                        else:
+                            outcome_list = outcomes
+                        for i, price in enumerate(prices):
+                            if float(price) >= 0.99 and i < len(outcome_list):
+                                outcome = outcome_list[i].strip().upper()
+                                break
+                    except (ValueError, TypeError, json.JSONDecodeError):
+                        pass
 
             # Generate hash ID for gamma_events
             event_id = hashlib.sha256(condition_id.encode()).hexdigest()
@@ -145,9 +162,8 @@ async def _ingest_events_async(ctx, db_path: str):
                 }
             )
 
-        # Insert into gamma_events using raw SQL to preserve created_at
-        for record in gamma_events_records:
-            db.execute(
+        with db.conn:
+            db.conn.executemany(
                 """
                 INSERT INTO gamma_events (id, condition_id, question, outcome, end_date, tags, active, niche_slug, created_at)
                 VALUES (:id, :condition_id, :question, :outcome, :end_date, :tags, :active, :niche_slug, :created_at)
@@ -160,12 +176,9 @@ async def _ingest_events_async(ctx, db_path: str):
                     active = excluded.active,
                     niche_slug = excluded.niche_slug
                 """,
-                record,
+                gamma_events_records,
             )
-
-        # Insert into markets using raw SQL to preserve created_at
-        for record in markets_records:
-            db.execute(
+            db.conn.executemany(
                 """
                 INSERT INTO markets (condition_id, question, outcome, resolved, niche_slug, created_at, end_date, category, active, tokens)
                 VALUES (:condition_id, :question, :outcome, :resolved, :niche_slug, :created_at, :end_date, :category, :active, :tokens)
@@ -179,10 +192,8 @@ async def _ingest_events_async(ctx, db_path: str):
                     active = excluded.active,
                     tokens = excluded.tokens
                 """,
-                record,
+                markets_records,
             )
-
-        db.conn.commit()
 
         click.echo(f"Ingested {len(markets)} markets for niche '{niche_slug}'")
         click.echo(f"  - gamma_events: {len(gamma_events_records)} records")

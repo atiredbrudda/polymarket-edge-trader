@@ -91,7 +91,7 @@ def test_build_positions_aggregates_trades(test_db: sqlite_utils.Database):
         - Correct count of positions created
         - One position per (trader, market) pair
     """
-    from src.polymarket_analytics.positions.aggregation import (
+    from polymarket_analytics.positions.aggregation import (
         build_positions_from_trades,
     )
 
@@ -278,7 +278,7 @@ def test_build_positions_direction_calculation(test_db: sqlite_utils.Database):
         - Net SELLs → direction = 'SHORT'
         - Equal BUY/SELL → direction = 'FLAT'
     """
-    from src.polymarket_analytics.positions.aggregation import (
+    from polymarket_analytics.positions.aggregation import (
         build_positions_from_trades,
     )
 
@@ -427,7 +427,7 @@ def test_build_positions_volume_weighted_avg(test_db: sqlite_utils.Database):
     Asserts:
         - avg_entry_price is volume-weighted, not simple average
     """
-    from src.polymarket_analytics.positions.aggregation import (
+    from polymarket_analytics.positions.aggregation import (
         build_positions_from_trades,
     )
 
@@ -516,7 +516,7 @@ def test_build_positions_fails_without_entities(test_db: sqlite_utils.Database):
         - ClickException raised with clear message
     """
     import click
-    from src.polymarket_analytics.positions.aggregation import (
+    from polymarket_analytics.positions.aggregation import (
         build_positions_from_trades,
     )
 
@@ -557,7 +557,7 @@ def test_build_positions_idempotent(test_db: sqlite_utils.Database):
         - No duplicate rows
         - Data updated correctly on second run
     """
-    from src.polymarket_analytics.positions.aggregation import (
+    from polymarket_analytics.positions.aggregation import (
         build_positions_from_trades,
     )
 

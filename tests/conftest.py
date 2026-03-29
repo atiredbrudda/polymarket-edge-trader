@@ -14,8 +14,8 @@ import hashlib
 import pytest
 import sqlite_utils
 
-from src.polymarket_analytics.config.loader import load_niche_config
-from src.polymarket_analytics.db.schema import init_database
+from polymarket_analytics.config.loader import load_niche_config
+from polymarket_analytics.db.schema import init_database
 
 
 @pytest.fixture

@@ -4,7 +4,7 @@ This module provides a rate-limited async client for the Polymarket Gamma API,
 handling pagination and error handling for market ingestion.
 """
 
-from typing import List, Optional
+from typing import Callable, List, Optional
 
 import httpx
 from aiolimiter import AsyncLimiter
@@ -33,7 +33,9 @@ class GammaAPIClient:
     async def _get_client(self) -> httpx.AsyncClient:
         """Get or create the httpx AsyncClient."""
         if self._client is None or self._client.is_closed:
-            self._client = httpx.AsyncClient(timeout=30.0)
+            self._client = httpx.AsyncClient(
+                timeout=httpx.Timeout(connect=10.0, read=60.0, write=10.0, pool=10.0)
+            )
         return self._client
 
     async def close(self):
@@ -60,27 +62,21 @@ class GammaAPIClient:
             data = response.json()
             return int(data["id"])
 
-    async def fetch_markets(self, tag_id: int, limit: int = 100) -> List[dict]:
+    async def fetch_markets(
+        self,
+        tag_id: int,
+        limit: int = 200,
+        on_page: Optional[Callable[[int, int], None]] = None,
+    ) -> List[dict]:
         """Fetch all markets for a given tag_id with pagination.
-
-        Handles offset pagination until no more results are returned.
-        Preserves all market fields including conditionId (0x-prefixed 64-hex).
 
         Args:
             tag_id: Tag ID (integer) to fetch markets for
-            limit: Number of markets per page (default: 100)
+            limit: Number of markets per page (default: 500)
+            on_page: Optional callback(page_num, total_so_far) called after each page
 
         Returns:
-            List of market objects with fields:
-            - conditionId: 0x-prefixed 64-hex string (PRIMARY KEY)
-            - question: Market question text
-            - outcomes: Comma-separated outcomes (e.g., "YES,NO")
-            - outcomePrices: Current prices
-            - active: Whether market is accepting trades
-            - closed: Whether market is closed
-            - endDate: Market close time (ISO timestamp)
-            - tags: Tag objects
-            - result: Resolution info (for resolved markets)
+            List of market dicts
 
         Raises:
             httpx.HTTPStatusError: If API request fails
@@ -88,6 +84,7 @@ class GammaAPIClient:
         client = await self._get_client()
         all_markets: List[dict] = []
         offset = 0
+        page = 0
 
         while True:
             async with self.limiter:
@@ -103,6 +100,10 @@ class GammaAPIClient:
 
             all_markets.extend(markets)
             offset += limit
+            page += 1
+
+            if on_page:
+                on_page(page, len(all_markets))
 
         return all_markets
 

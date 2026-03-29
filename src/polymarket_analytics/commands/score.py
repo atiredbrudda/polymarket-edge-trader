@@ -19,12 +19,12 @@ from typing import Any
 import click
 from rich.console import Console
 
-from src.polymarket_analytics.cli import cli
-from src.polymarket_analytics.db.schema import init_database
-from src.polymarket_analytics.scoring.extraction import extract_resolved_positions
-from src.polymarket_analytics.scoring.metrics import calculate_all_metrics
-from src.polymarket_analytics.scoring.normalization import compute_normalized_scores
-from src.polymarket_analytics.scoring.writer import write_lift_scores
+from polymarket_analytics.cli import cli
+from polymarket_analytics.db.schema import init_database
+from polymarket_analytics.scoring.extraction import extract_resolved_positions
+from polymarket_analytics.scoring.metrics import calculate_all_metrics
+from polymarket_analytics.scoring.normalization import compute_normalized_scores
+from polymarket_analytics.scoring.writer import write_lift_scores
 
 console = Console()
 

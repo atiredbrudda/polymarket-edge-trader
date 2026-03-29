@@ -3,7 +3,7 @@
 import click
 from pathlib import Path
 
-from src.polymarket_analytics.config.loader import load_niche_config
+from polymarket_analytics.config.loader import load_niche_config
 
 
 @click.group()
@@ -29,4 +29,4 @@ def cli(ctx, niche: str):
 
 # Import commands after cli is defined to register them
 # This must be at the end to avoid circular imports
-import src.polymarket_analytics.commands  # noqa: E402,F401
+import polymarket_analytics.commands  # noqa: E402,F401

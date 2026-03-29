@@ -12,8 +12,8 @@ import sqlite_utils
 import pandas as pd
 from datetime import datetime, timedelta
 
-from src.polymarket_analytics.db.schema import init_database
-from src.polymarket_analytics.scoring.extraction import extract_resolved_positions
+from polymarket_analytics.db.schema import init_database
+from polymarket_analytics.scoring.extraction import extract_resolved_positions
 
 
 @pytest.fixture

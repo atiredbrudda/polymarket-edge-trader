@@ -25,10 +25,10 @@ from rich.progress import (
     TextColumn,
 )
 
-from src.polymarket_analytics.cli import cli
-from src.polymarket_analytics.api.data import DataAPIClient
-from src.polymarket_analytics.api.graph import GraphAPIClient, parse_graph_event
-from src.polymarket_analytics.db.schema import init_database
+from polymarket_analytics.cli import cli
+from polymarket_analytics.api.data import DataAPIClient
+from polymarket_analytics.api.graph import GraphAPIClient, parse_graph_event
+from polymarket_analytics.db.schema import init_database
 
 
 console = Console()

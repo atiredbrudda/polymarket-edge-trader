@@ -16,9 +16,9 @@ import pytest
 import sqlite_utils
 from datetime import datetime, timezone, timedelta
 
-from src.polymarket_analytics.db.schema import init_database
-from src.polymarket_analytics.detection.convergence import detect_convergence
-from src.polymarket_analytics.detection.writer import upsert_signal
+from polymarket_analytics.db.schema import init_database
+from polymarket_analytics.detection.convergence import detect_convergence
+from polymarket_analytics.detection.writer import upsert_signal
 
 # Import helpers from conftest
 from tests.conftest import (

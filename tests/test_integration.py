@@ -11,7 +11,7 @@ import pytest
 import sqlite3
 import sqlite_utils
 
-from src.polymarket_analytics.token_catalog.builder import TokenCatalogBuilder
+from polymarket_analytics.token_catalog.builder import TokenCatalogBuilder
 
 
 def test_token_catalog_ingestion(
@@ -224,7 +224,7 @@ def test_classify_tokens_uses_clob_token_ids(test_db: sqlite_utils.Database, tmp
     db_path = tmp_path / "test.db"
 
     # Initialize schema
-    from src.polymarket_analytics.db.schema import init_database
+    from polymarket_analytics.db.schema import init_database
 
     db = init_database(db_path)
 
@@ -264,7 +264,7 @@ def test_classify_tokens_uses_clob_token_ids(test_db: sqlite_utils.Database, tmp
         obj = {"config": MockConfig()}
 
     # Run classify_tokens with mocked API
-    from src.polymarket_analytics.commands.classify_tokens import _classify_tokens_async
+    from polymarket_analytics.commands.classify_tokens import _classify_tokens_async
 
     async def run_test():
         with patch(

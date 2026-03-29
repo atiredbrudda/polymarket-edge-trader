@@ -13,11 +13,11 @@ import pytest
 import sqlite_utils
 from datetime import datetime, timezone, timedelta
 
-from src.polymarket_analytics.db.schema import init_database
-from src.polymarket_analytics.scoring.extraction import extract_resolved_positions
-from src.polymarket_analytics.scoring.metrics import calculate_all_metrics
-from src.polymarket_analytics.scoring.normalization import compute_normalized_scores
-from src.polymarket_analytics.scoring.writer import write_lift_scores
+from polymarket_analytics.db.schema import init_database
+from polymarket_analytics.scoring.extraction import extract_resolved_positions
+from polymarket_analytics.scoring.metrics import calculate_all_metrics
+from polymarket_analytics.scoring.normalization import compute_normalized_scores
+from polymarket_analytics.scoring.writer import write_lift_scores
 
 
 @pytest.fixture

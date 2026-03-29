@@ -1,7 +1,7 @@
 """Entity extraction module with pattern matcher and LLM fallback."""
 
-from src.polymarket_analytics.extraction.llm import LLMFallback, EXTRACTION_PROMPT
-from src.polymarket_analytics.extraction.patterns import (
+from polymarket_analytics.extraction.llm import LLMFallback, EXTRACTION_PROMPT
+from polymarket_analytics.extraction.patterns import (
     EntityPatternMatcher,
     GAME_PATTERNS,
     TEAM_PATTERNS,

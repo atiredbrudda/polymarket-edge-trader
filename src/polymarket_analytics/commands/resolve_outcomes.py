@@ -8,8 +8,8 @@ import asyncio
 from pathlib import Path
 import click
 
-from src.polymarket_analytics.cli import cli
-from src.polymarket_analytics.db.schema import init_database
+from polymarket_analytics.cli import cli
+from polymarket_analytics.db.schema import init_database
 
 
 @cli.command()
@@ -50,25 +50,17 @@ async def _resolve_outcomes_async(ctx, db_path: str):
             "Run 'ingest-events' first to populate gamma_events."
         )
 
-    # Update markets.outcome from gamma_events for resolved markets
-    # Only update when outcome IS NOT NULL (closed + actually resolved)
+    # Update markets.outcome from gamma_events for resolved markets.
+    # JOIN-style UPDATE avoids correlated subquery (single pass vs one lookup per row).
     result = db.execute(
         """
         UPDATE markets
-        SET outcome = (
-            SELECT ge.outcome
-            FROM gamma_events ge
-            WHERE ge.condition_id = markets.condition_id
-              AND ge.niche_slug = :niche_slug
-        ),
-        resolved = 1
-        WHERE condition_id IN (
-            SELECT condition_id FROM gamma_events
-            WHERE niche_slug = :niche_slug
-              AND active = 0
-              AND outcome IS NOT NULL
-        )
-        AND niche_slug = :niche_slug
+        SET outcome = ge.outcome,
+            resolved = 1
+        FROM gamma_events ge
+        WHERE markets.condition_id = ge.condition_id
+          AND ge.niche_slug = :niche_slug
+          AND ge.outcome IS NOT NULL
         """,
         {"niche_slug": niche_slug},
     )

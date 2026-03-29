@@ -34,7 +34,7 @@ def extract_resolved_positions(
           per GUIDE.md — captures positions actively traded late in window
 
     Example:
-        >>> from src.polymarket_analytics.db.schema import init_database
+        >>> from polymarket_analytics.db.schema import init_database
         >>> db = init_database(db_path)
         >>> df = extract_resolved_positions(db, 'esports', window_days=30)
         >>> if len(df) > 0:

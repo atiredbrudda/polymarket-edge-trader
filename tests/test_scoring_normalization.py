@@ -11,7 +11,7 @@ import numpy as np
 import pandas as pd
 import pytest
 
-from src.polymarket_analytics.scoring.normalization import (
+from polymarket_analytics.scoring.normalization import (
     assign_quintiles,
     compute_normalized_scores,
     zscore_normalize,

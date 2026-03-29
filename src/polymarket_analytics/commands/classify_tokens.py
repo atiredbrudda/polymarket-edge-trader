@@ -11,9 +11,9 @@ from pathlib import Path
 
 import click
 
-from src.polymarket_analytics.cli import cli
-from src.polymarket_analytics.db.schema import init_database
-from src.polymarket_analytics.api.gamma import GammaAPIClient
+from polymarket_analytics.cli import cli
+from polymarket_analytics.db.schema import init_database
+from polymarket_analytics.api.gamma import GammaAPIClient
 
 
 @cli.command()
@@ -59,8 +59,13 @@ async def _classify_tokens_async(ctx, db_path: str):
         tag_id = config.tag_id
         click.echo(f"Fetching markets from Gamma API for tag_id: {tag_id}")
 
-        # Fetch markets from Gamma API (fresh data, not from existing markets table)
-        markets = await client.fetch_markets(tag_id)
+        # Fetch markets from Gamma API (needs clobTokenIds, not stored in gamma_events)
+        def on_page(page: int, total: int) -> None:
+            click.echo(f"  Fetching... page {page} ({total} markets so far)", nl=False)
+            click.echo("\r", nl=False)
+
+        markets = await client.fetch_markets(tag_id, on_page=on_page)
+        click.echo()  # newline after \r progress
 
         # Assert data fetched (RESL-02)
         if not markets:
@@ -131,9 +136,8 @@ async def _classify_tokens_async(ctx, db_path: str):
                     }
                 )
 
-        # Insert into token_catalog using raw SQL to preserve created_at on re-runs
-        for record in token_catalog_records:
-            db.execute(
+        with db.conn:
+            db.conn.executemany(
                 """
                 INSERT INTO token_catalog (token_id, condition_id, question, niche_slug, node_path, market_type, created_at)
                 VALUES (:token_id, :condition_id, :question, :niche_slug, :node_path, :market_type, :created_at)
@@ -144,10 +148,8 @@ async def _classify_tokens_async(ctx, db_path: str):
                     node_path = excluded.node_path,
                     market_type = excluded.market_type
                 """,
-                record,
+                token_catalog_records,
             )
-
-        db.conn.commit()
 
         click.echo(
             f"Built token catalog with {len(token_catalog_records)} entries for niche '{niche_slug}'"

@@ -2,7 +2,7 @@
 
 from pathlib import Path
 
-from src.polymarket_analytics.db.connection import get_db
+from polymarket_analytics.db.connection import get_db
 
 
 def create_core_tables(db):

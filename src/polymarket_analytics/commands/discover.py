@@ -15,25 +15,19 @@ from pathlib import Path
 from typing import Any, Dict, List, Optional
 
 import click
+from rich.console import Console
+from rich.progress import BarColumn, MofNCompleteColumn, Progress, TaskProgressColumn, TimeElapsedColumn, TextColumn
 
-from src.polymarket_analytics.cli import cli
-from src.polymarket_analytics.api.data import DataAPIClient
-from src.polymarket_analytics.db.schema import init_database
-from src.polymarket_analytics.extraction.llm import LLMFallback
-from src.polymarket_analytics.extraction.patterns import EntityPatternMatcher
+from polymarket_analytics.cli import cli
+from polymarket_analytics.api.data import DataAPIClient
+from polymarket_analytics.db.schema import init_database
+from polymarket_analytics.extraction.llm import LLMFallback
+from polymarket_analytics.extraction.patterns import EntityPatternMatcher
+
+console = Console()
 
 
 def generate_entity_id(condition_id: str, entities: Dict[str, Any]) -> str:
-    """Generate stable entity ID from condition_id and extracted entities.
-
-    Args:
-        condition_id: Market condition ID
-        entities: Extracted entity dict with game, team_a, team_b, etc.
-
-    Returns:
-        SHA256 hash (first 16 chars) as stable entity ID
-    """
-    # Create deterministic string from entities
     entity_str = json.dumps(entities, sort_keys=True)
     combined = f"{condition_id}:{entity_str}"
     return hashlib.sha256(combined.encode()).hexdigest()[:16]
@@ -53,53 +47,38 @@ def generate_entity_id(condition_id: str, entities: Dict[str, Any]) -> str:
 )
 @click.pass_context
 def discover(ctx, db_path: str, use_llm: bool) -> None:
-    """Discover traders and extract entities for niche markets.
-
-    This command:
-    1. Fetches markets for niche from database
-    2. Extracts entities using pattern matcher (LLM fallback if enabled)
-    3. Populates market_entities table
-    4. Fetches trades from Data API
-    5. Populates traders table with unique traders
-
-    Args:
-        ctx: Click context with niche and config
-        db_path: Path to SQLite database
-        use_llm: Whether to use LLM fallback for entity extraction
-    """
+    """Discover traders and extract entities for niche markets."""
     niche = ctx.obj.get("niche", "esports")
     config = ctx.obj.get("config")
 
     if not config:
         raise click.ClickException(f"No config found for niche: {niche}")
 
-    # Initialize database
     db_path_obj = Path(db_path)
     if not db_path_obj.parent.exists():
         db_path_obj.parent.mkdir(parents=True, exist_ok=True)
 
     db = init_database(db_path_obj)
 
-    # Assert markets table exists (RESL-01)
     if not db["markets"].exists():
         raise click.ClickException(
             "markets table does not exist. Run ingest-events command first."
         )
 
-    # Fetch markets for niche from database (not API)
-    markets_query = """
-        SELECT condition_id, question FROM markets WHERE niche_slug = :niche_slug
-    """
-    markets = list(db.query(markets_query, {"niche_slug": niche}))
+    markets = list(db.query(
+        "SELECT condition_id, question FROM markets WHERE niche_slug = :niche_slug",
+        {"niche_slug": niche},
+    ))
 
-    # Assert markets exist (RESL-02)
     if not markets:
         raise click.ClickException(
             f"No markets found for niche='{niche}' in database. "
             f"Run ingest-events command first."
         )
 
-    # Initialize extractors
+    console.print(f"[bold]=== Discovering for {niche} ===[/bold]")
+    console.print(f"Found {len(markets):,} markets\n")
+
     pattern_matcher = EntityPatternMatcher()
     llm_fallback: Optional[LLMFallback] = None
 
@@ -107,48 +86,51 @@ def discover(ctx, db_path: str, use_llm: bool) -> None:
         try:
             llm_fallback = LLMFallback()
         except ValueError as e:
-            # LLM enabled but API key not set - warn and continue without LLM
-            click.echo(f"Warning: {e}. Disabling LLM fallback.", err=True)
+            console.print(f"[yellow]Warning: {e}. Disabling LLM fallback.[/yellow]")
             llm_fallback = None
 
-    # Process entity extraction
-    entity_count = 0
+    # --- Entity extraction with progress bar ---
+    entity_records = []
     llm_count = 0
     pattern_count = 0
 
-    for market in markets:
-        condition_id = market["condition_id"]
-        question = market["question"]
+    with Progress(
+        TextColumn("[progress.description]{task.description}"),
+        BarColumn(),
+        MofNCompleteColumn(),
+        TaskProgressColumn(),
+        TimeElapsedColumn(),
+        console=console,
+        transient=False,
+    ) as progress:
+        task = progress.add_task("[cyan]Extracting entities", total=len(markets))
 
-        # Try pattern matcher first
-        entities = pattern_matcher.extract(question)
+        for market in markets:
+            condition_id = market["condition_id"]
+            question = market["question"]
 
-        # Check if critical fields missing
-        needs_llm = (
-            use_llm
-            and llm_fallback is not None
-            and (entities["game"] is None or entities["team_a"] is None)
-        )
+            entities = pattern_matcher.extract(question)
 
-        if needs_llm:
-            try:
-                entities = llm_fallback.extract(question)
-                llm_count += 1
-            except Exception as e:
-                click.echo(
-                    f"Warning: LLM extraction failed for {condition_id[:8]}...: {e}",
-                    err=True,
-                )
+            needs_llm = (
+                use_llm
+                and llm_fallback is not None
+                and (entities["game"] is None or entities["team_a"] is None)
+            )
 
-        if entities["game"] is not None or entities["team_a"] is not None:
-            pattern_count += 1
+            if needs_llm:
+                try:
+                    entities = llm_fallback.extract(question)
+                    llm_count += 1
+                except Exception as e:
+                    console.print(
+                        f"  [red]LLM failed for {condition_id[:8]}...: {e}[/red]"
+                    )
 
-        # Generate stable entity ID
-        entity_id = generate_entity_id(condition_id, entities)
+            if entities["game"] is not None or entities["team_a"] is not None:
+                pattern_count += 1
 
-        # Upsert into market_entities
-        db["market_entities"].upsert(
-            {
+            entity_id = generate_entity_id(condition_id, entities)
+            entity_records.append({
                 "id": entity_id,
                 "condition_id": condition_id,
                 "game": entities.get("game"),
@@ -156,22 +138,39 @@ def discover(ctx, db_path: str, use_llm: bool) -> None:
                 "team_b": entities.get("team_b"),
                 "tournament": entities.get("tournament"),
                 "market_type": entities.get("market_type"),
-            },
-            pk="id",
-            replace=True,
-        )
-        entity_count += 1
+            })
 
-    # Fetch traders from Data API
+            progress.advance(task)
+
+    # Batch upsert market_entities
+    with db.conn:
+        db.conn.executemany(
+            """
+            INSERT INTO market_entities (id, condition_id, game, team_a, team_b, tournament, market_type)
+            VALUES (:id, :condition_id, :game, :team_a, :team_b, :tournament, :market_type)
+            ON CONFLICT(condition_id) DO UPDATE SET
+                id = excluded.id,
+                game = excluded.game,
+                team_a = excluded.team_a,
+                team_b = excluded.team_b,
+                tournament = excluded.tournament,
+                market_type = excluded.market_type
+            """,
+            entity_records,
+        )
+
+    console.print(f"\n[green]Entities:[/green] {len(entity_records):,} written "
+                  f"(pattern: {pattern_count:,}, LLM: {llm_count:,})\n")
+
+    # --- Trader discovery ---
     condition_ids = [m["condition_id"] for m in markets]
 
     async def fetch_traders():
-        """Fetch trades and extract unique traders."""
         client = DataAPIClient()
         try:
+            console.print("[cyan]Fetching traders from Data API...[/cyan]")
             trades = await client.fetch_trades(condition_ids, limit=1000)
 
-            # Extract unique traders from trades
             traders: Dict[str, Dict[str, Any]] = {}
             now = datetime.now(timezone.utc).isoformat()
 
@@ -182,11 +181,8 @@ def discover(ctx, db_path: str, use_llm: bool) -> None:
 
                 timestamp = trade.get("timestamp")
                 if timestamp:
-                    # Convert Unix timestamp to ISO format
                     try:
-                        ts_iso = datetime.fromtimestamp(
-                            timestamp, tz=timezone.utc
-                        ).isoformat()
+                        ts_iso = datetime.fromtimestamp(timestamp, tz=timezone.utc).isoformat()
                     except (ValueError, OSError):
                         ts_iso = now
                 else:
@@ -201,15 +197,24 @@ def discover(ctx, db_path: str, use_llm: bool) -> None:
                         "created_at": now,
                     }
                 else:
-                    # Update first_seen and last_seen
                     if ts_iso < traders[address]["first_seen"]:
                         traders[address]["first_seen"] = ts_iso
                     if ts_iso > traders[address]["last_seen"]:
                         traders[address]["last_seen"] = ts_iso
 
-            # Upsert traders
-            for trader_data in traders.values():
-                db["traders"].upsert(trader_data, pk="address", replace=True)
+            # Batch upsert traders
+            if traders:
+                with db.conn:
+                    db.conn.executemany(
+                        """
+                        INSERT INTO traders (address, first_seen, last_seen, backfill_complete, created_at)
+                        VALUES (:address, :first_seen, :last_seen, :backfill_complete, :created_at)
+                        ON CONFLICT(address) DO UPDATE SET
+                            first_seen = MIN(excluded.first_seen, traders.first_seen),
+                            last_seen = MAX(excluded.last_seen, traders.last_seen)
+                        """,
+                        list(traders.values()),
+                    )
 
             return len(traders)
         finally:
@@ -217,9 +222,4 @@ def discover(ctx, db_path: str, use_llm: bool) -> None:
 
     trader_count = asyncio.run(fetch_traders())
 
-    # Print summary
-    click.echo(
-        f"Discovered {trader_count} traders, extracted entities for {entity_count} markets"
-    )
-    click.echo(f"  Pattern matcher success: {pattern_count}")
-    click.echo(f"  LLM fallback used: {llm_count}")
+    console.print(f"[green]Traders:[/green] {trader_count:,} discovered")

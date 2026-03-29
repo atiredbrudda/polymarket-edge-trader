@@ -13,7 +13,7 @@ import pytest
 import sqlite_utils
 from decimal import Decimal
 
-from src.polymarket_analytics.db.schema import init_database
+from polymarket_analytics.db.schema import init_database
 
 
 @pytest.fixture
@@ -206,7 +206,7 @@ def test_resolve_pnl_formulas(resolved_positions_db):
     Args:
         resolved_positions_db: Database with fixture data
     """
-    from src.polymarket_analytics.positions.resolution import resolve_position_pnl
+    from polymarket_analytics.positions.resolution import resolve_position_pnl
 
     # Run resolution
     count = resolve_position_pnl(resolved_positions_db, "esports")
@@ -255,7 +255,7 @@ def test_resolve_position_pnl_function():
 
     Verifies pure Python implementation produces same results as SQL.
     """
-    from src.polymarket_analytics.positions.resolution import calculate_pnl
+    from polymarket_analytics.positions.resolution import calculate_pnl
 
     # LONG + YES: 100 * (1.0 - 0.60) = 40.0
     result = calculate_pnl("LONG", "YES", Decimal("100"), Decimal("0.60"))
@@ -284,7 +284,7 @@ def test_resolve_skips_unresolved_markets(resolved_positions_db):
     Args:
         resolved_positions_db: Database with fixture data including market without outcome
     """
-    from src.polymarket_analytics.positions.resolution import resolve_position_pnl
+    from polymarket_analytics.positions.resolution import resolve_position_pnl
 
     # Run resolution
     resolve_position_pnl(resolved_positions_db, "esports")
@@ -305,7 +305,7 @@ def test_resolve_idempotent(resolved_positions_db):
     Args:
         resolved_positions_db: Database with fixture data
     """
-    from src.polymarket_analytics.positions.resolution import resolve_position_pnl
+    from polymarket_analytics.positions.resolution import resolve_position_pnl
 
     # First run
     count1 = resolve_position_pnl(resolved_positions_db, "esports")
@@ -337,7 +337,7 @@ def test_resolve_fails_without_outcomes(test_db):
     Args:
         test_db: Database with schema but no outcomes
     """
-    from src.polymarket_analytics.positions.resolution import resolve_position_pnl
+    from polymarket_analytics.positions.resolution import resolve_position_pnl
     import click
 
     # Insert a market without outcome

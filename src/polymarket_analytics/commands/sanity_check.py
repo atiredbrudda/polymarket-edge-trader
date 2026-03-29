@@ -19,9 +19,9 @@ from typing import Any, Dict, List, Optional, Tuple
 import click
 from rich.console import Console
 
-from src.polymarket_analytics.cli import cli
-from src.polymarket_analytics.config.loader import load_niche_config
-from src.polymarket_analytics.db.schema import init_database
+from polymarket_analytics.cli import cli
+from polymarket_analytics.config.loader import load_niche_config
+from polymarket_analytics.db.schema import init_database
 
 
 console = Console()

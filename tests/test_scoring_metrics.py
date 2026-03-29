@@ -9,7 +9,7 @@ Verifies formulas against GUIDE.md §"Happy Path — Row-by-Row Trace":
 import pandas as pd
 import pytest
 
-from src.polymarket_analytics.scoring.metrics import (
+from polymarket_analytics.scoring.metrics import (
     calculate_all_metrics,
     calculate_clv,
     calculate_roi,

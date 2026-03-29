@@ -18,10 +18,10 @@ from typing import Any
 import click
 from rich.console import Console
 
-from src.polymarket_analytics.cli import cli
-from src.polymarket_analytics.db.schema import init_database
-from src.polymarket_analytics.detection.convergence import detect_convergence
-from src.polymarket_analytics.detection.writer import upsert_signals_batch
+from polymarket_analytics.cli import cli
+from polymarket_analytics.db.schema import init_database
+from polymarket_analytics.detection.convergence import detect_convergence
+from polymarket_analytics.detection.writer import upsert_signals_batch
 
 console = Console()
 
