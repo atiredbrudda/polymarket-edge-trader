@@ -46,7 +46,7 @@ async def _classify_tokens_async(ctx, db_path: str):
     db = init_database(db_path_obj)
 
     # Assert dependency: markets table exists (RESL-01)
-    if not db.table_exists("markets"):
+    if "markets" not in db.table_names():
         raise click.ClickException(
             "No 'markets' table found. Run 'ingest-events' command first to create it."
         )
@@ -146,6 +146,8 @@ async def _classify_tokens_async(ctx, db_path: str):
                 """,
                 record,
             )
+
+        db.conn.commit()
 
         click.echo(
             f"Built token catalog with {len(token_catalog_records)} entries for niche '{niche_slug}'"
