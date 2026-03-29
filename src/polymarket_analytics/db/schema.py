@@ -112,14 +112,16 @@ def create_core_tables(db):
         {
             "id": str,  # Primary key - hash
             "trader_address": str,  # FK to traders.address
-            "market_id": str,  # Market reference
+            "market_id": str,  # Market reference - markets.condition_id
             "direction": str,  # LONG/SHORT/FLAT
-            "size": float,  # Position size
-            "avg_entry_price": float,  # Average entry price
-            "entry_timestamp": str,  # ISO timestamp
-            "last_trade_timestamp": str,  # ISO timestamp
-            "pnl": float,  # Nullable - calculated on resolution
+            "size": str,  # NUMERIC(20,6) - Position size (using str for NUMERIC affinity)
+            "avg_entry_price": str,  # NUMERIC(10,6) - Average entry price (using str for NUMERIC affinity)
+            "entry_timestamp": str,  # ISO timestamp - first trade in position
+            "last_trade_timestamp": str,  # ISO timestamp - most recent trade (for 30-day window filter)
+            "trade_count": int,  # Number of trades in this position
             "resolved": bool,  # Whether position is resolved
+            "outcome": str,  # WIN/LOSS/NULL - result of the position
+            "pnl": str,  # NUMERIC(20,6) - Profit/loss (using str for NUMERIC affinity)
         },
         pk="id",
         foreign_keys=[("trader_address", "traders", "address")],
@@ -131,16 +133,20 @@ def create_core_tables(db):
         {
             "id": str,  # Primary key - hash
             "trader_address": str,  # FK to traders.address
-            "clv": float,  # Closed-loop value
-            "roi": float,  # Return on investment
-            "sharpe": float,  # Sharpe ratio
-            "z_clv": float,  # Z-score for CLV
-            "z_roi": float,  # Z-score for ROI
-            "z_sharpe": float,  # Z-score for Sharpe
-            "composite": float,  # Composite score
-            "quintile": int,  # 1-5 ranking
-            "window_start": str,  # ISO timestamp
-            "window_end": str,  # ISO timestamp
+            "category": str,  # Niche slug (esports, nba, etc.)
+            "composite_score": str,  # NUMERIC - Combined z-score (clv_zscore + roi_zscore + sharpe_zscore)
+            "clv_raw": str,  # NUMERIC - Raw CLV (close_price - entry_price) / entry_price
+            "clv_zscore": str,  # Z-score for CLV across all traders
+            "roi_raw": str,  # NUMERIC - Raw ROI (total_pnl / total_capital_deployed)
+            "roi_zscore": str,  # Z-score for ROI across all traders
+            "sharpe_raw": str,  # NUMERIC - Raw Sharpe ratio (mean(returns) / std(returns))
+            "sharpe_zscore": str,  # Z-score for Sharpe across all traders
+            "quintile": int,  # 1-5 ranking (5 = top 20% = smart money)
+            "position_count": int,  # Number of resolved positions in window
+            "total_pnl": str,  # NUMERIC - Total PnL in window
+            "window_start": str,  # ISO timestamp - start of scoring window
+            "window_end": str,  # ISO timestamp - end of scoring window
+            "computed_at": str,  # ISO timestamp - when score was computed
         },
         pk="id",
         foreign_keys=[("trader_address", "traders", "address")],
