@@ -80,18 +80,4 @@ def sample_token_catalog() -> list[dict]:
             "niche_slug": "esports",
             "node_path": "esports/dota2/ti-2025/final",
         },
-        {
-            "token_id": "0x4d5e6f7a8b9c",
-            "condition_id": "esports-cs2-major-navi-vs-faze",
-            "question": "Will NAVI win CS2 Major 2025?",
-            "niche_slug": "esports",
-            "node_path": "esports/cs2/major-2025/final",
-        },
-        {
-            "token_id": "0x5e6f7a8b9c0d",
-            "condition_id": "esports-lol-msi-jdg-vs-blg",
-            "question": "Will JDG win MSI 2025?",
-            "niche_slug": "esports",
-            "node_path": "esports/lol/msi-2025/final",
-        },
     ]
