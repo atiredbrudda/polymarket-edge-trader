@@ -48,18 +48,25 @@ def assign_quintiles(metrics_df: pd.DataFrame) -> pd.Series:
     Returns:
         Series with quintile assignments (1-5)
     """
+    # First check if all values are identical - qcut can't handle this
+    if metrics_df["composite_score"].nunique() == 1:
+        return pd.Series(3, index=metrics_df.index, dtype="int64")
+
     try:
+        # Don't pass labels when using duplicates='drop' - pandas will use range labels
+        # Then we map them to 1-5 range
         quintiles = pd.qcut(
             metrics_df["composite_score"],
             q=5,
-            labels=[1, 2, 3, 4, 5],
             duplicates="drop",  # Handle tied scores by dropping duplicate bins
-        ).astype(int)
-        return quintiles
+        )
+        # Convert categories to int and shift to 1-5 range
+        # qcut returns 0-based codes, so add 1
+        return (quintiles.cat.codes + 1).astype("int64")
     except ValueError as e:
-        # Fallback: if all scores are identical, assign middle quintile
+        # Fallback: if bin edges are not unique even after drop, assign middle quintile
         if "Bin edges must be unique" in str(e):
-            return pd.Series(3, index=metrics_df.index)
+            return pd.Series(3, index=metrics_df.index, dtype="int64")
         else:
             raise
 
