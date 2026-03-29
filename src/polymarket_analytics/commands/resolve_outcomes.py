@@ -73,6 +73,8 @@ async def _resolve_outcomes_async(ctx, db_path: str):
         {"niche_slug": niche_slug},
     )
 
+    db.conn.commit()
+
     # Get count of updated rows
     updated_count = result.rowcount
 

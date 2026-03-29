@@ -182,6 +182,8 @@ async def _ingest_events_async(ctx, db_path: str):
                 record,
             )
 
+        db.conn.commit()
+
         click.echo(f"Ingested {len(markets)} markets for niche '{niche_slug}'")
         click.echo(f"  - gamma_events: {len(gamma_events_records)} records")
         click.echo(f"  - markets: {len(markets_records)} records")
