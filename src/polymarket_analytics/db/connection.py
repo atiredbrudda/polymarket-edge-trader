@@ -1,0 +1,23 @@
+"""Database connection factory with WAL mode and foreign key enforcement."""
+
+from pathlib import Path
+
+import sqlite_utils
+
+
+def get_db(db_path: Path) -> sqlite_utils.Database:
+    """Create database connection with WAL mode and foreign key enforcement.
+
+    Args:
+        db_path: Path to SQLite database file
+
+    Returns:
+        sqlite_utils.Database instance with WAL mode enabled and FK enforcement
+
+    WAL mode is enabled at connection time and persists in the database file.
+    Foreign keys are enforced on every connection via PRAGMA.
+    """
+    db = sqlite_utils.Database(db_path)
+    db.enable_wal()  # Enable WAL mode for read concurrency (SCHM-02)
+    db.execute("PRAGMA foreign_keys = ON")  # Enforce foreign key constraints
+    return db
