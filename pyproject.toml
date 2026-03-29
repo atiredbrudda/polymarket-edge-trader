@@ -14,5 +14,5 @@ dependencies = [
     "sqlite-utils>=3.39",
 ]
 
-[tool.uv]
-packages = ["src/polymarket_analytics"]
+[project.scripts]
+polymarket = "src.polymarket_analytics.cli:cli"
