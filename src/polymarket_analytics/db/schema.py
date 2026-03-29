@@ -9,6 +9,8 @@ def create_core_tables(db):
     """Create all 9 core tables with foreign keys.
 
     Tables are created in dependency order to satisfy foreign key constraints.
+    For tables requiring NUMERIC affinity on price/size columns, raw SQL is used
+    after initial table creation to enforce proper column types.
     """
     # 1. traders - base table for all trader data
     db.table("traders").create(
@@ -83,6 +85,7 @@ def create_core_tables(db):
             "question": str,  # Market question
             "niche_slug": str,  # e.g., "esports"
             "node_path": str,  # Hierarchy path
+            "market_type": str,  # Type of market (e.g., "binary", "categorical")
             "created_at": str,  # ISO timestamp
         },
         pk="token_id",
@@ -91,67 +94,61 @@ def create_core_tables(db):
     )
 
     # 6. trades - individual trade records
-    db.table("trades").create(
-        {
-            "trade_id": str,  # Primary key - unique trade ID
-            "token_id": str,  # FK to token_catalog.token_id
-            "timestamp": str,  # ISO timestamp
-            "side": str,  # YES or NO
-            "price": str,  # NUMERIC(10,6) - Trade price (using str for NUMERIC affinity)
-            "size": str,  # NUMERIC(20,6) - Trade size (using str for NUMERIC affinity)
-            "market_id": str,  # Denormalized - markets.condition_id
-            "trader_address": str,  # Wallet address of trader (required for build-positions aggregation)
-        },
-        pk="trade_id",
-        foreign_keys=[("token_id", "token_catalog", "token_id")],
-        if_not_exists=True,
-    )
+    # Use raw SQL for NUMERIC affinity on price/size columns
+    db.execute("""
+        CREATE TABLE IF NOT EXISTS trades (
+            trade_id TEXT PRIMARY KEY,
+            token_id TEXT REFERENCES token_catalog(token_id),
+            timestamp TEXT,
+            side TEXT,
+            price NUMERIC(10,6),
+            size NUMERIC(20,6),
+            market_id TEXT,
+            trader_address TEXT
+        )
+    """)
 
     # 7. positions - trader positions aggregated from trades
-    db.table("positions").create(
-        {
-            "id": str,  # Primary key - hash
-            "trader_address": str,  # FK to traders.address
-            "market_id": str,  # Market reference - markets.condition_id
-            "direction": str,  # LONG/SHORT/FLAT
-            "size": str,  # NUMERIC(20,6) - Position size (using str for NUMERIC affinity)
-            "avg_entry_price": str,  # NUMERIC(10,6) - Average entry price (using str for NUMERIC affinity)
-            "entry_timestamp": str,  # ISO timestamp - first trade in position
-            "last_trade_timestamp": str,  # ISO timestamp - most recent trade (for 30-day window filter)
-            "trade_count": int,  # Number of trades in this position
-            "resolved": bool,  # Whether position is resolved
-            "outcome": str,  # WIN/LOSS/NULL - result of the position
-            "pnl": str,  # NUMERIC(20,6) - Profit/loss (using str for NUMERIC affinity)
-        },
-        pk="id",
-        foreign_keys=[("trader_address", "traders", "address")],
-        if_not_exists=True,
-    )
+    # Use raw SQL for NUMERIC affinity on price/size/pnl columns
+    db.execute("""
+        CREATE TABLE IF NOT EXISTS positions (
+            id TEXT PRIMARY KEY,
+            trader_address TEXT REFERENCES traders(address),
+            market_id TEXT,
+            direction TEXT,
+            size NUMERIC(20,6),
+            avg_entry_price NUMERIC(10,6),
+            entry_timestamp TEXT,
+            last_trade_timestamp TEXT,
+            trade_count INTEGER,
+            resolved INTEGER,
+            outcome TEXT,
+            pnl NUMERIC(20,6)
+        )
+    """)
 
     # 8. lift_scores - trader performance scores
-    db.table("lift_scores").create(
-        {
-            "id": str,  # Primary key - hash
-            "trader_address": str,  # FK to traders.address
-            "category": str,  # Niche slug (esports, nba, etc.)
-            "composite_score": str,  # NUMERIC - Combined z-score (clv_zscore + roi_zscore + sharpe_zscore)
-            "clv_raw": str,  # NUMERIC - Raw CLV (close_price - entry_price) / entry_price
-            "clv_zscore": str,  # Z-score for CLV across all traders
-            "roi_raw": str,  # NUMERIC - Raw ROI (total_pnl / total_capital_deployed)
-            "roi_zscore": str,  # Z-score for ROI across all traders
-            "sharpe_raw": str,  # NUMERIC - Raw Sharpe ratio (mean(returns) / std(returns))
-            "sharpe_zscore": str,  # Z-score for Sharpe across all traders
-            "quintile": int,  # 1-5 ranking (5 = top 20% = smart money)
-            "position_count": int,  # Number of resolved positions in window
-            "total_pnl": str,  # NUMERIC - Total PnL in window
-            "window_start": str,  # ISO timestamp - start of scoring window
-            "window_end": str,  # ISO timestamp - end of scoring window
-            "computed_at": str,  # ISO timestamp - when score was computed
-        },
-        pk="id",
-        foreign_keys=[("trader_address", "traders", "address")],
-        if_not_exists=True,
-    )
+    # Use raw SQL for NUMERIC columns
+    db.execute("""
+        CREATE TABLE IF NOT EXISTS lift_scores (
+            id TEXT PRIMARY KEY,
+            trader_address TEXT REFERENCES traders(address),
+            category TEXT,
+            composite_score NUMERIC,
+            clv_raw NUMERIC,
+            clv_zscore NUMERIC,
+            roi_raw NUMERIC,
+            roi_zscore NUMERIC,
+            sharpe_raw NUMERIC,
+            sharpe_zscore NUMERIC,
+            quintile INTEGER,
+            position_count INTEGER,
+            total_pnl NUMERIC,
+            window_start TEXT,
+            window_end TEXT,
+            computed_at TEXT
+        )
+    """)
 
     # 9. signals - smart money consensus signals
     db.table("signals").create(
@@ -194,7 +191,7 @@ def create_indexes(db):
         ["active"], if_not_exists=True, index_name="idx_gamma_active"
     )
 
-    # trades indexes
+    # trades indexes - includes trader_address for build-positions aggregation
     db["trades"].create_index(
         ["token_id"], if_not_exists=True, index_name="idx_trades_token"
     )
@@ -203,6 +200,23 @@ def create_indexes(db):
     )
     db["trades"].create_index(
         ["timestamp"], if_not_exists=True, index_name="idx_trades_timestamp"
+    )
+    db["trades"].create_index(
+        ["trader_address"], if_not_exists=True, index_name="idx_trades_trader_address"
+    )
+    # Composite index for build-positions query pattern
+    db["trades"].create_index(
+        ["trader_address", "market_id"],
+        if_not_exists=True,
+        index_name="idx_trades_trader_market",
+    )
+
+    # market_entities - UNIQUE constraint on condition_id via unique index
+    db["market_entities"].create_index(
+        ["condition_id"],
+        if_not_exists=True,
+        index_name="idx_market_entities_condition_unique",
+        unique=True,
     )
 
     # positions indexes
