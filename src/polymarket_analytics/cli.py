@@ -25,3 +25,8 @@ def cli(ctx, niche: str):
     config_path = Path(__file__).parent.parent.parent / "niches" / f"{niche}.yaml"
     config = load_niche_config(config_path)
     ctx.obj["config"] = config
+
+
+# Import commands after cli is defined to register them
+# This must be at the end to avoid circular imports
+import src.polymarket_analytics.commands  # noqa: E402,F401
