@@ -95,6 +95,7 @@ def create_core_tables(db):
 
     # 6. trades - individual trade records
     # Use raw SQL for NUMERIC affinity on price/size columns
+    # trade_id PRIMARY KEY enforces UNIQUE constraint for INSERT OR IGNORE idempotency
     db.execute("""
         CREATE TABLE IF NOT EXISTS trades (
             trade_id TEXT PRIMARY KEY,
