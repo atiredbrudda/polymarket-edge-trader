@@ -242,6 +242,7 @@ def test_classify_tokens_uses_clob_token_ids(test_db: sqlite_utils.Database, tmp
             "category": "esports",
             "active": True,
             "tokens": "[]",
+            "event_slug": None,
         },
         pk="condition_id",
     )
@@ -269,7 +270,7 @@ def test_classify_tokens_uses_clob_token_ids(test_db: sqlite_utils.Database, tmp
 
     async def run_test():
         with patch(
-            "src.polymarket_analytics.api.gamma.GammaAPIClient.fetch_markets",
+            "polymarket_analytics.commands.classify_tokens.GammaAPIClient.fetch_markets",
             new_callable=AsyncMock,
         ) as mock_fetch:
             mock_fetch.return_value = [mock_market]
