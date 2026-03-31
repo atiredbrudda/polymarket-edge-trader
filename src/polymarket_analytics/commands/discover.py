@@ -62,7 +62,9 @@ def _fetch_market_trades(condition_id: str, limit: int = 500) -> List[dict]:
     response.raise_for_status()
     trades = response.json()
     # Filter to this market only (API may return cross-market trades)
-    return [t for t in trades if t.get("conditionId", "").lower() == condition_id.lower()]
+    return [
+        t for t in trades if t.get("conditionId", "").lower() == condition_id.lower()
+    ]
 
 
 @cli.command()
@@ -120,7 +122,9 @@ def discover(ctx, db_path: str, closing_within: Optional[int], use_llm: bool) ->
     async def _fetch():
         client = GammaAPIClient()
         try:
-            return await client.fetch_markets(config.tag_id, closed=False, on_page=on_page)
+            return await client.fetch_markets(
+                config.tag_id, closed=False, on_page=on_page
+            )
         finally:
             await client.close()
 
@@ -145,10 +149,12 @@ def discover(ctx, db_path: str, closing_within: Optional[int], use_llm: bool) ->
         cutoff = now_utc + timedelta(hours=closing_within)
         before = len(gamma_markets)
         gamma_markets = [
-            m for m in gamma_markets
-            if m.get("endDate") and now_utc <= datetime.fromisoformat(
-                m["endDate"].replace("Z", "+00:00")
-            ) <= cutoff
+            m
+            for m in gamma_markets
+            if m.get("endDate")
+            and now_utc
+            <= datetime.fromisoformat(m["endDate"].replace("Z", "+00:00"))
+            <= cutoff
         ]
         dropped = before - len(gamma_markets)
         console.print(
@@ -162,38 +168,48 @@ def discover(ctx, db_path: str, closing_within: Optional[int], use_llm: bool) ->
     # -------------------------------------------------------------------------
     # Step 2: Upsert live markets into DB
     # -------------------------------------------------------------------------
-    console.print(f"[bold]Step 2/4[/bold] Saving {len(gamma_markets):,} markets to DB...")
+    console.print(
+        f"[bold]Step 2/4[/bold] Saving {len(gamma_markets):,} markets to DB..."
+    )
 
     now_iso = now_utc.isoformat()
-    markets_records = [
-        {
-            "condition_id": m["conditionId"],
-            "question": m.get("question", ""),
-            "outcome": None,
-            "resolved": False,
-            "niche_slug": niche,
-            "created_at": now_iso,
-            "end_date": m.get("endDate"),
-            "category": niche,
-            "active": True,
-            "tokens": json.dumps(m.get("tokens", [])),
-        }
-        for m in gamma_markets
-        if m.get("conditionId")
-    ]
+    markets_records = []
+    for m in gamma_markets:
+        if not m.get("conditionId"):
+            continue
+        events = m.get("events", [])
+        event_slug = None
+        if events and len(events) > 0:
+            event_slug = events[0].get("slug")
+        markets_records.append(
+            {
+                "condition_id": m["conditionId"],
+                "question": m.get("question", ""),
+                "outcome": None,
+                "resolved": False,
+                "niche_slug": niche,
+                "created_at": now_iso,
+                "end_date": m.get("endDate"),
+                "category": niche,
+                "active": True,
+                "tokens": json.dumps(m.get("tokens", [])),
+                "event_slug": event_slug,
+            }
+        )
 
     with db.conn:
         db.conn.executemany(
             """
             INSERT INTO markets (condition_id, question, outcome, resolved, niche_slug,
-                                 created_at, end_date, category, active, tokens)
+                                 created_at, end_date, category, active, tokens, event_slug)
             VALUES (:condition_id, :question, :outcome, :resolved, :niche_slug,
-                    :created_at, :end_date, :category, :active, :tokens)
+                    :created_at, :end_date, :category, :active, :tokens, :event_slug)
             ON CONFLICT(condition_id) DO UPDATE SET
                 question = excluded.question,
                 end_date = excluded.end_date,
                 active   = excluded.active,
-                tokens   = excluded.tokens
+                tokens   = excluded.tokens,
+                event_slug = excluded.event_slug
             """,
             markets_records,
         )
@@ -243,6 +259,30 @@ def discover(ctx, db_path: str, closing_within: Optional[int], use_llm: bool) ->
         f"  [green]✓[/green] {len(existing_entity_cids):,} markets already have entities extracted"
     )
 
+    # Build cid → event_slug map from the markets we just upserted
+    cid_to_event_slug: Dict[str, Optional[str]] = {
+        r["condition_id"]: r["event_slug"] for r in markets_records
+    }
+
+    # Pre-seed event_slug → entities from DB (siblings extracted in prior runs)
+    event_slug_entities: Dict[str, Dict[str, Any]] = {}
+    rows = db.execute("""
+        SELECT m.event_slug, me.game, me.team_a, me.team_b, me.tournament, me.market_type
+        FROM market_entities me
+        JOIN markets m ON me.condition_id = m.condition_id
+        WHERE m.event_slug IS NOT NULL AND me.game IS NOT NULL
+    """).fetchall()
+    for row in rows:
+        slug = row[0]
+        if slug and slug not in event_slug_entities:
+            event_slug_entities[slug] = {
+                "game": row[1],
+                "team_a": row[2],
+                "team_b": row[3],
+                "tournament": row[4],
+                "market_type": row[5],
+            }
+
     # Setup entity extraction
     pattern_matcher = EntityPatternMatcher()
     llm_fallback: Optional[LLMFallback] = None
@@ -263,6 +303,7 @@ def discover(ctx, db_path: str, closing_within: Optional[int], use_llm: bool) ->
     entity_records: List[Dict[str, Any]] = []
     llm_count = 0
     pattern_count = 0
+    event_slug_count = 0
     new_markets_count = 0
     skipped_count = 0
     error_count = 0
@@ -303,7 +344,9 @@ def discover(ctx, db_path: str, closing_within: Optional[int], use_llm: bool) ->
                 closing_soon = False
                 if end_date_str:
                     try:
-                        end_dt = datetime.fromisoformat(end_date_str.replace("Z", "+00:00"))
+                        end_dt = datetime.fromisoformat(
+                            end_date_str.replace("Z", "+00:00")
+                        )
                         closing_soon = end_dt <= refresh_cutoff
                     except ValueError:
                         pass
@@ -339,7 +382,8 @@ def discover(ctx, db_path: str, closing_within: Optional[int], use_llm: bool) ->
                 try:
                     ts_iso = (
                         datetime.fromtimestamp(raw_ts, tz=timezone.utc).isoformat()
-                        if raw_ts else now_iso
+                        if raw_ts
+                        else now_iso
                     )
                 except (ValueError, OSError):
                     ts_iso = now_iso
@@ -361,10 +405,7 @@ def discover(ctx, db_path: str, closing_within: Optional[int], use_llm: bool) ->
                 # Build trade record (same format as backfill)
                 raw_token_id = trade.get("asset") or trade.get("asset_id")
                 tx_hash = trade.get("transactionHash", "")
-                trade_id = (
-                    tx_hash
-                    or f"{address}_{trade.get('timestamp', '')}_{cid}"
-                )
+                trade_id = tx_hash or f"{address}_{trade.get('timestamp', '')}_{cid}"
 
                 # Resolve market_id via token catalog; fall back to conditionId
                 if raw_token_id and raw_token_id in catalog_by_token:
@@ -372,7 +413,7 @@ def discover(ctx, db_path: str, closing_within: Optional[int], use_llm: bool) ->
                     token_id_val = raw_token_id
                 else:
                     resolved_market_id = cid  # conditionId is already known
-                    token_id_val = None        # not in catalog yet; skip FK
+                    token_id_val = None  # not in catalog yet; skip FK
 
                 try:
                     price = Decimal(str(trade.get("price", "0")))
@@ -386,16 +427,18 @@ def discover(ctx, db_path: str, closing_within: Optional[int], use_llm: bool) ->
                 except InvalidOperation:
                     size = Decimal("0")
 
-                trade_records.append({
-                    "trade_id": trade_id,
-                    "token_id": token_id_val,
-                    "timestamp": ts_iso,
-                    "side": "BUY" if trade.get("side") == "BUY" else "SELL",
-                    "price": str(price),
-                    "size": str(size),
-                    "market_id": resolved_market_id,
-                    "trader_address": address,
-                })
+                trade_records.append(
+                    {
+                        "trade_id": trade_id,
+                        "token_id": token_id_val,
+                        "timestamp": ts_iso,
+                        "side": "BUY" if trade.get("side") == "BUY" else "SELL",
+                        "price": str(price),
+                        "size": str(size),
+                        "market_id": resolved_market_id,
+                        "trader_address": address,
+                    }
+                )
 
             # --- Entity extraction ---
             if cid not in existing_entity_cids:
@@ -404,12 +447,24 @@ def discover(ctx, db_path: str, closing_within: Optional[int], use_llm: bool) ->
                     description=f"[cyan]⚙ entities[/cyan]  [dim]{question[:55]}[/dim]",
                 )
                 entities = pattern_matcher.extract(question)
-                needs_llm = (
-                    use_llm
-                    and llm_fallback is not None
-                    and (entities.get("game") is None or entities.get("team_a") is None)
+                pattern_incomplete = (
+                    entities.get("game") is None or entities.get("team_a") is None
                 )
-                if needs_llm:
+
+                # event_slug fallback: inherit entities from a sibling market
+                if pattern_incomplete:
+                    slug = cid_to_event_slug.get(cid)
+                    if slug and slug in event_slug_entities:
+                        entities = event_slug_entities[slug]
+                        event_slug_count += 1
+                        pattern_incomplete = False
+
+                # LLM fallback: only if pattern and event_slug both failed
+                if (
+                    pattern_incomplete
+                    and use_llm
+                    and llm_fallback is not None
+                ):
                     progress.update(
                         task,
                         description=f"[cyan]⚙ LLM[/cyan]  [dim]{question[:58]}[/dim]",
@@ -420,18 +475,27 @@ def discover(ctx, db_path: str, closing_within: Optional[int], use_llm: bool) ->
                     except Exception as e:
                         console.print(f"  [red]✗ LLM {cid[:10]}...: {e}[/red]")
 
-                if entities.get("game") is not None or entities.get("team_a") is not None:
+                if (
+                    entities.get("game") is not None
+                    or entities.get("team_a") is not None
+                ):
                     pattern_count += 1
+                    # Cache for siblings processed later in this run
+                    slug = cid_to_event_slug.get(cid)
+                    if slug and slug not in event_slug_entities:
+                        event_slug_entities[slug] = entities
 
-                entity_records.append({
-                    "id": _entity_id(cid, entities),
-                    "condition_id": cid,
-                    "game": entities.get("game"),
-                    "team_a": entities.get("team_a"),
-                    "team_b": entities.get("team_b"),
-                    "tournament": entities.get("tournament"),
-                    "market_type": entities.get("market_type"),
-                })
+                entity_records.append(
+                    {
+                        "id": _entity_id(cid, entities),
+                        "condition_id": cid,
+                        "game": entities.get("game"),
+                        "team_a": entities.get("team_a"),
+                        "team_b": entities.get("team_b"),
+                        "tournament": entities.get("tournament"),
+                        "market_type": entities.get("market_type"),
+                    }
+                )
 
             progress.update(task, description=_desc())
             progress.advance(task)
@@ -440,7 +504,10 @@ def discover(ctx, db_path: str, closing_within: Optional[int], use_llm: bool) ->
     # Step 5: Batch write to DB
     # -------------------------------------------------------------------------
     if trade_records:
-        with console.status(f"[bold green]Writing {len(trade_records):,} trades to DB...", spinner="dots"):
+        with console.status(
+            f"[bold green]Writing {len(trade_records):,} trades to DB...",
+            spinner="dots",
+        ):
             with db.conn:
                 db.conn.executemany(
                     """
@@ -453,7 +520,9 @@ def discover(ctx, db_path: str, closing_within: Optional[int], use_llm: bool) ->
         console.print(f"  [green]✓[/green] {len(trade_records):,} trades written")
 
     if traders:
-        with console.status(f"[bold green]Writing {len(traders):,} traders to DB...", spinner="dots"):
+        with console.status(
+            f"[bold green]Writing {len(traders):,} traders to DB...", spinner="dots"
+        ):
             with db.conn:
                 db.conn.executemany(
                     """
@@ -468,7 +537,10 @@ def discover(ctx, db_path: str, closing_within: Optional[int], use_llm: bool) ->
         console.print(f"  [green]✓[/green] {len(traders):,} traders written")
 
     if entity_records:
-        with console.status(f"[bold green]Writing {len(entity_records):,} entities to DB...", spinner="dots"):
+        with console.status(
+            f"[bold green]Writing {len(entity_records):,} entities to DB...",
+            spinner="dots",
+        ):
             with db.conn:
                 db.conn.executemany(
                     """
@@ -495,6 +567,6 @@ def discover(ctx, db_path: str, closing_within: Optional[int], use_llm: bool) ->
         f"  Errors:                {error_count:,}\n"
         f"  Trades stored:         {len(trade_records):,}\n"
         f"  Entities extracted:    {len(entity_records):,} "
-        f"(pattern: {pattern_count:,}, LLM: {llm_count:,})\n"
+        f"(pattern: {pattern_count - event_slug_count:,}, event_slug: {event_slug_count:,}, LLM: {llm_count:,})\n"
         f"  Traders discovered:    {len(traders):,}"
     )
