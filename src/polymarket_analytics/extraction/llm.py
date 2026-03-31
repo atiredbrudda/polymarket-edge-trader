@@ -12,6 +12,9 @@ import os
 from typing import Any, Dict, Optional
 
 from anthropic import Anthropic
+from dotenv import load_dotenv
+
+load_dotenv()
 
 # Prompt template for entity extraction
 EXTRACTION_PROMPT = """
