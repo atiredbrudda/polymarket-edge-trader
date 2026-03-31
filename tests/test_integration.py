@@ -173,9 +173,10 @@ def test_schema_matches_guide(test_db: sqlite_utils.Database):
     trades_cols = [col.name for col in test_db["trades"].columns]
     assert "trader_address" in trades_cols, "trades missing trader_address"
 
-    # markets must have end_date for score 30-day window
+    # markets must have end_date for score 30-day window and event_slug for parent-child links
     markets_cols = [col.name for col in test_db["markets"].columns]
     assert "end_date" in markets_cols, "markets missing end_date"
+    assert "event_slug" in markets_cols, "markets missing event_slug"
 
     # market_entities must have team_a/team_b (not team)
     entities_cols = [col.name for col in test_db["market_entities"].columns]
@@ -241,6 +242,7 @@ def test_classify_tokens_uses_clob_token_ids(test_db: sqlite_utils.Database, tmp
             "category": "esports",
             "active": True,
             "tokens": "[]",
+            "event_slug": None,
         },
         pk="condition_id",
     )
@@ -268,7 +270,7 @@ def test_classify_tokens_uses_clob_token_ids(test_db: sqlite_utils.Database, tmp
 
     async def run_test():
         with patch(
-            "src.polymarket_analytics.api.gamma.GammaAPIClient.fetch_markets",
+            "polymarket_analytics.commands.classify_tokens.GammaAPIClient.fetch_markets",
             new_callable=AsyncMock,
         ) as mock_fetch:
             mock_fetch.return_value = [mock_market]
@@ -291,3 +293,129 @@ def test_classify_tokens_uses_clob_token_ids(test_db: sqlite_utils.Database, tmp
         assert ":0" not in token_id and ":1" not in token_id, (
             f"Synthetic token ID found: {token_id}"
         )
+
+
+def test_migration_adds_event_slug_to_existing_db(tmp_path):
+    """Migration: init_database adds event_slug column to pre-existing markets table.
+
+    Simulates upgrading a database created before event_slug was introduced.
+    Without run_migrations(), the INSERT in ingest-events/discover would crash
+    with 'table markets has no column named event_slug'.
+    """
+    from polymarket_analytics.db.schema import init_database
+
+    db_path = tmp_path / "old.db"
+
+    # Build old-schema markets table without event_slug
+    old_db = sqlite_utils.Database(db_path)
+    old_db["markets"].create(
+        {
+            "condition_id": str,
+            "question": str,
+            "outcome": str,
+            "resolved": bool,
+            "niche_slug": str,
+            "created_at": str,
+            "end_date": str,
+            "category": str,
+            "active": bool,
+            "tokens": str,
+        },
+        pk="condition_id",
+    )
+    assert "event_slug" not in old_db["markets"].columns_dict
+
+    # Run init_database — migration must add the column
+    db = init_database(db_path)
+    assert "event_slug" in db["markets"].columns_dict
+
+
+def test_event_slug_stored_and_retrieved(test_db: sqlite_utils.Database):
+    """event_slug is persisted to markets table and queryable."""
+    test_db["markets"].insert(
+        {
+            "condition_id": "0xprop001",
+            "question": "Total Kills Over/Under 34.5 in Game 1?",
+            "outcome": None,
+            "resolved": False,
+            "niche_slug": "esports",
+            "created_at": "2025-01-01T00:00:00Z",
+            "end_date": "2025-12-31T23:59:59Z",
+            "category": "esports",
+            "active": True,
+            "tokens": "[]",
+            "event_slug": "faze-vs-navi-blast-spring-2025",
+        },
+        pk="condition_id",
+    )
+    row = test_db["markets"].get("0xprop001")
+    assert row["event_slug"] == "faze-vs-navi-blast-spring-2025"
+
+
+def test_event_slug_null_when_no_parent_event(test_db: sqlite_utils.Database):
+    """event_slug is NULL for standalone markets with no events array."""
+    test_db["markets"].insert(
+        {
+            "condition_id": "0xstandalone",
+            "question": "Will FaZe win IEM Katowice 2025?",
+            "outcome": None,
+            "resolved": False,
+            "niche_slug": "esports",
+            "created_at": "2025-01-01T00:00:00Z",
+            "end_date": "2025-12-31T23:59:59Z",
+            "category": "esports",
+            "active": True,
+            "tokens": "[]",
+            "event_slug": None,
+        },
+        pk="condition_id",
+    )
+    row = test_db["markets"].get("0xstandalone")
+    assert row["event_slug"] is None
+
+
+def test_event_slug_upsert_updates_existing_row(test_db: sqlite_utils.Database):
+    """ON CONFLICT upsert correctly refreshes event_slug on re-ingestion."""
+    base = {
+        "condition_id": "0xupsert",
+        "question": "Match winner?",
+        "outcome": None,
+        "resolved": False,
+        "niche_slug": "esports",
+        "created_at": "2025-01-01T00:00:00Z",
+        "end_date": "2025-12-31T23:59:59Z",
+        "category": "esports",
+        "active": True,
+        "tokens": "[]",
+    }
+
+    # First insert: no event_slug
+    test_db.conn.execute(
+        """
+        INSERT INTO markets (condition_id, question, outcome, resolved, niche_slug,
+                             created_at, end_date, category, active, tokens, event_slug)
+        VALUES (:condition_id, :question, :outcome, :resolved, :niche_slug,
+                :created_at, :end_date, :category, :active, :tokens, :event_slug)
+        ON CONFLICT(condition_id) DO UPDATE SET event_slug = excluded.event_slug
+        """,
+        {**base, "event_slug": None},
+    )
+    test_db.conn.commit()
+    assert test_db["markets"].get("0xupsert")["event_slug"] is None
+
+    # Second insert: event_slug now known
+    test_db.conn.execute(
+        """
+        INSERT INTO markets (condition_id, question, outcome, resolved, niche_slug,
+                             created_at, end_date, category, active, tokens, event_slug)
+        VALUES (:condition_id, :question, :outcome, :resolved, :niche_slug,
+                :created_at, :end_date, :category, :active, :tokens, :event_slug)
+        ON CONFLICT(condition_id) DO UPDATE SET event_slug = excluded.event_slug
+        """,
+        {**base, "event_slug": "faze-vs-navi-blast-spring-2025"},
+    )
+    test_db.conn.commit()
+    assert (
+        test_db["markets"].get("0xupsert")["event_slug"]
+        == "faze-vs-navi-blast-spring-2025"
+    )
