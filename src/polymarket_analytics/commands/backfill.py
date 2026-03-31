@@ -281,90 +281,90 @@ async def backfill_async(ctx, db_path: str) -> None:
     ))
 
     if not traders:
-        console.print("[green]All traders already backfilled.[/green]")
-        return
+        console.print("[green]All traders already backfilled. Skipping to entity extraction.[/green]")
+    else:
+        console.print(f"[bold]Step 1/2[/bold] Fetching trades for {len(traders):,} traders...")
 
-    console.print(f"[bold]Step 1/2[/bold] Fetching trades for {len(traders):,} traders...")
+    if traders:
+        # Initialize API clients
+        data_client = DataAPIClient()
+        graph_client = GraphAPIClient(api_key=None)
 
-    # Initialize API clients
-    data_client = DataAPIClient()
-    graph_client = GraphAPIClient(api_key=None)
+        start_time = time.time()
+        total_stats = {
+            "traders_processed": 0,
+            "trades_ingested": 0,
+            "trades_skipped": 0,
+            "graph_fallbacks": 0,
+            "errors": 0,
+        }
 
-    start_time = time.time()
-    total_stats = {
-        "traders_processed": 0,
-        "trades_ingested": 0,
-        "trades_skipped": 0,
-        "graph_fallbacks": 0,
-        "errors": 0,
-    }
+        def _desc() -> str:
+            return (
+                f"[cyan]Traders[/cyan]  "
+                f"[dim]ingested: {total_stats['trades_ingested']:,} | "
+                f"skipped: {total_stats['trades_skipped']:,} | "
+                f"graph fallbacks: {total_stats['graph_fallbacks']:,} | "
+                f"errors: {total_stats['errors']:,}[/dim]"
+            )
 
-    def _desc() -> str:
-        return (
-            f"[cyan]Traders[/cyan]  "
-            f"[dim]ingested: {total_stats['trades_ingested']:,} | "
-            f"skipped: {total_stats['trades_skipped']:,} | "
-            f"graph fallbacks: {total_stats['graph_fallbacks']:,} | "
-            f"errors: {total_stats['errors']:,}[/dim]"
-        )
+        try:
+            with Progress(
+                SpinnerColumn(),
+                TextColumn("{task.description}"),
+                BarColumn(),
+                MofNCompleteColumn(),
+                TaskProgressColumn(),
+                TimeElapsedColumn(),
+                console=console,
+                transient=False,
+            ) as progress:
+                task = progress.add_task(_desc(), total=len(traders))
 
-    try:
-        with Progress(
-            SpinnerColumn(),
-            TextColumn("{task.description}"),
-            BarColumn(),
-            MofNCompleteColumn(),
-            TaskProgressColumn(),
-            TimeElapsedColumn(),
-            console=console,
-            transient=False,
-        ) as progress:
-            task = progress.add_task(_desc(), total=len(traders))
-
-            for trader in traders:
-                trader_address = trader["address"]
-                progress.update(
-                    task,
-                    description=f"[cyan]↓ trades[/cyan]  [dim]{trader_address[:10]}...[/dim]",
-                )
-
-                try:
-                    stats = await backfill_trader(
-                        db,
-                        trader_address,
-                        data_client,
-                        graph_client,
+                for trader in traders:
+                    trader_address = trader["address"]
+                    progress.update(
+                        task,
+                        description=f"[cyan]↓ trades[/cyan]  [dim]{trader_address[:10]}...[/dim]",
                     )
 
-                    total_stats["traders_processed"] += 1
-                    total_stats["trades_ingested"] += stats["ingested"]
-                    total_stats["trades_skipped"] += stats["skipped"]
-                    if stats["fallback"]:
-                        total_stats["graph_fallbacks"] += 1
+                    try:
+                        stats = await backfill_trader(
+                            db,
+                            trader_address,
+                            data_client,
+                            graph_client,
+                        )
 
-                except click.ClickException:
-                    raise
-                except Exception as e:
-                    total_stats["errors"] += 1
-                    total_stats["traders_processed"] += 1
-                    console.print(f"  [red]✗ {trader_address[:10]}...: {e}[/red]")
+                        total_stats["traders_processed"] += 1
+                        total_stats["trades_ingested"] += stats["ingested"]
+                        total_stats["trades_skipped"] += stats["skipped"]
+                        if stats["fallback"]:
+                            total_stats["graph_fallbacks"] += 1
 
-                progress.update(task, description=_desc())
-                progress.advance(task)
+                    except click.ClickException:
+                        raise
+                    except Exception as e:
+                        total_stats["errors"] += 1
+                        total_stats["traders_processed"] += 1
+                        console.print(f"  [red]✗ {trader_address[:10]}...: {e}[/red]")
 
-        elapsed = time.time() - start_time
-        console.print(
-            f"\n[bold green]Backfill complete[/bold green] ({elapsed:.1f}s)\n"
-            f"  Traders processed:    {total_stats['traders_processed']:,}\n"
-            f"  Trades ingested:      {total_stats['trades_ingested']:,}\n"
-            f"  Trades skipped:       {total_stats['trades_skipped']:,}\n"
-            f"  Graph fallbacks used: {total_stats['graph_fallbacks']:,}\n"
-            f"  Errors:               {total_stats['errors']:,}"
-        )
+                    progress.update(task, description=_desc())
+                    progress.advance(task)
 
-    finally:
-        await data_client.close()
-        await graph_client.close()
+            elapsed = time.time() - start_time
+            console.print(
+                f"\n[bold green]Backfill complete[/bold green] ({elapsed:.1f}s)\n"
+                f"  Traders processed:    {total_stats['traders_processed']:,}\n"
+                f"  Trades ingested:      {total_stats['trades_ingested']:,}\n"
+                f"  Trades skipped:       {total_stats['trades_skipped']:,}\n"
+                f"  Graph fallbacks used: {total_stats['graph_fallbacks']:,}\n"
+                f"  Errors:               {total_stats['errors']:,}"
+            )
+
+        finally:
+            await data_client.close()
+            await graph_client.close()
 
     # -------------------------------------------------------------------------
     # Step 2: Post-backfill entity extraction
