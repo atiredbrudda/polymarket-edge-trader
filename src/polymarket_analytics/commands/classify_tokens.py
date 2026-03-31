@@ -136,6 +136,13 @@ async def _classify_tokens_async(ctx, db_path: str):
                     }
                 )
 
+        # Filter to condition_ids that exist in markets (FK constraint)
+        known_cids = set(
+            row[0] for row in db.execute("SELECT condition_id FROM markets").fetchall()
+        )
+        filtered_records = [r for r in token_catalog_records if r["condition_id"] in known_cids]
+        skipped = len(token_catalog_records) - len(filtered_records)
+
         with db.conn:
             db.conn.executemany(
                 """
@@ -148,11 +155,12 @@ async def _classify_tokens_async(ctx, db_path: str):
                     node_path = excluded.node_path,
                     market_type = excluded.market_type
                 """,
-                token_catalog_records,
+                filtered_records,
             )
 
         click.echo(
-            f"Built token catalog with {len(token_catalog_records)} entries for niche '{niche_slug}'"
+            f"Built token catalog with {len(filtered_records)} entries for niche '{niche_slug}'"
+            + (f" ({skipped} skipped — not yet in markets table)" if skipped else "")
         )
 
     finally:
