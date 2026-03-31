@@ -9,7 +9,10 @@ Usage:
 """
 
 import asyncio
-from datetime import datetime, timezone
+import hashlib
+import json
+import time
+from datetime import datetime, timedelta, timezone
 from decimal import Decimal
 from pathlib import Path
 from typing import Any, Dict, List, Optional
@@ -20,6 +23,7 @@ from rich.progress import (
     BarColumn,
     MofNCompleteColumn,
     Progress,
+    SpinnerColumn,
     TaskProgressColumn,
     TimeElapsedColumn,
     TextColumn,
@@ -29,6 +33,8 @@ from polymarket_analytics.cli import cli
 from polymarket_analytics.api.data import DataAPIClient
 from polymarket_analytics.api.graph import GraphAPIClient, parse_graph_event
 from polymarket_analytics.db.schema import init_database
+from polymarket_analytics.extraction.patterns import EntityPatternMatcher
+from polymarket_analytics.extraction.llm import LLMFallback
 
 
 console = Console()
@@ -107,23 +113,42 @@ async def backfill_trader(
     """
     stats = {"ingested": 0, "skipped": 0, "fallback": False}
 
+    # Scoring window: 30 days + 10-day safeguard
+    COVERAGE_DAYS = 40
+    coverage_cutoff = datetime.now(timezone.utc) - timedelta(days=COVERAGE_DAYS)
+
     # Tier 1: Try Data API first
     api_trades = await fetch_trades_with_retry(data_client, trader_address)
 
-    # Tier 2: Graph fallback if API returns 0 trades
-    if not api_trades:
+    # Tier 2: Graph fallback if API doesn't cover the full 40-day window.
+    # "Covers" means at least one trade predates the cutoff (oldest trade >= 40 days ago).
+    # If API returns 0 trades OR all trades are within the last 40 days, use Graph.
+    def _api_covers_window(trades: list) -> bool:
+        for t in trades:
+            ts = t.get("timestamp")
+            if ts is None:
+                continue
+            try:
+                if isinstance(ts, int):
+                    trade_dt = datetime.fromtimestamp(ts, tz=timezone.utc)
+                else:
+                    trade_dt = datetime.fromisoformat(str(ts).replace("Z", "+00:00"))
+                if trade_dt <= coverage_cutoff:
+                    return True
+            except Exception:
+                continue
+        return False
+
+    needs_graph = not api_trades or not _api_covers_window(api_trades)
+
+    if needs_graph:
         stats["fallback"] = True
-        console.print(
-            f"  [yellow]API returned 0 trades for {trader_address[:8]}..., using Graph fallback[/yellow]"
-        )
         graph_events = await graph_client.fetch_trader_trades(trader_address)
-        # Parse Graph events to trade format
+        # Merge Graph trades with API trades (union — INSERT OR IGNORE deduplicates)
         for event in graph_events:
-            trade_data = parse_graph_event(event, trader_address)
-            api_trades.append(trade_data)
+            api_trades.append(parse_graph_event(event, trader_address))
 
     if not api_trades:
-        # No trades from either source
         return stats
 
     # Process trades
@@ -164,11 +189,7 @@ async def backfill_trader(
         )
 
         if not catalog_result:
-            # Token not in catalog - skip this trade (don't insert with synthetic ID)
             stats["skipped"] += 1
-            console.print(
-                f"  [yellow]Skipped trade {trade_id[:8]}...: token_id {token_id} not in catalog[/yellow]"
-            )
             continue
 
         condition_id = catalog_result[0]["condition_id"]
@@ -217,14 +238,8 @@ async def backfill_trader(
         try:
             db["trades"].insert(trade_data, replace=False)
             stats["ingested"] += 1
-        except Exception as e:
-            # UNIQUE constraint violation or other error
-            if "UNIQUE" in str(e) or "PRIMARY KEY" in str(e):
-                stats["skipped"] += 1
-            else:
-                console.print(
-                    f"  [red]Error inserting trade {trade_id[:8]}...: {e}[/red]"
-                )
+        except Exception:
+            stats["skipped"] += 1
 
     # Mark trader as backfill complete
     if stats["ingested"] > 0 or stats["skipped"] > 0:
@@ -248,48 +263,55 @@ async def backfill_async(ctx, db_path: str) -> None:
 
     db = init_database(db_path_obj)
 
-    # Dependency assertions (RESL-01, RESL-02)
     console.print("[bold]=== Backfilling Trade History ===[/bold]\n")
 
-    # Assert traders table exists
+    # Dependency assertions
     if not db["traders"].exists():
         raise click.ClickException(
             "traders table does not exist. Run discover command first."
         )
-
-    # Assert token_catalog table exists
     if not db["token_catalog"].exists():
         raise click.ClickException(
             "token_catalog table does not exist. Run classify-tokens command first."
         )
 
     # Query traders needing backfill
-    traders_query = """
-        SELECT address FROM traders WHERE backfill_complete = False OR backfill_complete IS NULL
-    """
-    traders = list(db.query(traders_query))
+    traders = list(db.query(
+        "SELECT address FROM traders WHERE backfill_complete = False OR backfill_complete IS NULL"
+    ))
 
     if not traders:
         console.print("[green]All traders already backfilled.[/green]")
         return
 
-    console.print(f"Found {len(traders)} traders needing backfill\n")
+    console.print(f"[bold]Step 1/2[/bold] Fetching trades for {len(traders):,} traders...")
 
     # Initialize API clients
     data_client = DataAPIClient()
-    graph_client = GraphAPIClient(api_key=None)  # Graph API key optional
+    graph_client = GraphAPIClient(api_key=None)
+
+    start_time = time.time()
+    total_stats = {
+        "traders_processed": 0,
+        "trades_ingested": 0,
+        "trades_skipped": 0,
+        "graph_fallbacks": 0,
+        "errors": 0,
+    }
+
+    def _desc() -> str:
+        return (
+            f"[cyan]Traders[/cyan]  "
+            f"[dim]ingested: {total_stats['trades_ingested']:,} | "
+            f"skipped: {total_stats['trades_skipped']:,} | "
+            f"graph fallbacks: {total_stats['graph_fallbacks']:,} | "
+            f"errors: {total_stats['errors']:,}[/dim]"
+        )
 
     try:
-        # Main backfill loop with progress bar
-        total_stats = {
-            "traders_processed": 0,
-            "trades_ingested": 0,
-            "trades_skipped": 0,
-            "graph_fallbacks": 0,
-        }
-
         with Progress(
-            TextColumn("[progress.description]{task.description}"),
+            SpinnerColumn(),
+            TextColumn("{task.description}"),
             BarColumn(),
             MofNCompleteColumn(),
             TaskProgressColumn(),
@@ -297,16 +319,13 @@ async def backfill_async(ctx, db_path: str) -> None:
             console=console,
             transient=False,
         ) as progress:
-            task = progress.add_task(
-                f"[cyan]Backfilling traders for {niche}",
-                total=len(traders),
-            )
+            task = progress.add_task(_desc(), total=len(traders))
 
             for trader in traders:
                 trader_address = trader["address"]
                 progress.update(
                     task,
-                    description=f"[cyan]Processing {trader_address[:8]}...",
+                    description=f"[cyan]↓ trades[/cyan]  [dim]{trader_address[:10]}...[/dim]",
                 )
 
                 try:
@@ -323,34 +342,189 @@ async def backfill_async(ctx, db_path: str) -> None:
                     if stats["fallback"]:
                         total_stats["graph_fallbacks"] += 1
 
-                    if stats["ingested"] > 0:
-                        console.print(
-                            f"  [green]+{stats['ingested']} trades[/green], "
-                            f"[yellow]{stats['skipped']} skipped[/yellow]"
-                        )
-
-                except click.ClickException as e:
-                    # Re-raise click exceptions (like max retries)
+                except click.ClickException:
                     raise
                 except Exception as e:
-                    console.print(
-                        f"  [red]Error processing {trader_address[:8]}...: {e}[/red]"
-                    )
+                    total_stats["errors"] += 1
                     total_stats["traders_processed"] += 1
+                    console.print(f"  [red]✗ {trader_address[:10]}...: {e}[/red]")
 
+                progress.update(task, description=_desc())
                 progress.advance(task)
 
-        # Print summary
-        console.print("\n[bold]Backfill complete[/bold]")
-        console.print(f"  Traders processed:      {total_stats['traders_processed']}")
-        console.print(f"  Trades ingested:        {total_stats['trades_ingested']:,}")
-        console.print(f"  Trades skipped:         {total_stats['trades_skipped']:,}")
-        console.print(f"  Graph fallbacks used:   {total_stats['graph_fallbacks']}")
+        elapsed = time.time() - start_time
+        console.print(
+            f"\n[bold green]Backfill complete[/bold green] ({elapsed:.1f}s)\n"
+            f"  Traders processed:    {total_stats['traders_processed']:,}\n"
+            f"  Trades ingested:      {total_stats['trades_ingested']:,}\n"
+            f"  Trades skipped:       {total_stats['trades_skipped']:,}\n"
+            f"  Graph fallbacks used: {total_stats['graph_fallbacks']:,}\n"
+            f"  Errors:               {total_stats['errors']:,}"
+        )
 
     finally:
-        # Cleanup clients
         await data_client.close()
         await graph_client.close()
+
+    # -------------------------------------------------------------------------
+    # Step 2: Post-backfill entity extraction
+    # Markets touched by backfill may never have been seen by discover,
+    # so they have no market_entities row → invisible to build-positions.
+    # -------------------------------------------------------------------------
+    console.print("\n[bold]Step 2/2[/bold] Post-backfill entity extraction...")
+
+    markets_needing_entities = list(db.query(
+        """
+        SELECT DISTINCT t.market_id AS condition_id, m.question, m.event_slug
+        FROM trades t
+        JOIN markets m ON m.condition_id = t.market_id
+        LEFT JOIN market_entities me ON me.condition_id = t.market_id
+        WHERE me.condition_id IS NULL
+          AND m.niche_slug = :niche
+          AND m.question IS NOT NULL
+        """,
+        {"niche": niche},
+    ))
+
+    if not markets_needing_entities:
+        console.print("  [green]✓[/green] All markets already have entities extracted.")
+        return
+
+    console.print(f"  Found {len(markets_needing_entities):,} markets without entity rows")
+
+    # Setup extractors
+    pattern_matcher = EntityPatternMatcher()
+    llm_fallback: Optional[LLMFallback] = None
+    try:
+        llm_fallback = LLMFallback()
+        console.print("  [green]✓[/green] LLM fallback ready")
+    except ValueError as e:
+        console.print(f"  [yellow]⚠ LLM unavailable: {e}[/yellow]")
+
+    # Pre-seed event_slug → entities from DB (siblings extracted in prior runs)
+    event_slug_entities: Dict[str, Dict[str, Any]] = {}
+    rows = db.execute("""
+        SELECT m.event_slug, me.game, me.team_a, me.team_b, me.tournament, me.market_type
+        FROM market_entities me
+        JOIN markets m ON me.condition_id = m.condition_id
+        WHERE m.event_slug IS NOT NULL AND me.game IS NOT NULL
+    """).fetchall()
+    for row in rows:
+        slug = row[0]
+        if slug and slug not in event_slug_entities:
+            event_slug_entities[slug] = {
+                "game": row[1], "team_a": row[2], "team_b": row[3],
+                "tournament": row[4], "market_type": row[5],
+            }
+
+    entity_records: List[Dict[str, Any]] = []
+    pattern_count = 0
+    llm_count = 0
+    event_slug_count = 0
+    llm_disabled = False  # becomes True on first API error
+
+    def _entity_id(condition_id: str, entities: Dict[str, Any]) -> str:
+        entity_str = json.dumps(entities, sort_keys=True)
+        return hashlib.sha256(f"{condition_id}:{entity_str}".encode()).hexdigest()[:16]
+
+    def _desc() -> str:
+        return (
+            f"[cyan]Entities[/cyan]  "
+            f"[dim]pattern: {pattern_count - event_slug_count:,} | "
+            f"event_slug: {event_slug_count:,} | llm: {llm_count:,} | "
+            f"total: {len(entity_records):,}[/dim]"
+        )
+
+    with Progress(
+        SpinnerColumn(),
+        TextColumn("{task.description}"),
+        BarColumn(),
+        MofNCompleteColumn(),
+        TaskProgressColumn(),
+        TimeElapsedColumn(),
+        console=console,
+        transient=False,
+    ) as progress:
+        task = progress.add_task(_desc(), total=len(markets_needing_entities))
+
+        for row in markets_needing_entities:
+            cid = row["condition_id"]
+            question = row["question"]
+            event_slug = row["event_slug"]
+
+            entities = pattern_matcher.extract(question)
+            pattern_incomplete = (
+                entities.get("game") is None or entities.get("team_a") is None
+            )
+
+            # event_slug fallback: inherit entities from a sibling market
+            if pattern_incomplete and event_slug and event_slug in event_slug_entities:
+                entities = event_slug_entities[event_slug]
+                event_slug_count += 1
+                pattern_incomplete = False
+
+            # LLM fallback: only if pattern and event_slug both failed
+            if pattern_incomplete and not llm_disabled and llm_fallback is not None:
+                progress.update(
+                    task,
+                    description=f"[cyan]⚙ LLM[/cyan]  [dim]{question[:58]}[/dim]",
+                )
+                try:
+                    entities = llm_fallback.extract(question)
+                    llm_count += 1
+                except Exception as e:
+                    llm_disabled = True
+                    llm_fallback = None
+                    console.print(
+                        f"  [yellow]⚠ LLM disabled after error: {e}[/yellow]\n"
+                        f"  [dim]Remaining markets will use pattern-only extraction.[/dim]"
+                    )
+
+            if entities.get("game") is not None or entities.get("team_a") is not None:
+                pattern_count += 1
+                # Cache for siblings processed later in this run
+                if event_slug and event_slug not in event_slug_entities:
+                    event_slug_entities[event_slug] = entities
+
+            entity_records.append({
+                "id": _entity_id(cid, entities),
+                "condition_id": cid,
+                "game": entities.get("game"),
+                "team_a": entities.get("team_a"),
+                "team_b": entities.get("team_b"),
+                "tournament": entities.get("tournament"),
+                "market_type": entities.get("market_type"),
+            })
+
+            progress.update(task, description=_desc())
+            progress.advance(task)
+
+    if entity_records:
+        with console.status(
+            f"[bold green]Writing {len(entity_records):,} entities to DB...",
+            spinner="dots",
+        ):
+            with db.conn:
+                db.conn.executemany(
+                    """
+                    INSERT INTO market_entities (id, condition_id, game, team_a, team_b, tournament, market_type)
+                    VALUES (:id, :condition_id, :game, :team_a, :team_b, :tournament, :market_type)
+                    ON CONFLICT(condition_id) DO UPDATE SET
+                        id          = excluded.id,
+                        game        = excluded.game,
+                        team_a      = excluded.team_a,
+                        team_b      = excluded.team_b,
+                        tournament  = excluded.tournament,
+                        market_type = excluded.market_type
+                    """,
+                    entity_records,
+                )
+        console.print(
+            f"  [green]✓[/green] {len(entity_records):,} entities written "
+            f"(pattern: {pattern_count - event_slug_count:,}, event_slug: {event_slug_count:,}, LLM: {llm_count:,})"
+        )
+
+    return
 
 
 @cli.command()
