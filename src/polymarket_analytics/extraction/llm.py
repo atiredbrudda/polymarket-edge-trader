@@ -9,6 +9,7 @@ Cost Control: Only use when pattern matcher fails. Do not call for every market.
 
 import json
 import os
+import time
 from typing import Any, Dict, Optional
 
 from anthropic import Anthropic
@@ -109,23 +110,26 @@ class LLMFallback:
         """
         prompt = EXTRACTION_PROMPT.format(question=question)
 
-        response = self.client.messages.create(
-            model=self.model,
-            max_tokens=200,
-            messages=[{"role": "user", "content": prompt}],
-        )
+        last_exc: Exception = RuntimeError("no attempts made")
+        for attempt in range(3):
+            if attempt > 0:
+                time.sleep(2 ** attempt)  # 2s, 4s
+            try:
+                response = self.client.messages.create(
+                    model=self.model,
+                    max_tokens=200,
+                    messages=[{"role": "user", "content": prompt}],
+                )
+                response_text = response.content[0].text.strip()
+                entities = json.loads(response_text)
+                return {
+                    "game": entities.get("game"),
+                    "team_a": entities.get("team_a"),
+                    "team_b": entities.get("team_b"),
+                    "tournament": entities.get("tournament"),
+                    "market_type": entities.get("market_type"),
+                }
+            except Exception as e:
+                last_exc = e
 
-        # Parse JSON response
-        response_text = response.content[0].text.strip()
-        entities = json.loads(response_text)
-
-        # Ensure all expected keys are present
-        result = {
-            "game": entities.get("game"),
-            "team_a": entities.get("team_a"),
-            "team_b": entities.get("team_b"),
-            "tournament": entities.get("tournament"),
-            "market_type": entities.get("market_type"),
-        }
-
-        return result
+        raise last_exc

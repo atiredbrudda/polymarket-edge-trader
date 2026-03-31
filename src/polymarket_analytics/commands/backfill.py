@@ -379,7 +379,7 @@ async def backfill_async(ctx, db_path: str) -> None:
         FROM trades t
         JOIN markets m ON m.condition_id = t.market_id
         LEFT JOIN market_entities me ON me.condition_id = t.market_id
-        WHERE me.condition_id IS NULL
+        WHERE (me.condition_id IS NULL OR (me.game IS NULL AND me.team_a IS NULL))
           AND m.niche_slug = :niche
           AND m.question IS NOT NULL
         """,
