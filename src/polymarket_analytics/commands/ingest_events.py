@@ -67,7 +67,9 @@ async def _ingest_events_async(ctx, db_path: str):
 
         # Fetch markets from Gamma API with page progress
         def on_page(page: int, total: int) -> None:
-            console.print(f"  Fetching... page {page} ({total} markets so far)", end="\r")
+            console.print(
+                f"  Fetching... page {page} ({total} markets so far)", end="\r"
+            )
 
         markets = await client.fetch_markets(tag_id, on_page=on_page)
         console.print()  # newline after \r progress
@@ -147,6 +149,11 @@ async def _ingest_events_async(ctx, db_path: str):
             )
 
             # markets record
+            events = market.get("events", [])
+            event_slug = None
+            if events and len(events) > 0:
+                event_slug = events[0].get("slug")
+
             markets_records.append(
                 {
                     "condition_id": condition_id,
@@ -159,6 +166,7 @@ async def _ingest_events_async(ctx, db_path: str):
                     "category": category,
                     "active": active,
                     "tokens": json.dumps([]),
+                    "event_slug": event_slug,
                 }
             )
 
@@ -180,8 +188,8 @@ async def _ingest_events_async(ctx, db_path: str):
             )
             db.conn.executemany(
                 """
-                INSERT INTO markets (condition_id, question, outcome, resolved, niche_slug, created_at, end_date, category, active, tokens)
-                VALUES (:condition_id, :question, :outcome, :resolved, :niche_slug, :created_at, :end_date, :category, :active, :tokens)
+                INSERT INTO markets (condition_id, question, outcome, resolved, niche_slug, created_at, end_date, category, active, tokens, event_slug)
+                VALUES (:condition_id, :question, :outcome, :resolved, :niche_slug, :created_at, :end_date, :category, :active, :tokens, :event_slug)
                 ON CONFLICT(condition_id) DO UPDATE SET
                     question = excluded.question,
                     outcome = excluded.outcome,
@@ -190,7 +198,8 @@ async def _ingest_events_async(ctx, db_path: str):
                     end_date = excluded.end_date,
                     category = excluded.category,
                     active = excluded.active,
-                    tokens = excluded.tokens
+                    tokens = excluded.tokens,
+                    event_slug = excluded.event_slug
                 """,
                 markets_records,
             )
