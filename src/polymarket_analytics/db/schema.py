@@ -38,6 +38,7 @@ def create_core_tables(db):
             "category": str,  # Market category (e.g., "esports")
             "active": bool,  # Whether market is currently active
             "tokens": str,  # JSON blob of token IDs
+            "event_slug": str,  # Parent event slug from events[0].slug - links child markets to parent
         },
         pk="condition_id",
         if_not_exists=True,
@@ -239,6 +240,17 @@ def create_indexes(db):
     )
 
 
+def run_migrations(db):
+    """Apply schema migrations for columns added after initial creation.
+
+    Safe to run on any database — checks for column existence before adding.
+    """
+    if "markets" in db.table_names():
+        markets_cols = {col.name for col in db["markets"].columns}
+        if "event_slug" not in markets_cols:
+            db["markets"].add_column("event_slug", str)
+
+
 def init_database(db_path: Path):
     """Initialize database with all tables and indexes.
 
@@ -250,5 +262,6 @@ def init_database(db_path: Path):
     """
     db = get_db(db_path)
     create_core_tables(db)
+    run_migrations(db)
     create_indexes(db)
     return db
