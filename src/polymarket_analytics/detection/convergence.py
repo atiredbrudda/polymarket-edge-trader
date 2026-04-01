@@ -104,21 +104,3 @@ def _assert_dependencies(db: sqlite_utils.Database, niche_slug: str) -> None:
             "positions table does not exist. Run build-positions command first."
         )
 
-    # Assert lift_scores has Q5 traders for this niche (latest scoring run only)
-    # Filter to MAX(computed_at) to avoid counting stale historical Q5 records
-    q5_count = db.execute(
-        """
-        SELECT COUNT(*) FROM lift_scores
-        WHERE quintile = 5 AND category = :niche_slug
-          AND computed_at = (
-              SELECT MAX(computed_at) FROM lift_scores WHERE category = :niche_slug
-          )
-        """,
-        {"niche_slug": niche_slug},
-    ).fetchone()[0]
-
-    if q5_count == 0:
-        raise click.ClickException(
-            f"No Q5 (top quintile) traders found for niche '{niche_slug}' in latest scoring run. "
-            "Run score command to compute lift_scores first."
-        )

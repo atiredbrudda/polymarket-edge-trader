@@ -66,13 +66,16 @@ class GammaAPIClient:
         self,
         tag_id: int,
         limit: int = 200,
+        closed: Optional[bool] = None,
         on_page: Optional[Callable[[int, int], None]] = None,
     ) -> List[dict]:
         """Fetch all markets for a given tag_id with pagination.
 
         Args:
             tag_id: Tag ID (integer) to fetch markets for
-            limit: Number of markets per page (default: 500)
+            limit: Number of markets per page (default: 200)
+            closed: If False, fetch only open/unresolved markets. If True, only closed.
+                    If None (default), fetch all markets.
             on_page: Optional callback(page_num, total_so_far) called after each page
 
         Returns:
@@ -86,11 +89,15 @@ class GammaAPIClient:
         offset = 0
         page = 0
 
+        params: dict = {"tag_id": tag_id, "limit": limit}
+        if closed is not None:
+            params["closed"] = "true" if closed else "false"
+
         while True:
             async with self.limiter:
                 response = await client.get(
                     f"{GAMMA_BASE_URL}/markets",
-                    params={"tag_id": tag_id, "limit": limit, "offset": offset},
+                    params={**params, "offset": offset},
                 )
                 response.raise_for_status()
 

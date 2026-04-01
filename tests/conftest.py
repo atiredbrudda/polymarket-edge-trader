@@ -17,6 +17,11 @@ import sqlite_utils
 from polymarket_analytics.config.loader import load_niche_config
 from polymarket_analytics.db.schema import init_database
 
+# Fixed timestamp used across detection test helpers so all traders share the same
+# computed_at — simulating a single scoring run. Required for MAX(computed_at)
+# filter in convergence query to match all test traders, not just the last inserted.
+_FIXED_COMPUTED_AT = "2026-01-01T12:00:00Z"
+
 
 @pytest.fixture
 def test_db(tmp_path: Path) -> sqlite_utils.Database:
@@ -138,7 +143,7 @@ def create_q5_trader(
             "total_pnl": 500.0,
             "window_start": now,
             "window_end": now,
-            "computed_at": now,
+            "computed_at": _FIXED_COMPUTED_AT,
         },
         replace=True,
     )
@@ -190,7 +195,7 @@ def create_qn_trader(
             "total_pnl": 50.0,
             "window_start": now,
             "window_end": now,
-            "computed_at": now,
+            "computed_at": _FIXED_COMPUTED_AT,
         },
         replace=True,
     )

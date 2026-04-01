@@ -4,7 +4,7 @@ This module provides a rate-limited async client for the Polymarket Data API,
 handling batched requests for trades and holders data.
 """
 
-from typing import List, Optional
+from typing import Callable, List, Optional
 
 import httpx
 from aiolimiter import AsyncLimiter
@@ -54,16 +54,20 @@ class DataAPIClient:
             await self._client.aclose()
 
     async def fetch_trades(
-        self, condition_ids: List[str], limit: int = 1000
+        self,
+        condition_ids: List[str],
+        limit: int = 1000,
+        on_batch: Optional[Callable[[int, int], None]] = None,
     ) -> List[dict]:
         """Fetch trades for multiple markets.
 
-        Batches condition_ids in groups of 50 to avoid URL length limits
-        (research pitfall #2). Each batch is fetched with rate limiting.
+        Batches condition_ids in groups of 50 to avoid URL length limits.
+        Each batch is fetched with rate limiting.
 
         Args:
             condition_ids: List of condition IDs (0x-prefixed 64-hex strings)
             limit: Max trades per market (default: 1000, max: 10000)
+            on_batch: Optional callback(batch_num, total_batches) after each batch
 
         Returns:
             List of trade objects with fields:
@@ -81,11 +85,12 @@ class DataAPIClient:
         """
         client = await self._get_client()
         all_trades: List[dict] = []
+        total_batches = (len(condition_ids) + self._batch_size - 1) // self._batch_size
 
-        # Batch condition IDs to avoid URL length limits
         for i in range(0, len(condition_ids), self._batch_size):
             batch = condition_ids[i : i + self._batch_size]
             market_param = ",".join(batch)
+            batch_num = i // self._batch_size + 1
 
             async with self.limiter:
                 response = await client.get(
@@ -96,6 +101,9 @@ class DataAPIClient:
 
             trades = response.json()
             all_trades.extend(trades)
+
+            if on_batch:
+                on_batch(batch_num, total_batches)
 
         return all_trades
 
@@ -185,6 +193,10 @@ class DataAPIClient:
                         "offset": offset,
                     },
                 )
+                # 400 on a subsequent page means the API's offset cap was hit —
+                # not a real error, just end of available data.
+                if response.status_code == 400 and offset > 0:
+                    break
                 response.raise_for_status()
 
             trades = response.json()
