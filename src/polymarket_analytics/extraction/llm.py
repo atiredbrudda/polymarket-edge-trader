@@ -28,7 +28,7 @@ Extract the following entities from the market question:
 - tournament: Tournament/championship name
 - market_type: Type of bet (winner, total_maps, handicap, etc.)
 
-Market Question: "{question}"
+Market Question: "{question}"{event_slug_line}
 
 Return ONLY a valid JSON object with this exact structure:
 {{
@@ -87,11 +87,13 @@ class LLMFallback:
 
         self.model = "claude-sonnet-4-20250514"
 
-    def extract(self, question: str) -> Dict[str, Any]:
+    def extract(self, question: str, event_slug: Optional[str] = None) -> Dict[str, Any]:
         """Extract entities from market question using LLM.
 
         Args:
             question: Market question text to extract entities from.
+            event_slug: Optional event slug for additional context (e.g.
+                        'blasttv-austin-major-furia-vs-pain' helps infer game=CS2).
 
         Returns:
             Dictionary with extracted entities:
@@ -108,7 +110,12 @@ class LLMFallback:
             This method is expensive - only call when pattern matcher fails
             to extract critical fields (game, team_a, team_b).
         """
-        prompt = EXTRACTION_PROMPT.format(question=question)
+        event_slug_line = (
+            f"\nEvent Slug: \"{event_slug}\"" if event_slug else ""
+        )
+        prompt = EXTRACTION_PROMPT.format(
+            question=question, event_slug_line=event_slug_line
+        )
 
         last_exc: Exception = RuntimeError("no attempts made")
         for attempt in range(3):

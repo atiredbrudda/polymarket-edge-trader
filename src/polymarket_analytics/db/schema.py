@@ -240,6 +240,32 @@ def create_indexes(db):
     )
 
 
+def create_views(db):
+    """Create or replace derived views.
+
+    Views are always recreated so they stay current with any schema changes.
+    """
+    db.execute("""
+        CREATE VIEW IF NOT EXISTS q5_traders AS
+        SELECT
+            trader_address,
+            category,
+            composite_score,
+            clv_raw,
+            roi_raw,
+            sharpe_raw,
+            position_count,
+            total_pnl,
+            computed_at
+        FROM lift_scores
+        WHERE quintile = 5
+          AND computed_at = (
+              SELECT MAX(computed_at) FROM lift_scores ls2
+              WHERE ls2.category = lift_scores.category
+          )
+    """)
+
+
 def run_migrations(db):
     """Apply schema migrations for columns added after initial creation.
 
@@ -264,4 +290,5 @@ def init_database(db_path: Path):
     create_core_tables(db)
     run_migrations(db)
     create_indexes(db)
+    create_views(db)
     return db

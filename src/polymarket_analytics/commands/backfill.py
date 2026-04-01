@@ -11,11 +11,93 @@ Usage:
 import asyncio
 import hashlib
 import json
+import re
 import time
 from datetime import datetime, timedelta, timezone
 from decimal import Decimal
 from pathlib import Path
 from typing import Any, Dict, List, Optional
+
+# Map event_slug game prefix → canonical game name (must match market_entities.game values)
+_SLUG_GAME_MAP: Dict[str, str] = {
+    "cs2": "CS2",
+    "cs": "CS2",
+    "csgo": "CS2",
+    "dota2": "Dota 2",
+    "dota": "Dota 2",
+    "lol": "LoL",
+    "league": "LoL",
+    "val": "Valorant",
+    "valorant": "Valorant",
+    "hok": "Honor of Kings",
+    "r6siege": "Rainbow Six Siege",
+    "r6": "Rainbow Six Siege",
+    "codmw": "Call of Duty",
+    "cod": "Call of Duty",
+    "mlbb": "Mobile Legends",
+    "rl": "Rocket League",
+    "ow": "Overwatch",
+    "sc2": "StarCraft 2",
+}
+
+# Map tournament slug prefixes → game (for organizer-branded slugs with no game prefix).
+# Checked longest prefix first to avoid shorter prefix shadowing longer ones.
+_TOURNAMENT_PREFIX_MAP: list = [
+    ("blast-bounty",        "CS2"),
+    ("blast-open",          "CS2"),
+    ("blast-rivals",        "CS2"),
+    ("blast-slam",          "CS2"),
+    ("blastopen",           "CS2"),
+    ("dreamhack-major",     "CS2"),
+    ("esl-pro-league",      "CS2"),
+    ("esl-one-birmingham",  "Dota 2"),
+    ("fissure-playground",  "CS2"),
+    ("iem",                 "CS2"),
+    ("pgl-astana",          "CS2"),
+    ("pgl-bucharest",       "CS2"),
+    ("pgl-wallachia",       "Dota 2"),
+    ("thunderpick-wc",      "CS2"),
+    ("optic-texas-major",   "Call of Duty"),
+    ("betboom-rush-b",      "CS2"),
+    ("first-stand",         "LoL"),
+    ("msi-playoffs",        "LoL"),
+    ("geng-global-academy", "LoL"),
+]
+
+_SLUG_DATE_RE = re.compile(r"^(.+)-(\d{4})-(\d{2})-(\d{2})$")
+
+
+def _parse_event_slug(slug: str) -> Dict[str, Optional[str]]:
+    """Parse event_slug into entities.
+
+    Handles two formats:
+    - Match slug: 'game-team_a-team_b-YYYY-MM-DD' → game + teams
+    - Prefix-only: 'game-anything' (no date) → game only, when prefix is a known game
+    """
+    if not slug:
+        return {}
+    # Try match slug format first (with date)
+    m = _SLUG_DATE_RE.match(slug)
+    if m:
+        body = m.group(1)  # everything before the date
+        parts = body.split("-")
+        if len(parts) >= 3:
+            game_prefix = parts[0]
+            game = _SLUG_GAME_MAP.get(game_prefix)
+            if game:
+                team_a = parts[1]
+                team_b = "-".join(parts[2:]) if len(parts) > 2 else None
+                return {"game": game, "team_a": team_a, "team_b": team_b}
+    # Try prefix-only format (e.g. 'cs2-fissure-playground-1-winner')
+    prefix = slug.split("-")[0]
+    game = _SLUG_GAME_MAP.get(prefix)
+    if game:
+        return {"game": game}
+    # Try tournament prefix map (e.g. 'blast-bounty-fnatic-vs-legacy' → CS2)
+    for tournament_prefix, tournament_game in _TOURNAMENT_PREFIX_MAP:
+        if slug.startswith(tournament_prefix):
+            return {"game": tournament_game}
+    return {}
 
 import click
 from rich.console import Console
@@ -379,7 +461,7 @@ async def backfill_async(ctx, db_path: str) -> None:
         FROM trades t
         JOIN markets m ON m.condition_id = t.market_id
         LEFT JOIN market_entities me ON me.condition_id = t.market_id
-        WHERE (me.condition_id IS NULL OR (me.game IS NULL AND me.team_a IS NULL))
+        WHERE me.condition_id IS NULL
           AND m.niche_slug = :niche
           AND m.question IS NOT NULL
         """,
@@ -421,6 +503,7 @@ async def backfill_async(ctx, db_path: str) -> None:
     pattern_count = 0
     llm_count = 0
     event_slug_count = 0
+    slug_parse_count = 0
     llm_disabled = False  # becomes True on first API error
 
     def _entity_id(condition_id: str, entities: Dict[str, Any]) -> str:
@@ -430,9 +513,9 @@ async def backfill_async(ctx, db_path: str) -> None:
     def _desc() -> str:
         return (
             f"[cyan]Entities[/cyan]  "
-            f"[dim]pattern: {pattern_count - event_slug_count:,} | "
-            f"event_slug: {event_slug_count:,} | llm: {llm_count:,} | "
-            f"total: {len(entity_records):,}[/dim]"
+            f"[dim]pattern: {pattern_count - event_slug_count - slug_parse_count:,} | "
+            f"event_slug: {event_slug_count:,} | slug_parse: {slug_parse_count:,} | "
+            f"llm: {llm_count:,} | total: {len(entity_records):,}[/dim]"
         )
 
     with Progress(
@@ -463,14 +546,24 @@ async def backfill_async(ctx, db_path: str) -> None:
                 event_slug_count += 1
                 pattern_incomplete = False
 
-            # LLM fallback: only if pattern and event_slug both failed
+            # slug parse fallback: extract game+teams directly from slug structure
+            if pattern_incomplete and event_slug:
+                parsed = _parse_event_slug(event_slug)
+                if parsed.get("game"):
+                    entities = parsed
+                    slug_parse_count += 1
+                    pattern_incomplete = False
+                    # seed cache so siblings use this result, not slug parse again
+                    event_slug_entities[event_slug] = entities
+
+            # LLM fallback: only if pattern, event_slug, and slug parse all failed
             if pattern_incomplete and not llm_disabled and llm_fallback is not None:
                 progress.update(
                     task,
                     description=f"[cyan]⚙ LLM[/cyan]  [dim]{question[:58]}[/dim]",
                 )
                 try:
-                    entities = llm_fallback.extract(question)
+                    entities = llm_fallback.extract(question, event_slug=event_slug)
                     llm_count += 1
                 except Exception as e:
                     llm_disabled = True
@@ -521,7 +614,8 @@ async def backfill_async(ctx, db_path: str) -> None:
                 )
         console.print(
             f"  [green]✓[/green] {len(entity_records):,} entities written "
-            f"(pattern: {pattern_count - event_slug_count:,}, event_slug: {event_slug_count:,}, LLM: {llm_count:,})"
+            f"(pattern: {pattern_count - event_slug_count - slug_parse_count:,}, "
+            f"event_slug: {event_slug_count:,}, slug_parse: {slug_parse_count:,}, LLM: {llm_count:,})"
         )
 
     return

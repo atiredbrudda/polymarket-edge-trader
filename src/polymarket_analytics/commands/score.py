@@ -71,7 +71,7 @@ async def _score_async(ctx: Any, db_path: str) -> None:
         )
 
     # Assert resolved positions exist in window
-    window_days = config.get("scoring_window_days", 30)
+    window_days = config.scoring_window_days
     resolved_in_window = db.execute(
         """
         SELECT COUNT(*) as cnt FROM positions p
@@ -90,7 +90,7 @@ async def _score_async(ctx: Any, db_path: str) -> None:
         )
 
     # Load config
-    min_positions = config.get("min_positions", 30)
+    min_positions = config.min_positions
 
     # Calculate window_end as current timestamp
     window_end = datetime.now(timezone.utc).isoformat().replace("+00:00", "Z")

@@ -53,7 +53,9 @@ def build_positions_from_trades(db: Any, niche_slug: str) -> int:
             "Run discover command first."
         )
 
-    # 3. Assert zero orphan trades (trades without market_entities.game)
+    # 3. Warn on orphan trades (trades without market_entities.game) but don't block.
+    # A small number of non-esports markets (chess, streamer bets, etc.) will never
+    # have a game — excluding them is correct behaviour for the esports niche.
     orphan_count = db.execute("""
         SELECT COUNT(*) as cnt
         FROM trades t
@@ -61,9 +63,9 @@ def build_positions_from_trades(db: Any, niche_slug: str) -> int:
         WHERE me.game IS NULL
     """).fetchone()[0]
     if orphan_count > 0:
-        raise click.ClickException(
-            f"Found {orphan_count} trades without matching market_entities.game. "
-            "Run discover command to extract entities for these markets."
+        click.echo(
+            f"Warning: {orphan_count} trades have no game entity and will be excluded "
+            "from positions (non-esports or unresolvable markets)."
         )
 
     # Get all trades grouped by (trader, market)
