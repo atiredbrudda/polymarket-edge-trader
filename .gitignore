@@ -26,3 +26,10 @@ data/*.db
 GUIDE.md
 AGENTS.md
 CLAUDE.md
+DETECT_ENRICHMENT_SPEC.md
+
+# macOS
+.DS_Store
+
+# Build artifacts
+*.egg-info/
