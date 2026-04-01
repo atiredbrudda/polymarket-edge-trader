@@ -6,8 +6,11 @@ __pycache__/
 
 # Virtual environments
 venv/
-.env/
 .venv/
+
+# Environment variables (never commit secrets)
+.env
+.env.*
 
 # IDE
 .vscode/
