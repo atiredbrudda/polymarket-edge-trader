@@ -21,3 +21,6 @@ data/*.db
 
 # Planning directory (internal, not for public repos)
 .planning/
+
+# Internal docs
+GUIDE.md
