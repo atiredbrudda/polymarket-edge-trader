@@ -24,3 +24,5 @@ data/*.db
 
 # Internal docs
 GUIDE.md
+AGENTS.md
+CLAUDE.md
