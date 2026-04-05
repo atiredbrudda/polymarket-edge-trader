@@ -41,7 +41,8 @@ def calculate_clv(positions_df: pd.DataFrame) -> pd.DataFrame:
     # For FLAT positions, use avg_exit_price as resolution_price
     if "direction" in df.columns and "avg_exit_price" in df.columns:
         flat_mask = df["direction"] == "FLAT"
-        df.loc[flat_mask, "resolution_price"] = df.loc[flat_mask, "avg_exit_price"]
+        if flat_mask.any():
+            df.loc[flat_mask, "resolution_price"] = df.loc[flat_mask, "avg_exit_price"]
 
     # Drop rows where resolution_price is still NaN (edge case guard)
     df = df.dropna(subset=["resolution_price"])
