@@ -383,3 +383,68 @@ def test_resolve_fails_without_outcomes(test_db):
 
     assert "No market outcomes found" in str(exc_info.value)
     assert "Run resolve-outcomes command first" in str(exc_info.value)
+
+
+def test_resolve_flat_with_exit_price(test_db):
+    """Test FLAT positions with avg_exit_price are resolved correctly.
+
+    FLAT trader who bought at 0.40 and sold at 0.70:
+    - pnl = size * (0.70 - 0.40) = 100 * 0.30 = 30.0
+    - outcome = 'WIN' (pnl > 0)
+    """
+    from polymarket_analytics.positions.resolution import resolve_position_pnl
+    import hashlib
+
+    # Insert a FLAT position with avg_exit_price
+    position_id = hashlib.sha256(b"flattradermarket1").hexdigest()[:16]
+    test_db["positions"].insert(
+        {
+            "id": position_id,
+            "trader_address": "flattrader",
+            "market_id": "market-flat",
+            "direction": "FLAT",
+            "size": 100,
+            "avg_entry_price": 0.40,
+            "avg_exit_price": 0.70,
+            "entry_timestamp": "2025-01-01T00:00:00Z",
+            "last_trade_timestamp": "2025-01-02T00:00:00Z",
+            "trade_count": 2,
+            "resolved": 0,
+            "outcome": None,
+            "pnl": None,
+        }
+    )
+
+    # Run resolution (no market outcomes needed for FLAT)
+    count = resolve_position_pnl(test_db, "esports")
+
+    # Should resolve 1 position
+    assert count == 1
+
+    # Verify FLAT position resolved correctly
+    row = test_db.execute(
+        "SELECT outcome, pnl, resolved FROM positions WHERE trader_address = 'flattrader'"
+    ).fetchone()
+    assert row[0] == "WIN", f"Expected WIN, got {row[0]}"
+    assert abs(float(row[1]) - 30.0) < 0.001, f"Expected pnl 30.0, got {row[1]}"
+    assert row[2] == 1, "Position should be resolved"
+
+
+def test_calculate_pnl_flat_with_exit_price():
+    """Test Python helper calculate_pnl() for FLAT with exit price.
+
+    FLAT with entry=0.40, exit=0.70, size=100:
+    Expected: 100 * (0.70 - 0.40) = 30.0
+    """
+    from polymarket_analytics.positions.resolution import calculate_pnl
+    from decimal import Decimal
+
+    # FLAT with exit price
+    result = calculate_pnl(
+        "FLAT", "YES", Decimal("100"), Decimal("0.40"), Decimal("0.70")
+    )
+    assert result == Decimal("30.00"), f"Expected 30.00, got {result}"
+
+    # FLAT without exit price (old behavior)
+    result = calculate_pnl("FLAT", "YES", Decimal("100"), Decimal("0.40"))
+    assert result == Decimal("0"), f"Expected 0, got {result}"

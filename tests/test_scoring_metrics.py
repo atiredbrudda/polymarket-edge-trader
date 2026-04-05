@@ -96,6 +96,29 @@ class TestCLVCalculation:
         assert pytest.approx(alice["clv_raw"], 0.001) == 0.667
         assert pytest.approx(bob["clv_raw"], 0.001) == -1.0
 
+    def test_clv_flat_position_with_exit_price(self):
+        """Test CLV for FLAT position uses avg_exit_price.
+
+        FLAT trader who bought at 0.40 and sold at 0.70:
+        Expected CLV: (0.70 - 0.40) / 0.40 = 0.75
+        """
+        positions = pd.DataFrame(
+            {
+                "trader_address": ["0xFlatTrader"],
+                "avg_entry_price": [0.40],
+                "avg_exit_price": [0.70],
+                "direction": ["FLAT"],
+                "outcome": [None],
+            }
+        )
+
+        result = calculate_clv(positions)
+
+        assert len(result) == 1
+        assert result.iloc[0]["trader_address"] == "0xFlatTrader"
+        # (0.70 - 0.40) / 0.40 = 0.30 / 0.40 = 0.75
+        assert pytest.approx(result.iloc[0]["clv_raw"], 0.001) == 0.75
+
 
 class TestROICalculation:
     """Tests for calculate_roi function."""

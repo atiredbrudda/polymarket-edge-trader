@@ -22,6 +22,8 @@ def calculate_clv(positions_df: pd.DataFrame) -> pd.DataFrame:
             - trader_address: wallet address
             - avg_entry_price: volume-weighted average entry price
             - outcome: 'YES' or 'NO'
+            - direction: position direction (LONG, SHORT, FLAT)
+            - avg_exit_price: volume-weighted average exit price (for FLAT positions)
 
     Returns:
         DataFrame with columns: [trader_address, clv_raw]
@@ -35,6 +37,14 @@ def calculate_clv(positions_df: pd.DataFrame) -> pd.DataFrame:
 
     # Map outcome to resolution_price: YES -> 1.0, NO -> 0.0
     df["resolution_price"] = df["outcome"].map({"YES": 1.0, "NO": 0.0})
+
+    # For FLAT positions, use avg_exit_price as resolution_price
+    if "direction" in df.columns and "avg_exit_price" in df.columns:
+        flat_mask = df["direction"] == "FLAT"
+        df.loc[flat_mask, "resolution_price"] = df.loc[flat_mask, "avg_exit_price"]
+
+    # Drop rows where resolution_price is still NaN (edge case guard)
+    df = df.dropna(subset=["resolution_price"])
 
     # CLV per position: (resolution_price - avg_entry_price) / avg_entry_price
     df["clv"] = (df["resolution_price"] - df["avg_entry_price"]) / df["avg_entry_price"]
