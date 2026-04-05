@@ -641,3 +641,153 @@ def test_build_positions_idempotent(test_db: sqlite_utils.Database):
     assert Decimal(str(position["size"])) == Decimal("150.0"), (
         f"size should be 150 after second run, got {position['size']}"
     )
+
+
+def test_build_positions_buy_only_entry_and_exit_price(test_db: sqlite_utils.Database):
+    """Test avg_entry_price is BUY-only VWAP and avg_exit_price is SELL-only VWAP.
+
+    FLAT position: BUY 100@0.40 + SELL 100@0.70
+    Expected: avg_entry_price = 0.40 (BUY-only), avg_exit_price = 0.70 (SELL-only), size = 100
+    """
+    from polymarket_analytics.positions.aggregation import build_positions_from_trades
+
+    _setup_test_data(test_db)
+
+    test_db["market_entities"].insert(
+        {
+            "id": "entity-flat",
+            "condition_id": "market-1",
+            "game": "CS2",
+            "team_a": "Team A",
+            "team_b": "Team B",
+            "tournament": "Tournament 1",
+            "market_type": "binary",
+        }
+    )
+
+    test_db["traders"].insert(
+        {
+            "address": "0xFlatTrader",
+            "first_seen": "2025-01-01T00:00:00Z",
+            "last_seen": "2025-01-15T00:00:00Z",
+            "backfill_complete": True,
+            "created_at": "2025-01-01T00:00:00Z",
+        }
+    )
+
+    test_db["trades"].insert(
+        {
+            "trade_id": "trade-buy-1",
+            "token_id": "token-1",
+            "timestamp": "2025-01-10T10:00:00Z",
+            "side": "BUY",
+            "price": Decimal("0.40"),
+            "size": Decimal("100.0"),
+            "market_id": "market-1",
+            "trader_address": "0xFlatTrader",
+        }
+    )
+    test_db["trades"].insert(
+        {
+            "trade_id": "trade-sell-1",
+            "token_id": "token-1",
+            "timestamp": "2025-01-10T11:00:00Z",
+            "side": "SELL",
+            "price": Decimal("0.70"),
+            "size": Decimal("100.0"),
+            "market_id": "market-1",
+            "trader_address": "0xFlatTrader",
+        }
+    )
+
+    build_positions_from_trades(test_db, "esports")
+
+    position = list(
+        test_db["positions"].rows_where("trader_address = ?", ["0xFlatTrader"])
+    )[0]
+
+    assert position["direction"] == "FLAT"
+    assert abs(float(position["avg_entry_price"]) - 0.40) < 0.0001, (
+        f"avg_entry_price should be 0.40 (BUY-only), got {position['avg_entry_price']}"
+    )
+    assert abs(float(position["avg_exit_price"]) - 0.70) < 0.0001, (
+        f"avg_exit_price should be 0.70 (SELL-only), got {position['avg_exit_price']}"
+    )
+    assert float(position["size"]) == 100.0, (
+        f"size should be 100 (gross BUY volume), got {position['size']}"
+    )
+
+
+def test_build_positions_long_entry_price_ignores_sells(test_db: sqlite_utils.Database):
+    """Test LONG position avg_entry_price ignores SELL prices.
+
+    LONG position: BUY 100@0.50 + SELL 30@0.80
+    Expected: avg_entry_price = 0.50 (BUY-only VWAP), avg_exit_price = 0.80 (SELL-only), size = 70
+    """
+    from polymarket_analytics.positions.aggregation import build_positions_from_trades
+
+    _setup_test_data(test_db)
+
+    test_db["market_entities"].insert(
+        {
+            "id": "entity-long",
+            "condition_id": "market-1",
+            "game": "CS2",
+            "team_a": "Team A",
+            "team_b": "Team B",
+            "tournament": "Tournament 1",
+            "market_type": "binary",
+        }
+    )
+
+    test_db["traders"].insert(
+        {
+            "address": "0xLongTrader",
+            "first_seen": "2025-01-01T00:00:00Z",
+            "last_seen": "2025-01-15T00:00:00Z",
+            "backfill_complete": True,
+            "created_at": "2025-01-01T00:00:00Z",
+        }
+    )
+
+    test_db["trades"].insert(
+        {
+            "trade_id": "trade-long-buy",
+            "token_id": "token-1",
+            "timestamp": "2025-01-10T10:00:00Z",
+            "side": "BUY",
+            "price": Decimal("0.50"),
+            "size": Decimal("100.0"),
+            "market_id": "market-1",
+            "trader_address": "0xLongTrader",
+        }
+    )
+    test_db["trades"].insert(
+        {
+            "trade_id": "trade-long-sell",
+            "token_id": "token-1",
+            "timestamp": "2025-01-10T11:00:00Z",
+            "side": "SELL",
+            "price": Decimal("0.80"),
+            "size": Decimal("30.0"),
+            "market_id": "market-1",
+            "trader_address": "0xLongTrader",
+        }
+    )
+
+    build_positions_from_trades(test_db, "esports")
+
+    position = list(
+        test_db["positions"].rows_where("trader_address = ?", ["0xLongTrader"])
+    )[0]
+
+    assert position["direction"] == "LONG"
+    assert abs(float(position["avg_entry_price"]) - 0.50) < 0.0001, (
+        f"avg_entry_price should be 0.50 (BUY-only VWAP), got {position['avg_entry_price']}"
+    )
+    assert abs(float(position["avg_exit_price"]) - 0.80) < 0.0001, (
+        f"avg_exit_price should be 0.80 (SELL-only), got {position['avg_exit_price']}"
+    )
+    assert abs(float(position["size"]) - 70.0) < 0.001, (
+        f"size should be 70 (abs(net_size)), got {position['size']}"
+    )

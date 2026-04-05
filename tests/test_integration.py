@@ -191,6 +191,7 @@ def test_schema_matches_guide(test_db: sqlite_utils.Database):
     assert "last_trade_timestamp" in positions_cols, (
         "positions missing last_trade_timestamp"
     )
+    assert "avg_exit_price" in positions_cols, "positions missing avg_exit_price"
 
     # lift_scores must have category, position_count, total_pnl, computed_at
     lift_cols = [col.name for col in test_db["lift_scores"].columns]
@@ -418,4 +419,167 @@ def test_event_slug_upsert_updates_existing_row(test_db: sqlite_utils.Database):
     assert (
         test_db["markets"].get("0xupsert")["event_slug"]
         == "faze-vs-navi-blast-spring-2025"
+    )
+
+
+def test_flat_trader_scores_in_pipeline(tmp_path):
+    """FLAT-08 integration: trader who exits before resolution is scored.
+
+    Flow:
+    1. Insert market (unresolved — FLAT path needs no outcome)
+    2. Insert FLAT trader: BUY 100@0.40 then SELL 100@0.70 on same market
+    3. run build_positions_from_trades() → FLAT position, size=100, entry=0.40, exit=0.70
+    4. run resolve_position_pnl() → pnl=30.0, resolved=1
+    5. run extract_resolved_positions() → trader in DataFrame with avg_exit_price=0.70
+    6. run calculate_all_metrics() → 0xFlatTrader has positive CLV ≈ 0.75
+    """
+    from decimal import Decimal
+    from polymarket_analytics.db.schema import init_database
+    from polymarket_analytics.positions.aggregation import build_positions_from_trades
+    from polymarket_analytics.positions.resolution import resolve_position_pnl
+    from polymarket_analytics.scoring.extraction import extract_resolved_positions
+    from polymarket_analytics.scoring.metrics import calculate_all_metrics
+
+    db_path = tmp_path / "test.db"
+    db = init_database(db_path)
+
+    # Insert markets: one for FLAT trader, one with outcome for dependency assert
+    db["markets"].insert(
+        {
+            "condition_id": "mkt-flat",
+            "question": "Will Team A win?",
+            "outcome": None,
+            "resolved": False,
+            "niche_slug": "esports",
+            "created_at": "2025-01-01T00:00:00Z",
+            "end_date": "2025-12-31T23:59:59Z",
+            "category": "esports",
+            "active": True,
+            "tokens": "[]",
+            "event_slug": None,
+        }
+    )
+    db["markets"].insert(
+        {
+            "condition_id": "mkt-yes",
+            "question": "Will Team B win?",
+            "outcome": "YES",
+            "resolved": True,
+            "niche_slug": "esports",
+            "created_at": "2025-01-01T00:00:00Z",
+            "end_date": "2025-12-31T23:59:59Z",
+            "category": "esports",
+            "active": False,
+            "tokens": "[]",
+            "event_slug": None,
+        }
+    )
+
+    # Insert market_entities
+    db["market_entities"].insert(
+        {
+            "id": "entity-flat",
+            "condition_id": "mkt-flat",
+            "game": "CS2",
+            "team_a": "Team A",
+            "team_b": "Team B",
+            "tournament": "Tournament 1",
+            "market_type": "binary",
+        }
+    )
+
+    # Insert token_catalog entry
+    db["token_catalog"].insert(
+        {
+            "token_id": "token-flat",
+            "condition_id": "mkt-flat",
+            "question": "Will Team A win?",
+            "niche_slug": "esports",
+            "node_path": "esports/cs2/tournament-1",
+            "market_type": "binary",
+            "created_at": "2025-01-01T00:00:00Z",
+        }
+    )
+
+    # Insert trader
+    db["traders"].insert(
+        {
+            "address": "0xFlatTrader",
+            "first_seen": "2025-01-01T00:00:00Z",
+            "last_seen": "2025-01-15T00:00:00Z",
+            "backfill_complete": True,
+            "created_at": "2025-01-01T00:00:00Z",
+        }
+    )
+
+    # Insert trades: BUY 100@0.40 then SELL 100@0.70 (use 2026-04-04 timestamp for 30-day window)
+    db["trades"].insert(
+        {
+            "trade_id": "trade-flat-buy",
+            "token_id": "token-flat",
+            "timestamp": "2026-04-04T10:00:00Z",
+            "side": "BUY",
+            "price": Decimal("0.40"),
+            "size": Decimal("100.0"),
+            "market_id": "mkt-flat",
+            "trader_address": "0xFlatTrader",
+        }
+    )
+    db["trades"].insert(
+        {
+            "trade_id": "trade-flat-sell",
+            "token_id": "token-flat",
+            "timestamp": "2026-04-04T11:00:00Z",
+            "side": "SELL",
+            "price": Decimal("0.70"),
+            "size": Decimal("100.0"),
+            "market_id": "mkt-flat",
+            "trader_address": "0xFlatTrader",
+        }
+    )
+
+    # Run build_positions
+    count = build_positions_from_trades(db, "esports")
+    assert count >= 1, "Should create at least one position"
+
+    # Verify position was created correctly
+    flat_pos = list(db["positions"].rows_where("trader_address = ?", ["0xFlatTrader"]))[
+        0
+    ]
+    assert flat_pos["direction"] == "FLAT"
+    assert abs(float(flat_pos["size"]) - 100.0) < 0.001, (
+        f"size should be 100 (gross BUY volume), got {flat_pos['size']}"
+    )
+    assert abs(float(flat_pos["avg_entry_price"]) - 0.40) < 0.001, (
+        f"avg_entry_price should be 0.40, got {flat_pos['avg_entry_price']}"
+    )
+    assert abs(float(flat_pos["avg_exit_price"]) - 0.70) < 0.001, (
+        f"avg_exit_price should be 0.70, got {flat_pos['avg_exit_price']}"
+    )
+
+    # Run resolve_position_pnl
+    resolve_count = resolve_position_pnl(db, "esports")
+    assert resolve_count >= 1, "Should resolve at least one position"
+
+    # Verify position was resolved correctly
+    flat_pos = list(db["positions"].rows_where("trader_address = ?", ["0xFlatTrader"]))[
+        0
+    ]
+    assert float(flat_pos["pnl"]) == pytest.approx(30.0, 0.001), (
+        f"pnl should be 30.0, got {flat_pos['pnl']}"
+    )
+    assert flat_pos["resolved"] == 1, "Position should be resolved"
+
+    # Run extract_resolved_positions
+    extracted_df = extract_resolved_positions(db, "esports")
+    assert "0xFlatTrader" in extracted_df["trader_address"].values, (
+        "0xFlatTrader should be in extracted DataFrame"
+    )
+
+    # Run calculate_all_metrics
+    metrics_df = calculate_all_metrics(extracted_df)
+    flat_metrics = metrics_df[metrics_df["trader_address"] == "0xFlatTrader"]
+    assert len(flat_metrics) == 1, "Should have one row for 0xFlatTrader"
+    assert flat_metrics.iloc[0]["clv_raw"] == pytest.approx(0.75, 0.001), (
+        f"CLV should be ~0.75, got {flat_metrics.iloc[0]['clv_raw']}"
     )

@@ -119,6 +119,44 @@ class TestCLVCalculation:
         # (0.70 - 0.40) / 0.40 = 0.30 / 0.40 = 0.75
         assert pytest.approx(result.iloc[0]["clv_raw"], 0.001) == 0.75
 
+    def test_clv_flat_and_long_mixed(self):
+        """FLAT and LONG positions in same DataFrame calculate independently."""
+        positions = pd.DataFrame(
+            {
+                "trader_address": ["0xFlat", "0xLong"],
+                "avg_entry_price": [0.40, 0.60],
+                "avg_exit_price": [0.70, None],
+                "direction": ["FLAT", "LONG"],
+                "outcome": ["FLAT", "YES"],
+            }
+        )
+        result = calculate_clv(positions)
+        assert len(result) == 2
+        flat_row = result[result["trader_address"] == "0xFlat"].iloc[0]
+        long_row = result[result["trader_address"] == "0xLong"].iloc[0]
+        assert pytest.approx(flat_row["clv_raw"], 0.001) == 0.75
+        assert pytest.approx(long_row["clv_raw"], 0.001) == 0.667
+
+    def test_clv_missing_direction_column(self):
+        """calculate_clv does not crash when 'direction' column is absent.
+
+        The backward-compat guard in metrics.py (`if 'direction' in df.columns`)
+        must allow legacy DataFrames without the column to proceed unchanged.
+        """
+        positions = pd.DataFrame(
+            {
+                "trader_address": ["0xLong"],
+                "avg_entry_price": [0.60],
+                "outcome": ["YES"],
+                # 'direction' column intentionally absent
+            }
+        )
+        result = calculate_clv(positions)
+        assert "clv_raw" in result.columns, (
+            "result must have clv_raw column even without direction"
+        )
+        assert len(result) == 1
+
 
 class TestROICalculation:
     """Tests for calculate_roi function."""
