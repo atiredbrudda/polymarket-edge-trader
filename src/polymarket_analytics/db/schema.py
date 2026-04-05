@@ -278,6 +278,11 @@ def run_migrations(db):
         if "event_title" not in markets_cols:
             db["markets"].add_column("event_title", str)
 
+    if "positions" in db.table_names():
+        positions_cols = {col.name for col in db["positions"].columns}
+        if "avg_exit_price" not in positions_cols:
+            db.execute("ALTER TABLE positions ADD COLUMN avg_exit_price NUMERIC(10,6)")
+
 
 def init_database(db_path: Path):
     """Initialize database with all tables and indexes.
