@@ -13,13 +13,15 @@ Reviewer moves it from Pending → Cleared (or Flagged) after checking.
 - **Branch:** worker/07-flat-position-tracking-p02
 - **Plan:** .planning/phases/07-flat-position-tracking/07-02-PLAN.md
 - **Summary:** .planning/phases/07-flat-position-tracking/07-02-SUMMARY.md
-- **Commits:** a62e476
+- **Commits:** a62e476..a9e7f22
 - **Files changed:**
   - src/polymarket_analytics/positions/resolution.py (MODIFIED)
   - src/polymarket_analytics/scoring/extraction.py (MODIFIED)
   - src/polymarket_analytics/scoring/metrics.py (MODIFIED)
   - tests/test_resolve_positions.py (MODIFIED)
   - tests/test_scoring_metrics.py (MODIFIED)
+  - tests/test_scoring_integration.py (MODIFIED — fix)
+- **Fixes:** Added "avg_exit_price" to expected columns list in test_score_empty_positions_no_crash (line 516)
 - **Worker notes:** 
   - FLAT positions with avg_exit_price now resolve before market-outcome pass
   - Dependency checks relaxed to allow FLAT-only resolution
@@ -39,6 +41,9 @@ Reviewer moves it from Pending → Cleared (or Flagged) after checking.
 ## Flagged
 
 <!-- Reviewer moves entries here if issues found. Worker fixes and re-adds to Pending. -->
+
+### Phase 07 Plan 02 - FLAT-First Resolution + CLV Fix — 2026-04-05
+**Resolved — moved to Pending Review 2026-04-05**
 
 
 ---
