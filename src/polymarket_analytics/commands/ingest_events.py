@@ -151,8 +151,10 @@ async def _ingest_events_async(ctx, db_path: str):
             # markets record
             events = market.get("events", [])
             event_slug = None
+            event_title = None
             if events and len(events) > 0:
                 event_slug = events[0].get("slug")
+                event_title = events[0].get("title")
 
             markets_records.append(
                 {
@@ -167,6 +169,7 @@ async def _ingest_events_async(ctx, db_path: str):
                     "active": active,
                     "tokens": json.dumps([]),
                     "event_slug": event_slug,
+                    "event_title": event_title,
                 }
             )
 
@@ -188,8 +191,8 @@ async def _ingest_events_async(ctx, db_path: str):
             )
             db.conn.executemany(
                 """
-                INSERT INTO markets (condition_id, question, outcome, resolved, niche_slug, created_at, end_date, category, active, tokens, event_slug)
-                VALUES (:condition_id, :question, :outcome, :resolved, :niche_slug, :created_at, :end_date, :category, :active, :tokens, :event_slug)
+                INSERT INTO markets (condition_id, question, outcome, resolved, niche_slug, created_at, end_date, category, active, tokens, event_slug, event_title)
+                VALUES (:condition_id, :question, :outcome, :resolved, :niche_slug, :created_at, :end_date, :category, :active, :tokens, :event_slug, :event_title)
                 ON CONFLICT(condition_id) DO UPDATE SET
                     question = excluded.question,
                     outcome = excluded.outcome,
@@ -199,7 +202,8 @@ async def _ingest_events_async(ctx, db_path: str):
                     category = excluded.category,
                     active = excluded.active,
                     tokens = excluded.tokens,
-                    event_slug = excluded.event_slug
+                    event_slug = excluded.event_slug,
+                    event_title = excluded.event_title
                 """,
                 markets_records,
             )

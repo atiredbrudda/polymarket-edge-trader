@@ -63,6 +63,7 @@ def detect_convergence(db: sqlite_utils.Database, niche_slug: str) -> pd.DataFra
             MAX(p.last_trade_timestamp) as last_position_time
         FROM positions p
         JOIN lift_scores ls ON ls.trader_address = p.trader_address
+        JOIN markets m ON m.condition_id = p.market_id
         WHERE p.resolved = 0
           AND ls.quintile = 5
           AND ls.category = :niche_slug
@@ -70,6 +71,7 @@ def detect_convergence(db: sqlite_utils.Database, niche_slug: str) -> pd.DataFra
               SELECT MAX(computed_at) FROM lift_scores WHERE category = :niche_slug
           )
           AND p.size > 0
+          AND (m.end_date IS NULL OR datetime(m.end_date) > datetime('now'))
         GROUP BY p.market_id, p.direction
         HAVING COUNT(DISTINCT p.trader_address) >= 2
     """

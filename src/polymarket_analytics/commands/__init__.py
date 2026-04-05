@@ -10,6 +10,8 @@ from polymarket_analytics.commands.resolve_outcomes import resolve_outcomes
 from polymarket_analytics.commands.resolve_positions import resolve_positions
 from polymarket_analytics.commands.sanity_check import sanity_check
 from polymarket_analytics.commands.score import score
+from polymarket_analytics.commands.serve import serve
+from polymarket_analytics.commands.show_traders import show_traders
 
 __all__ = [
     "backfill",
@@ -22,4 +24,6 @@ __all__ = [
     "resolve_positions",
     "sanity_check",
     "score",
+    "serve",
+    "show_traders",
 ]

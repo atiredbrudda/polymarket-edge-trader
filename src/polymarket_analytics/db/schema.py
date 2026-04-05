@@ -275,6 +275,8 @@ def run_migrations(db):
         markets_cols = {col.name for col in db["markets"].columns}
         if "event_slug" not in markets_cols:
             db["markets"].add_column("event_slug", str)
+        if "event_title" not in markets_cols:
+            db["markets"].add_column("event_title", str)
 
 
 def init_database(db_path: Path):
