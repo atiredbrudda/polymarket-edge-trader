@@ -48,6 +48,18 @@ polymarket --niche esports score
 polymarket --niche esports detect
 ```
 
+### Viewing Results
+
+```bash
+# Terminal: print Q5 traders and active signals as rich tables
+polymarket --niche esports show-traders
+
+# Browser: start localhost dashboard (auto-refreshes when DB changes)
+polymarket --niche esports serve
+# Open http://localhost:8080
+# Use --port PORT to change the port
+```
+
 ### Copy-Paste One-Liners
 
 ```bash
@@ -75,6 +87,4 @@ polymarket --help
 ```bash
 ANTHROPIC_API_KEY="your_key"       # Required for LLM entity extraction fallback
 THE_GRAPH_API_KEY="your_key"       # Required for Graph backfill fallback
-TELEGRAM_BOT_TOKEN="your_token"    # Required for alert command (Phase 7)
-TELEGRAM_CHAT_ID="your_chat_id"    # Required for alert command (Phase 7)
 ```
