@@ -74,7 +74,11 @@ def build_positions_from_trades(db: Any, niche_slug: str) -> int:
             trader_address,
             market_id,
             SUM(CASE WHEN side = 'BUY' THEN size ELSE -size END) as net_size,
-            SUM(size * price) / SUM(size) as avg_entry_price,
+            SUM(CASE WHEN side = 'BUY' THEN size * price ELSE 0 END) /
+                NULLIF(SUM(CASE WHEN side = 'BUY' THEN size ELSE 0 END), 0) as avg_entry_price,
+            SUM(CASE WHEN side = 'SELL' THEN size * price ELSE 0 END) /
+                NULLIF(SUM(CASE WHEN side = 'SELL' THEN size ELSE 0 END), 0) as avg_exit_price,
+            SUM(CASE WHEN side = 'BUY' THEN size ELSE 0 END) as gross_buy_size,
             MIN(timestamp) as entry_timestamp,
             MAX(timestamp) as last_trade_timestamp,
             COUNT(*) as trade_count
@@ -100,8 +104,13 @@ def build_positions_from_trades(db: Any, niche_slug: str) -> int:
         else:
             direction = "FLAT"
 
-        # Size is absolute net size
-        size = abs(net_size)
+        # FLAT positions: size = gross BUY volume (not abs(net)≈0)
+        # LONG/SHORT positions: size = abs(net_size) as before
+        gross_buy_size = float(row["gross_buy_size"])
+        if direction == "FLAT":
+            size = gross_buy_size
+        else:
+            size = abs(net_size)
 
         # Generate deterministic position ID
         position_id = _generate_position_id(trader_address, market_id)
@@ -113,7 +122,12 @@ def build_positions_from_trades(db: Any, niche_slug: str) -> int:
                 "market_id": market_id,
                 "direction": direction,
                 "size": size,
-                "avg_entry_price": float(row["avg_entry_price"]),
+                "avg_entry_price": float(row["avg_entry_price"])
+                if row["avg_entry_price"] is not None
+                else None,
+                "avg_exit_price": float(row["avg_exit_price"])
+                if row["avg_exit_price"] is not None
+                else None,
                 "entry_timestamp": row["entry_timestamp"],
                 "last_trade_timestamp": row["last_trade_timestamp"],
                 "trade_count": int(row["trade_count"]),
