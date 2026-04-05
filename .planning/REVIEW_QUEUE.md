@@ -16,13 +16,22 @@ Reviewer moves it from Pending → Cleared (or Flagged) after checking.
 
 <!-- Reviewer moves entries here if issues found. Worker fixes and re-adds to Pending. -->
 
-### Phase 07 Plan 02 - FLAT-First Resolution + CLV Fix — 2026-04-05
-**Resolved — moved to Pending Review 2026-04-05**
-
 
 ---
 
 ## Cleared
+
+### Phase 07 Plan 03 - FLAT Position Test Coverage — **CLEARED 2026-04-05**
+- **Branch:** worker/07-flat-position-tracking-p02
+- **Cleared by:** Reviewer (Claude Sonnet 4.6)
+- **Commits:** 030145a..4b77a62
+- **Tests:** pytest ✓ (42/42 pass; 8 new FLAT tests all passing)
+- **Files in scope:**
+  - `tests/test_build_positions.py` — 2 new tests: BUY-only VWAP assertion (entry=0.40), LONG entry ignores SELL prices
+  - `tests/test_resolve_positions.py` — 2 new tests: FLAT negative PnL (pnl=-20.0/outcome='LOSS'), FLAT-first pass skips NULL avg_exit_price (market-outcome path resolves to pnl=0/'FLAT')
+  - `tests/test_scoring_metrics.py` — 2 new tests: mixed FLAT+LONG CLV (0.75 and 0.667 independently), missing direction column backward compat
+  - `tests/test_integration.py` — 1 new test: full pipeline FLAT trader CLV≈0.75 (build→resolve→extract→score); schema assertion for avg_exit_price
+- **Reviewer notes:** Clean pass. All 8 new tests match plan spec exactly. `test_resolve_flat_loss` count==2 assertion is correct (LONG decoy + FLAT both resolved in same pass). 2026-04-04 timestamp in integration test correctly within 30-day window. No reviewer fixes required.
 
 ### Phase 07 Plan 02 - FLAT-First Resolution + CLV Fix — **CLEARED 2026-04-05**
 - **Branch:** worker/07-flat-position-tracking-p02
