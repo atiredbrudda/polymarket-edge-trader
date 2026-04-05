@@ -9,32 +9,6 @@ Reviewer moves it from Pending → Cleared (or Flagged) after checking.
 
 <!-- Worker adds entries here -->
 
-### Phase 07 Plan 02 - FLAT-First Resolution + CLV Fix — 2026-04-05
-- **Branch:** worker/07-flat-position-tracking-p02
-- **Plan:** .planning/phases/07-flat-position-tracking/07-02-PLAN.md
-- **Summary:** .planning/phases/07-flat-position-tracking/07-02-SUMMARY.md
-- **Commits:** a62e476..a9e7f22
-- **Files changed:**
-  - src/polymarket_analytics/positions/resolution.py (MODIFIED)
-  - src/polymarket_analytics/scoring/extraction.py (MODIFIED)
-  - src/polymarket_analytics/scoring/metrics.py (MODIFIED)
-  - tests/test_resolve_positions.py (MODIFIED)
-  - tests/test_scoring_metrics.py (MODIFIED)
-  - tests/test_scoring_integration.py (MODIFIED — fix)
-- **Fixes:** Added "avg_exit_price" to expected columns list in test_score_empty_positions_no_crash (line 516)
-- **Worker notes:** 
-  - FLAT positions with avg_exit_price now resolve before market-outcome pass
-  - Dependency checks relaxed to allow FLAT-only resolution
-  - CLV for FLAT trader (entry=0.40, exit=0.70) = 0.75 ✓
-  - 21 tests pass in modified files
-  - 7 pre-existing test failures unrelated to this plan (empty DataFrame coercion)
-- **Checklist:**
-  - [x] Tests pass (pytest)
-  - [x] Linter clean (ruff check src/ tests/)
-  - [x] No debug artifacts, no cosmetic changes outside scope
-  - [x] STATE.md NOT touched (reviewer-only)
-  - [x] Plan SUMMARY.md written
-
 
 ---
 
@@ -49,6 +23,21 @@ Reviewer moves it from Pending → Cleared (or Flagged) after checking.
 ---
 
 ## Cleared
+
+### Phase 07 Plan 02 - FLAT-First Resolution + CLV Fix — **CLEARED 2026-04-05**
+- **Branch:** worker/07-flat-position-tracking-p02
+- **Cleared by:** Reviewer (Claude Sonnet 4.6)
+- **Commits:** a62e476..030145a
+- **Tests:** pytest ✓ (25/25 pass across test_resolve_positions, test_scoring_metrics, test_scoring_integration)
+- **Files in scope:**
+  - `src/polymarket_analytics/positions/resolution.py` — FLAT-first UPDATE pass, relaxed dependency checks, `calculate_pnl()` optional avg_exit_price
+  - `src/polymarket_analytics/scoring/extraction.py` — adds `avg_exit_price` to SELECT and fallback columns
+  - `src/polymarket_analytics/scoring/metrics.py` — CLV uses avg_exit_price for FLAT; reviewer added `flat_mask.any()` guard
+  - `tests/test_resolve_positions.py` — 3 new tests (FLAT resolve, calculate_pnl FLAT)
+  - `tests/test_scoring_metrics.py` — 1 new test (CLV=0.75 for FLAT trader)
+  - `tests/test_scoring_integration.py` — avg_exit_price added to expected columns
+- **Reviewer fix:** `metrics.py` — added `if flat_mask.any():` guard before `df.loc[flat_mask, "resolution_price"] = df.loc[flat_mask, "avg_exit_price"]`. Without this, assigning an empty object Series to a float64 column raises TypeError on older pandas when no FLAT rows exist. Worker misidentified 3 integration test failures as pre-existing.
+- **Notes:** Implementation matches spec exactly. FLAT-first order correct (resolved=0 guard in market-outcome UPDATE handles exclusion). CLV formula clean.
 
 ### Phase 07 Plan 01 - avg_exit_price Schema + BUY/SELL Split Aggregation — **CLEARED 2026-04-05**
 - **Branch:** worker/07-flat-position-tracking-p01
