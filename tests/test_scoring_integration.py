@@ -513,6 +513,7 @@ class TestFullScoringPipeline:
             "direction",
             "size",
             "avg_entry_price",
+            "avg_exit_price",
             "pnl",
             "trade_count",
             "outcome",
