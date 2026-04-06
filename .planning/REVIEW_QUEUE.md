@@ -9,24 +9,6 @@ Reviewer moves it from Pending → Cleared (or Flagged) after checking.
 
 <!-- Worker adds entries here -->
 
-### Pipeline Todo #2 - Timestamp-based Selective Re-fetch — **2026-04-06**
-- **Branch:** worker/pipeline-todo-02-timestamps
-- **Todo:** .planning/todos/done/2026-04-06-replace-backfill-complete-boolean-with-timestamps-selective-re-fetch.md
-- **Commits:** 2d18fad
-- **Files changed:**
-  - src/polymarket_analytics/db/schema.py (MODIFIED) — migration adds last_backfilled_at + last_trade_seen_at columns, migrates existing data
-  - src/polymarket_analytics/commands/backfill.py (MODIFIED) — timestamp-based query, update both timestamps after backfill
-- **Worker notes:**
-  - Migration sets last_backfilled_at=datetime('now') for existing backfill_complete=1 traders to prevent mass re-fetch
-  - UPDATE only runs if traders table has rows (avoids test fixture issues)
-  - Selection query: includes traders where last_trade_seen_at IS NULL OR >= 40 days ago, AND last_backfilled_at IS NULL OR < 6 hours ago
-  - max_trade_timestamp computed from ingested trades (max of timestamp field)
-- **Checklist:**
-  - [x] Tests pass (pytest) — 87/87
-  - [x] Linter clean (ruff check src/ tests/) — pre-existing E402 warnings in backfill.py, no new errors
-  - [x] No debug artifacts
-  - [x] STATE.md NOT touched (reviewer-only)
-  - [ ] Plan SUMMARY.md written — N/A (todo, not a plan)
 
 
 ---
@@ -34,6 +16,16 @@ Reviewer moves it from Pending → Cleared (or Flagged) after checking.
 ## Flagged
 
 <!-- Reviewer moves entries here if issues found. Worker fixes and re-adds to Pending. -->
+
+### Pipeline Todo #2 - Timestamp-based Selective Re-fetch — **FLAGGED 2026-04-06**
+- **Branch:** worker/pipeline-todo-02-timestamps
+- **Flagged by:** Reviewer (Claude Sonnet 4.6)
+- **Issue:** `last_trade_seen_at` type mismatch — stores a raw Unix timestamp integer (e.g. `1775431309`) into a TEXT column, but the selection query compares it against `cutoff` which is an ISO datetime string (`"2026-02-25T03:35:54+00:00"`). SQLite text comparison always evaluates `"17..."` < `"20..."`, so after any successful backfill `last_trade_seen_at >= :cutoff` is permanently FALSE. The trader falls out of selection on all subsequent runs. Tests don't catch this because post-migration traders have `last_trade_seen_at IS NULL` (takes the NULL branch) and test fixtures never hit the update path.
+- **Fix required in `backfill.py`:** Convert Unix timestamp to ISO before storing:
+  ```python
+  "last_trade_seen_at": datetime.fromtimestamp(max_trade_timestamp, tz=timezone.utc).isoformat() if max_trade_timestamp else None,
+  ```
+- **Fix required in tests:** Add a test that backfills a trader, then runs selection again — trader with recent `last_trade_seen_at` should be re-included, trader with old `last_trade_seen_at` should be excluded.
 
 
 ---

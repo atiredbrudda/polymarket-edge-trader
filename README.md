@@ -51,13 +51,14 @@ polymarket --niche esports detect
 ### Viewing Results
 
 ```bash
-# Terminal: print Q5 traders and active signals as rich tables
-polymarket --niche esports show-traders
-
 # Browser: start localhost dashboard (auto-refreshes when DB changes)
 polymarket --niche esports serve
 # Open http://localhost:8080
 # Use --port PORT to change the port
+
+# Terminal: same Q5 traders and signals output, but printed to the terminal
+# Use this if you need the data without starting a web server
+polymarket --niche esports show-traders
 ```
 
 ### Copy-Paste One-Liners

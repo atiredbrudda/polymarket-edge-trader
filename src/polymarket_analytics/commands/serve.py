@@ -151,6 +151,10 @@ function signalCard(s) {
       <div class="signal-meta">
         <span>Q5 traders: <b>${s.q5_count}</b></span>
         <span>Avg score: <b>${fmt(s.avg_score)}</b></span>
+        ${s.tier ? `<span>Tier: <b style="color:var(--yellow)">${s.tier}</b></span>` : ''}
+        ${s.clv_dominant_count !== null && s.clv_dominant_count !== undefined ? `<span>CLV dominant: <b>${s.clv_dominant_count}</b></span>` : ''}
+        ${s.avg_entry_price !== null && s.avg_entry_price !== undefined ? `<span>Avg entry: <b>${fmt(s.avg_entry_price, 3)}</b></span>` : ''}
+        ${s.min_entry_price !== null && s.min_entry_price !== undefined ? `<span>Min entry: <b>${fmt(s.min_entry_price, 3)}</b></span>` : ''}
       </div>
       <div class="market-id">${s.market_id}</div>
       ${contribs}
@@ -246,7 +250,8 @@ def _get_data(db, niche_slug: str) -> dict:
         SELECT s.market_id, s.direction, s.q5_count, s.avg_score,
                COALESCE(m.question, s.market_id) AS question,
                m.event_title,
-               CASE WHEN datetime(m.end_date) > datetime('now', '+5 hours') THEN 'upcoming' ELSE 'live' END AS status
+               CASE WHEN datetime(m.end_date) > datetime('now', '+5 hours') THEN 'upcoming' ELSE 'live' END AS status,
+               s.clv_dominant_count, s.avg_entry_price, s.min_entry_price, s.tier
         FROM signals s
         LEFT JOIN markets m ON m.condition_id = s.market_id
         WHERE (m.end_date IS NULL OR datetime(m.end_date) > datetime('now'))
@@ -255,7 +260,7 @@ def _get_data(db, niche_slug: str) -> dict:
     ))
 
     signals = []
-    for market_id, direction, q5_count, avg_score, question, event_title, status in signals_raw:
+    for market_id, direction, q5_count, avg_score, question, event_title, status, clv_dominant_count, avg_entry_price, min_entry_price, tier in signals_raw:
         contributors = [
             {
                 "trader_address": r[0],
@@ -294,6 +299,10 @@ def _get_data(db, niche_slug: str) -> dict:
             "event_title": event_title if event_title and event_title != question else None,
             "status": status,
             "contributors": contributors,
+            "clv_dominant_count": clv_dominant_count,
+            "avg_entry_price": avg_entry_price,
+            "min_entry_price": min_entry_price,
+            "tier": tier,
         })
 
     return {"niche": niche_slug, "traders": traders, "signals": signals}
