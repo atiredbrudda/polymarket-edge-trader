@@ -95,7 +95,7 @@ def detect(ctx: Any, db_path: str) -> None:
     This command:
     1. Asserts dependencies exist (lift_scores, positions tables, Q5 traders)
     2. Detects convergence where >= 2 Q5 traders converge on same market+direction
-    3. Upserts detected signals to signals table with first_seen/last_updated tracking
+    3. Upserts detected signals with clv_dominant_count, avg_entry_price, min_entry_price, tier
     4. Prints summary with signals detected/updated count
 
     Args:

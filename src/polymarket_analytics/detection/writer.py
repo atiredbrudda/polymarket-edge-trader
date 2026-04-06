@@ -27,6 +27,10 @@ def upsert_signal(
     avg_score: float,
     first_seen: str,
     last_updated: str,
+    clv_dominant_count: int = None,
+    avg_entry_price: float = None,
+    min_entry_price: float = None,
+    tier: str = None,
 ) -> str:
     """Upsert a signal record to the signals table.
 
@@ -71,6 +75,10 @@ def upsert_signal(
             UPDATE signals SET
                 q5_count = :q5_count,
                 avg_score = :avg_score,
+                clv_dominant_count = :clv_dominant_count,
+                avg_entry_price = :avg_entry_price,
+                min_entry_price = :min_entry_price,
+                tier = :tier,
                 last_updated = :last_updated,
                 alerted = 0
             WHERE id = :id
@@ -79,6 +87,10 @@ def upsert_signal(
                 "id": signal_id,
                 "q5_count": q5_count,
                 "avg_score": avg_score,
+                "clv_dominant_count": clv_dominant_count,
+                "avg_entry_price": avg_entry_price,
+                "min_entry_price": min_entry_price,
+                "tier": tier,
                 "last_updated": last_updated,
             },
         )
@@ -91,8 +103,12 @@ def upsert_signal(
         # Use raw SQL for NUMERIC(10,6) avg_score precision
         db.execute(
             """
-            INSERT INTO signals (id, market_id, direction, q5_count, avg_score, first_seen, last_updated, alerted)
-            VALUES (:id, :market_id, :direction, :q5_count, :avg_score, :first_seen, :last_updated, 0)
+            INSERT INTO signals (id, market_id, direction, q5_count, avg_score,
+                clv_dominant_count, avg_entry_price, min_entry_price, tier,
+                first_seen, last_updated, alerted)
+            VALUES (:id, :market_id, :direction, :q5_count, :avg_score,
+                :clv_dominant_count, :avg_entry_price, :min_entry_price, :tier,
+                :first_seen, :last_updated, 0)
             """,
             {
                 "id": signal_id,
@@ -100,6 +116,10 @@ def upsert_signal(
                 "direction": direction,
                 "q5_count": q5_count,
                 "avg_score": avg_score,
+                "clv_dominant_count": clv_dominant_count,
+                "avg_entry_price": avg_entry_price,
+                "min_entry_price": min_entry_price,
+                "tier": tier,
                 "first_seen": first_seen,
                 "last_updated": last_updated,
                 "alerted": 0,
@@ -175,6 +195,19 @@ def upsert_signals_batch(
                 else 0.0,
                 first_seen=str(row["first_position_time"]),
                 last_updated=now,
+                clv_dominant_count=int(row["clv_dominant_count"])
+                if "clv_dominant_count" in row
+                and not pd.isna(row["clv_dominant_count"])
+                else None,
+                avg_entry_price=float(row["avg_entry_price"])
+                if "avg_entry_price" in row and not pd.isna(row["avg_entry_price"])
+                else None,
+                min_entry_price=float(row["min_entry_price"])
+                if "min_entry_price" in row and not pd.isna(row["min_entry_price"])
+                else None,
+                tier=str(row["tier"])
+                if "tier" in row and not pd.isna(row["tier"])
+                else None,
             )
             upserted += 1
 

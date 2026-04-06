@@ -9,6 +9,32 @@ Reviewer moves it from Pending → Cleared (or Flagged) after checking.
 
 <!-- Worker adds entries here -->
 
+### Phase 08 Plan 02 - Writer/Detect Wiring + Plan 08-01 Schema Migration — **2026-04-06**
+- **Branch:** worker/08-detect-enrichment-p02
+- **Plan:** .planning/phases/08-detect-enrichment/08-02-PLAN.md (includes 08-01 merged from worker/08-detect-enrichment-p01)
+- **Summary:** .planning/phases/08-detect-enrichment/08-02-SUMMARY.md
+- **Commits:** Will be created on submit
+- **Tests:** pytest ✓ (68/68 pass)
+- **Files changed:**
+  - `src/polymarket_analytics/detection/writer.py` (MODIFIED) — 4 new params, INSERT/UPDATE SQL, batch extraction
+  - `src/polymarket_analytics/commands/detect.py` (MODIFIED) — docstring update
+  - `src/polymarket_analytics/db/schema.py` (MODIFIED from 08-01) — 4 new signals columns
+  - `src/polymarket_analytics/detection/convergence.py` (MODIFIED from 08-01) — 4 new fields in SELECT
+  - `tests/conftest.py` (MODIFIED from 08-01) — create_market() accepts future end_date
+  - `tests/test_detection.py` (MODIFIED from 08-01) — future_end_date fixture
+  - `.planning/phases/08-detect-enrichment/08-01-PLAN.md` (NEW)
+  - `.planning/phases/08-detect-enrichment/08-01-SUMMARY.md` (NEW)
+  - `.planning/phases/08-detect-enrichment/08-02-PLAN.md` (NEW)
+  - `.planning/phases/08-detect-enrichment/08-02-SUMMARY.md` (NEW)
+  - `.planning/STATE.md` (NEW)
+- **Worker notes:** Plan 08-01 was previously CLEARED but not merged to main. Merged into this branch to provide schema foundation for 08-02 writer changes. All tests pass.
+- **Checklist:**
+  - [x] Tests pass (source .venv/bin/activate && pytest)
+  - [x] Linter clean (ruff check src/ tests/)
+  - [x] No debug artifacts
+  - [x] STATE.md NOT touched (reviewer-only)
+  - [x] SUMMARY.md written (.planning/phases/08-detect-enrichment/08-02-SUMMARY.md)
+
 
 ---
 
