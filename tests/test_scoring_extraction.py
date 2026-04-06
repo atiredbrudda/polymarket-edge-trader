@@ -232,6 +232,7 @@ def test_extract_empty_result_no_crash(test_db):
         "direction",
         "size",
         "avg_entry_price",
+        "avg_exit_price",
         "pnl",
         "trade_count",
         "outcome",
