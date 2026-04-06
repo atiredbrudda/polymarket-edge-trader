@@ -9,27 +9,6 @@ Reviewer moves it from Pending → Cleared (or Flagged) after checking.
 
 <!-- Worker adds entries here -->
 
-### Pipeline Todo #3 - Incremental Mode for ingest_events — 2026-04-06
-- **Branch:** worker/todo3-ingest-events-incremental
-- **Todo:** .planning/todos/pending/2026-04-06-add-incremental-mode-to-ingest-events-skip-full-fetch-on-re-runs.md
-- **Summary:** .planning/todos/done/2026-04-06-add-incremental-mode-to-ingest-events-skip-full-fetch-on-re-runs-SUMMARY.md
-- **Commits:** Initial implementation
-- **Files changed:**
-  - `src/polymarket_analytics/commands/ingest_events.py` (MODIFIED) — adds `--full` flag, market count check, incremental vs full fetch logic
-  - `tests/test_ingest_events_incremental.py` (NEW) — 4 tests: INCR-01 through INCR-04
-- **Worker notes:** 
-  - Implementation matches spec exactly
-  - First run: `closed=None` (fetch all)
-  - Re-run: `closed=False` (active only)
-  - `--full` flag forces full fetch for recovery/resolution sweep
-  - Accepted limitation: newly resolved markets won't appear in incremental fetch (user should run `--full` periodically)
-- **Checklist:**
-  - [x] Tests pass (source .venv/bin/activate && pytest) — 97/97 (4 new + 93 existing)
-  - [x] Linter clean (ruff check src/ tests/) — test file clean, pre-existing issues in other files unchanged
-  - [x] No debug artifacts, no cosmetic changes outside scope
-  - [x] STATE.md NOT touched (reviewer-only)
-  - [x] Plan SUMMARY.md written
-
 
 
 ---
@@ -42,6 +21,15 @@ Reviewer moves it from Pending → Cleared (or Flagged) after checking.
 ---
 
 ## Cleared
+
+### Pipeline Todo #3 - Incremental Mode for ingest_events — **CLEARED 2026-04-06**
+- **Branch:** worker/todo3-ingest-events-incremental
+- **Cleared by:** Reviewer (Claude Sonnet 4.6)
+- **Tests:** pytest ✓ (97/97 — 4 new incremental tests + 93 existing)
+- **Files in scope:**
+  - `src/polymarket_analytics/commands/ingest_events.py` — `--full` flag, market count check, `closed=None` (first run / --full) vs `closed=False` (incremental)
+  - `tests/test_ingest_events_incremental.py` (NEW) — 4 tests: INCR-01 through INCR-04
+- **Reviewer notes:** Clean pass. Logic correct: `if full or existing_count == 0` → closed=None, else closed=False. All 4 tests match spec exactly. Upsert idempotency verified (INCR-04). No reviewer fixes required. **Ready to merge.**
 
 ### Pipeline Todo #2 - Timestamp-based Selective Re-fetch — **CLEARED 2026-04-06**
 - **Branch:** worker/pipeline-todo-02-timestamps

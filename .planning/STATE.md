@@ -22,7 +22,7 @@ enabling users to follow high-signal trades.
 [██████████████████████████████] 100% - All 8 phases complete
 ```
 
-**Next:** Pipeline todos (see Pending Todos below) — todo #1 done, #2–4 remain
+**Next:** Pipeline todos (see Pending Todos below) — todos #1 and #2 done, #3–4 remain
 
 ---
 
@@ -90,7 +90,7 @@ enabling users to follow high-signal trades.
 3 remaining (1 done) — in dependency order:
 
 1. ~~`fix-unstable-trade-id-fallback-dedup-existing-trades-table`~~ — **DONE (2026-04-06)**
-2. `replace-backfill-complete-boolean-with-timestamps-selective-re-fetch` — last_backfilled_at + last_trade_seen_at, re-fetch only active traders. **Depends on #1 (done).**
+2. ~~`replace-backfill-complete-boolean-with-timestamps-selective-re-fetch`~~ — **DONE (2026-04-06)** last_backfilled_at + last_trade_seen_at, re-fetch only active traders.
 3. `add-incremental-mode-to-ingest-events-skip-full-fetch-on-re-runs` — closed=False on re-runs, full fetch only on first run. **Prerequisite for #4.**
 4. `store-clobtokenids-in-ingest-events-so-classify-tokens-reads-from-db` — eliminate redundant 96K Gamma API call from classify_tokens. **Depends on #3.**
 
@@ -172,8 +172,11 @@ enabling users to follow high-signal trades.
 - **Phase 7 COMPLETE (2026-04-06):** All 3 plans merged — avg_exit_price migration (07-01), FLAT-first resolution + CLV fix (07-02), FLAT position test coverage (07-03). All reviews cleared.
 - **Phase 8 Plan 01 MERGED (2026-04-06):** Schema migration adds 4 signals columns (clv_dominant_count, avg_entry_price, min_entry_price, tier); convergence query computes all 4 inline via SQL. Test fixture end_date bug fixed. 68/68 pass.
 - **Phase 8 Plan 02 MERGED (2026-04-06):** writer.py upserts all 4 new fields with None defaults (backwards-compatible) and pd.isna() guards. detect.py docstring updated. 68/68 pass.
+- **Phase 8 Plan 03 MERGED (2026-04-06):** 9 enrichment integration tests in tests/test_enrichment.py covering all ENRC requirements. Reviewer fix: added avg_exit_price to expected columns in test_scoring_extraction.py. 87/87 pass.
+- **Phase 8 COMPLETE (2026-04-06):** All 3 plans merged. Enrichment fields (clv_dominant_count, avg_entry_price, min_entry_price, tier) fully wired, tested, and persisted.
+- **Pipeline Todo #2 MERGED (2026-04-06):** Timestamp-based selective re-fetch live. last_backfilled_at + last_trade_seen_at columns in traders table. Migration sets timestamps for existing backfill_complete=True traders to prevent mass re-fetch. 93/93 pass.
 
 ---
 
 *State initialized: 2026-03-29*
-*Last updated: 2026-04-06 — Todo #1 (trade_id fix + dedup) complete; 3 pipeline todos remaining*
+*Last updated: 2026-04-06 — Phase 8 complete; todos #1 and #2 done; todos #3 and #4 remaining*
