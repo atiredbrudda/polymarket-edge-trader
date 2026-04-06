@@ -184,6 +184,15 @@ async def _ingest_events_async(ctx, db_path: str, full: bool):
                 event_slug = events[0].get("slug")
                 event_title = events[0].get("title")
 
+            # Extract clobTokenIds from Gamma API response
+            clob_token_ids = market.get("clobTokenIds", [])
+            if isinstance(clob_token_ids, str):
+                try:
+                    clob_token_ids = json.loads(clob_token_ids)
+                except (json.JSONDecodeError, ValueError):
+                    clob_token_ids = []
+            clob_token_ids_json = json.dumps(clob_token_ids) if clob_token_ids else None
+
             markets_records.append(
                 {
                     "condition_id": condition_id,
@@ -198,6 +207,7 @@ async def _ingest_events_async(ctx, db_path: str, full: bool):
                     "tokens": json.dumps([]),
                     "event_slug": event_slug,
                     "event_title": event_title,
+                    "clob_token_ids": clob_token_ids_json,
                 }
             )
 
@@ -219,8 +229,8 @@ async def _ingest_events_async(ctx, db_path: str, full: bool):
             )
             db.conn.executemany(
                 """
-                INSERT INTO markets (condition_id, question, outcome, resolved, niche_slug, created_at, end_date, category, active, tokens, event_slug, event_title)
-                VALUES (:condition_id, :question, :outcome, :resolved, :niche_slug, :created_at, :end_date, :category, :active, :tokens, :event_slug, :event_title)
+                INSERT INTO markets (condition_id, question, outcome, resolved, niche_slug, created_at, end_date, category, active, tokens, event_slug, event_title, clob_token_ids)
+                VALUES (:condition_id, :question, :outcome, :resolved, :niche_slug, :created_at, :end_date, :category, :active, :tokens, :event_slug, :event_title, :clob_token_ids)
                 ON CONFLICT(condition_id) DO UPDATE SET
                     question = excluded.question,
                     outcome = excluded.outcome,
@@ -231,7 +241,8 @@ async def _ingest_events_async(ctx, db_path: str, full: bool):
                     active = excluded.active,
                     tokens = excluded.tokens,
                     event_slug = excluded.event_slug,
-                    event_title = excluded.event_title
+                    event_title = excluded.event_title,
+                    clob_token_ids = excluded.clob_token_ids
                 """,
                 markets_records,
             )

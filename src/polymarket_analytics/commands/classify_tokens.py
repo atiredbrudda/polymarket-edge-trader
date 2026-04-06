@@ -1,10 +1,9 @@
-"""classify-tokens CLI command for building token catalog from Gamma API market data.
+"""classify-tokens CLI command for building token catalog from database market data.
 
-This command fetches markets from the Gamma API and populates the token_catalog
-table with condition_id mappings for all markets in the niche.
+This command reads markets from the database (populated by ingest-events) and populates
+the token_catalog table with condition_id and clobTokenIds mappings.
 """
 
-import asyncio
 import json
 from datetime import datetime
 from pathlib import Path
@@ -13,7 +12,6 @@ import click
 
 from polymarket_analytics.cli import cli
 from polymarket_analytics.db.schema import init_database
-from polymarket_analytics.api.gamma import GammaAPIClient
 
 
 @cli.command()
@@ -24,16 +22,16 @@ from polymarket_analytics.api.gamma import GammaAPIClient
 )
 @click.pass_context
 def classify_tokens(ctx, db_path: str):
-    """Build token catalog for the specified niche.
+    """Build token catalog for the specified niche from DB.
 
-    Fetches markets from Gamma API and populates token_catalog with
-    condition_id mappings for all markets in the niche.
+    Reads markets from database (populated by ingest-events command) and
+    populates token_catalog with condition_id and clobTokenIds mappings.
     """
-    asyncio.run(_classify_tokens_async(ctx, db_path))
+    _classify_tokens_from_db(ctx, db_path)
 
 
-async def _classify_tokens_async(ctx, db_path: str):
-    """Async implementation of classify-tokens command."""
+def _classify_tokens_from_db(ctx, db_path: str):
+    """Build token catalog from database markets."""
     config = ctx.obj["config"]
     niche_slug = config.slug
 
@@ -51,117 +49,108 @@ async def _classify_tokens_async(ctx, db_path: str):
             "No 'markets' table found. Run 'ingest-events' command first to create it."
         )
 
-    # Create Gamma API client
-    client = GammaAPIClient()
+    # Fetch markets from database (already populated by ingest-events)
+    click.echo(f"Fetching markets from database for niche: {niche_slug}")
 
-    try:
-        # Get tag_id from config
-        tag_id = config.tag_id
-        click.echo(f"Fetching markets from Gamma API for tag_id: {tag_id}")
+    markets_rows = db.execute(
+        """
+        SELECT condition_id, question, outcome, category, clob_token_ids
+        FROM markets
+        WHERE niche_slug = ?
+        """,
+        [niche_slug],
+    ).fetchall()
 
-        # Fetch markets from Gamma API (needs clobTokenIds, not stored in gamma_events)
-        def on_page(page: int, total: int) -> None:
-            click.echo(f"  Fetching... page {page} ({total} markets so far)", nl=False)
-            click.echo("\r", nl=False)
-
-        markets = await client.fetch_markets(tag_id, on_page=on_page)
-        click.echo()  # newline after \r progress
-
-        # Assert data fetched (RESL-02)
-        if not markets:
-            raise click.ClickException(
-                f"No markets found for tag_id={tag_id}. "
-                "Check tag_id is correct and niche has active markets."
-            )
-
-        click.echo(f"Fetched {len(markets)} markets from Gamma API")
-
-        # Build token_catalog entries from markets
-        # Each binary market has two real token IDs (YES and NO tokens)
-        token_catalog_records = []
-
-        for market in markets:
-            condition_id = market.get("conditionId", "")
-            question = market.get("question", "")
-            outcomes = market.get("outcomes", "YES,NO")
-            category = market.get("category", niche_slug)
-            tags = market.get("tags", [])
-
-            # Gamma API returns token IDs in clobTokenIds field (not outcomeTokens)
-            clob_token_ids = market.get("clobTokenIds", [])
-            # Handle case where it's a JSON string
-            if isinstance(clob_token_ids, str):
-                try:
-                    clob_token_ids = json.loads(clob_token_ids)
-                except (json.JSONDecodeError, ValueError):
-                    clob_token_ids = []
-
-            # Determine market_type from outcomes
-            outcome_list = outcomes.split(",") if outcomes else []
-            market_type = "binary" if outcome_list == ["YES", "NO"] else "categorical"
-
-            # Build node_path from category/tags
-            node_path = f"{niche_slug}/{category}"
-
-            # Use real token IDs from clobTokenIds, fallback only if empty
-            if clob_token_ids and len(clob_token_ids) >= 2:
-                token_ids = clob_token_ids[:2]  # Take first 2 for binary markets
-            else:
-                # Fallback: generate synthetic IDs (will never match real trades)
-                # Log warning so user knows catalog won't work with real data
-                click.echo(
-                    f"Warning: No clobTokenIds for {condition_id[:16]}... - "
-                    "using synthetic token IDs (won't match real trades)",
-                    err=True,
-                )
-                token_ids = [
-                    f"{condition_id}:0",
-                    f"{condition_id}:1",
-                ]
-
-            # Insert one row per token (YES and NO)
-            for idx, token_id in enumerate(token_ids):
-                outcome_name = (
-                    outcome_list[idx] if idx < len(outcome_list) else f"OUTCOME_{idx}"
-                )
-                token_catalog_records.append(
-                    {
-                        "token_id": token_id,
-                        "condition_id": condition_id,
-                        "question": question,
-                        "niche_slug": niche_slug,
-                        "node_path": node_path,
-                        "market_type": market_type,
-                        "created_at": datetime.now().isoformat(),
-                    }
-                )
-
-        # Filter to condition_ids that exist in markets (FK constraint)
-        known_cids = set(
-            row[0] for row in db.execute("SELECT condition_id FROM markets").fetchall()
-        )
-        filtered_records = [r for r in token_catalog_records if r["condition_id"] in known_cids]
-        skipped = len(token_catalog_records) - len(filtered_records)
-
-        with db.conn:
-            db.conn.executemany(
-                """
-                INSERT INTO token_catalog (token_id, condition_id, question, niche_slug, node_path, market_type, created_at)
-                VALUES (:token_id, :condition_id, :question, :niche_slug, :node_path, :market_type, :created_at)
-                ON CONFLICT(token_id) DO UPDATE SET
-                    condition_id = excluded.condition_id,
-                    question = excluded.question,
-                    niche_slug = excluded.niche_slug,
-                    node_path = excluded.node_path,
-                    market_type = excluded.market_type
-                """,
-                filtered_records,
-            )
-
-        click.echo(
-            f"Built token catalog with {len(filtered_records)} entries for niche '{niche_slug}'"
-            + (f" ({skipped} skipped — not yet in markets table)" if skipped else "")
+    # Assert data exists (RESL-02)
+    if not markets_rows:
+        raise click.ClickException(
+            f"No markets found for niche '{niche_slug}'. "
+            "Run 'ingest-events' command first to populate markets table."
         )
 
-    finally:
-        await client.close()
+    click.echo(f"Found {len(markets_rows)} markets in database")
+
+    # Build token_catalog entries from DB rows
+    token_catalog_records = []
+
+    for row in markets_rows:
+        condition_id = row[0]
+        question = row[1]
+        outcomes = row[2] or "YES,NO"
+        category = row[3] or niche_slug
+        clob_token_ids_raw = row[4]
+
+        # Parse clob_token_ids from JSON string
+        if clob_token_ids_raw:
+            try:
+                clob_token_ids = json.loads(clob_token_ids_raw)
+            except (json.JSONDecodeError, ValueError):
+                clob_token_ids = []
+        else:
+            clob_token_ids = []
+
+        # Determine market_type from outcomes
+        outcome_list = outcomes.split(",") if outcomes else []
+        market_type = "binary" if outcome_list == ["YES", "NO"] else "categorical"
+
+        # Build node_path from category/tags
+        node_path = f"{niche_slug}/{category}"
+
+        # Use real token IDs from clobTokenIds, fallback only if empty
+        if clob_token_ids and len(clob_token_ids) >= 2:
+            token_ids = clob_token_ids[:2]  # Take first 2 for binary markets
+        else:
+            # Fallback: generate synthetic IDs (will never match real trades)
+            # Log warning so user knows catalog won't work with real data
+            click.echo(
+                f"Warning: No clobTokenIds for {condition_id[:16]}... - "
+                "using synthetic token IDs (won't match real trades)",
+                err=True,
+            )
+            token_ids = [
+                f"{condition_id}:0",
+                f"{condition_id}:1",
+            ]
+
+        # Insert one row per token (YES and NO)
+        for idx, token_id in enumerate(token_ids):
+            token_catalog_records.append(
+                {
+                    "token_id": token_id,
+                    "condition_id": condition_id,
+                    "question": question,
+                    "niche_slug": niche_slug,
+                    "node_path": node_path,
+                    "market_type": market_type,
+                    "created_at": datetime.now().isoformat(),
+                }
+            )
+
+    # Filter to condition_ids that exist in markets (FK constraint)
+    known_cids = set(
+        row[0] for row in db.execute("SELECT condition_id FROM markets").fetchall()
+    )
+    filtered_records = [
+        r for r in token_catalog_records if r["condition_id"] in known_cids
+    ]
+    skipped = len(token_catalog_records) - len(filtered_records)
+
+    with db.conn:
+        db.conn.executemany(
+            """
+            INSERT INTO token_catalog (token_id, condition_id, question, niche_slug, node_path, market_type, created_at)
+            VALUES (:token_id, :condition_id, :question, :niche_slug, :node_path, :market_type, :created_at)
+            ON CONFLICT(token_id) DO UPDATE SET
+                condition_id = excluded.condition_id,
+                question = excluded.question,
+                niche_slug = excluded.niche_slug,
+                node_path = excluded.node_path,
+                market_type = excluded.market_type
+            """,
+            filtered_records,
+        )
+
+    click.echo(
+        f"Built token catalog with {len(filtered_records)} entries for niche '{niche_slug}'"
+        + (f" ({skipped} skipped — not yet in markets table)" if skipped else "")
+    )

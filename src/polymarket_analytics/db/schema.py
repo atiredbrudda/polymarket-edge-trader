@@ -312,6 +312,11 @@ def run_migrations(db):
                   AND last_backfilled_at IS NULL
             """)
 
+    if "markets" in db.table_names():
+        markets_cols = {col.name for col in db["markets"].columns}
+        if "clob_token_ids" not in markets_cols:
+            db["markets"].add_column("clob_token_ids", str)
+
 
 def init_database(db_path: Path):
     """Initialize database with all tables and indexes.
