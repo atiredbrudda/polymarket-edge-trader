@@ -43,24 +43,24 @@ _SLUG_GAME_MAP: Dict[str, str] = {
 # Map tournament slug prefixes → game (for organizer-branded slugs with no game prefix).
 # Checked longest prefix first to avoid shorter prefix shadowing longer ones.
 _TOURNAMENT_PREFIX_MAP: list = [
-    ("blast-bounty",        "CS2"),
-    ("blast-open",          "CS2"),
-    ("blast-rivals",        "CS2"),
-    ("blast-slam",          "CS2"),
-    ("blastopen",           "CS2"),
-    ("dreamhack-major",     "CS2"),
-    ("esl-pro-league",      "CS2"),
-    ("esl-one-birmingham",  "Dota 2"),
-    ("fissure-playground",  "CS2"),
-    ("iem",                 "CS2"),
-    ("pgl-astana",          "CS2"),
-    ("pgl-bucharest",       "CS2"),
-    ("pgl-wallachia",       "Dota 2"),
-    ("thunderpick-wc",      "CS2"),
-    ("optic-texas-major",   "Call of Duty"),
-    ("betboom-rush-b",      "CS2"),
-    ("first-stand",         "LoL"),
-    ("msi-playoffs",        "LoL"),
+    ("blast-bounty", "CS2"),
+    ("blast-open", "CS2"),
+    ("blast-rivals", "CS2"),
+    ("blast-slam", "CS2"),
+    ("blastopen", "CS2"),
+    ("dreamhack-major", "CS2"),
+    ("esl-pro-league", "CS2"),
+    ("esl-one-birmingham", "Dota 2"),
+    ("fissure-playground", "CS2"),
+    ("iem", "CS2"),
+    ("pgl-astana", "CS2"),
+    ("pgl-bucharest", "CS2"),
+    ("pgl-wallachia", "Dota 2"),
+    ("thunderpick-wc", "CS2"),
+    ("optic-texas-major", "Call of Duty"),
+    ("betboom-rush-b", "CS2"),
+    ("first-stand", "LoL"),
+    ("msi-playoffs", "LoL"),
     ("geng-global-academy", "LoL"),
 ]
 
@@ -98,6 +98,7 @@ def _parse_event_slug(slug: str) -> Dict[str, Optional[str]]:
         if slug.startswith(tournament_prefix):
             return {"game": tournament_game}
     return {}
+
 
 import click
 from rich.console import Console
@@ -253,9 +254,13 @@ async def backfill_trader(
             price_str = str(trade.get("price", "0"))
             size_str = str(trade.get("size", "0"))
             timestamp = trade.get("timestamp")
-            trade_id = trade.get("trade_id") or trade.get("txHash") or hashlib.sha256(
-                f"{trader_address}:{token_id}:{side}:{price_str}:{size_str}:{timestamp}".encode()
-            ).hexdigest()[:32]
+            trade_id = (
+                trade.get("trade_id")
+                or trade.get("txHash")
+                or hashlib.sha256(
+                    f"{trader_address}:{token_id}:{side}:{price_str}:{size_str}:{timestamp}".encode()
+                ).hexdigest()[:32]
+            )
 
         if not token_id:
             stats["skipped"] += 1
@@ -322,9 +327,24 @@ async def backfill_trader(
         except Exception:
             stats["skipped"] += 1
 
-    # Mark trader as backfill complete
+    # Mark trader as backfill complete and update timestamps
     if stats["ingested"] > 0 or stats["skipped"] > 0:
-        db["traders"].update(trader_address, {"backfill_complete": True})
+        # Compute max trade timestamp from ingested trades
+        max_trade_timestamp = None
+        for trade in api_trades:
+            ts = trade.get("timestamp")
+            if ts:
+                if max_trade_timestamp is None or ts > max_trade_timestamp:
+                    max_trade_timestamp = ts
+
+        db["traders"].update(
+            trader_address,
+            {
+                "last_backfilled_at": datetime.now(timezone.utc).isoformat(),
+                "last_trade_seen_at": max_trade_timestamp,
+                "backfill_complete": True,
+            },
+        )
 
     return stats
 
@@ -373,17 +393,43 @@ async def backfill_async(ctx, db_path: str) -> None:
     )
     dedup_count = dedup_result.rowcount if dedup_result else 0
     if dedup_count:
-        console.print(f"  [yellow]⚠ Removed {dedup_count:,} duplicate trade(s) from prior runs[/yellow]")
+        console.print(
+            f"  [yellow]⚠ Removed {dedup_count:,} duplicate trade(s) from prior runs[/yellow]"
+        )
 
-    # Query traders needing backfill
-    traders = list(db.query(
-        "SELECT address FROM traders WHERE backfill_complete = False OR backfill_complete IS NULL"
-    ))
+    # Query traders needing backfill using timestamp-based selection
+    # Selection logic:
+    # - last_trade_seen_at IS NULL → new trader, never backfilled, include
+    # - last_backfilled_at IS NULL → never backfilled (new trader not yet migrated), include
+    # - last_trade_seen_at >= cutoff (40 days ago) → recent activity, include
+    # - last_backfilled_at < threshold (6 hours ago) → not recently refreshed, include
+    COVERAGE_DAYS = 40
+    REFRESH_HOURS = 6
+    cutoff = (datetime.now(timezone.utc) - timedelta(days=COVERAGE_DAYS)).isoformat()
+    threshold = (
+        datetime.now(timezone.utc) - timedelta(hours=REFRESH_HOURS)
+    ).isoformat()
+
+    traders = list(
+        db.execute(
+            """
+        SELECT address FROM traders
+        WHERE
+            (last_trade_seen_at IS NULL OR last_trade_seen_at >= :cutoff)
+            AND (last_backfilled_at IS NULL OR last_backfilled_at < :threshold)
+    """,
+            {"cutoff": cutoff, "threshold": threshold},
+        ).fetchall()
+    )
 
     if not traders:
-        console.print("[green]All traders already backfilled. Skipping to entity extraction.[/green]")
+        console.print(
+            "[green]All traders already backfilled. Skipping to entity extraction.[/green]"
+        )
     else:
-        console.print(f"[bold]Step 1/2[/bold] Fetching trades for {len(traders):,} traders...")
+        console.print(
+            f"[bold]Step 1/2[/bold] Fetching trades for {len(traders):,} traders..."
+        )
 
     if traders:
         # Initialize API clients
@@ -473,8 +519,9 @@ async def backfill_async(ctx, db_path: str) -> None:
     # -------------------------------------------------------------------------
     console.print("\n[bold]Step 2/2[/bold] Post-backfill entity extraction...")
 
-    markets_needing_entities = list(db.query(
-        """
+    markets_needing_entities = list(
+        db.query(
+            """
         SELECT DISTINCT t.market_id AS condition_id, m.question, m.event_slug
         FROM trades t
         JOIN markets m ON m.condition_id = t.market_id
@@ -483,14 +530,17 @@ async def backfill_async(ctx, db_path: str) -> None:
           AND m.niche_slug = :niche
           AND m.question IS NOT NULL
         """,
-        {"niche": niche},
-    ))
+            {"niche": niche},
+        )
+    )
 
     if not markets_needing_entities:
         console.print("  [green]✓[/green] All markets already have entities extracted.")
         return
 
-    console.print(f"  Found {len(markets_needing_entities):,} markets without entity rows")
+    console.print(
+        f"  Found {len(markets_needing_entities):,} markets without entity rows"
+    )
 
     # Setup extractors
     pattern_matcher = EntityPatternMatcher()
@@ -513,8 +563,11 @@ async def backfill_async(ctx, db_path: str) -> None:
         slug = row[0]
         if slug and slug not in event_slug_entities:
             event_slug_entities[slug] = {
-                "game": row[1], "team_a": row[2], "team_b": row[3],
-                "tournament": row[4], "market_type": row[5],
+                "game": row[1],
+                "team_a": row[2],
+                "team_b": row[3],
+                "tournament": row[4],
+                "market_type": row[5],
             }
 
     entity_records: List[Dict[str, Any]] = []
@@ -597,15 +650,17 @@ async def backfill_async(ctx, db_path: str) -> None:
                 if event_slug and event_slug not in event_slug_entities:
                     event_slug_entities[event_slug] = entities
 
-            entity_records.append({
-                "id": _entity_id(cid, entities),
-                "condition_id": cid,
-                "game": entities.get("game"),
-                "team_a": entities.get("team_a"),
-                "team_b": entities.get("team_b"),
-                "tournament": entities.get("tournament"),
-                "market_type": entities.get("market_type"),
-            })
+            entity_records.append(
+                {
+                    "id": _entity_id(cid, entities),
+                    "condition_id": cid,
+                    "game": entities.get("game"),
+                    "team_a": entities.get("team_a"),
+                    "team_b": entities.get("team_b"),
+                    "tournament": entities.get("tournament"),
+                    "market_type": entities.get("market_type"),
+                }
+            )
 
             progress.update(task, description=_desc())
             progress.advance(task)

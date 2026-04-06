@@ -10,11 +10,22 @@ Reviewer moves it from Pending → Cleared (or Flagged) after checking.
 <!-- Worker adds entries here -->
 
 
+
 ---
 
 ## Flagged
 
 <!-- Reviewer moves entries here if issues found. Worker fixes and re-adds to Pending. -->
+
+### Pipeline Todo #2 - Timestamp-based Selective Re-fetch — **FLAGGED 2026-04-06**
+- **Branch:** worker/pipeline-todo-02-timestamps
+- **Flagged by:** Reviewer (Claude Sonnet 4.6)
+- **Issue:** `last_trade_seen_at` type mismatch — stores a raw Unix timestamp integer (e.g. `1775431309`) into a TEXT column, but the selection query compares it against `cutoff` which is an ISO datetime string (`"2026-02-25T03:35:54+00:00"`). SQLite text comparison always evaluates `"17..."` < `"20..."`, so after any successful backfill `last_trade_seen_at >= :cutoff` is permanently FALSE. The trader falls out of selection on all subsequent runs. Tests don't catch this because post-migration traders have `last_trade_seen_at IS NULL` (takes the NULL branch) and test fixtures never hit the update path.
+- **Fix required in `backfill.py`:** Convert Unix timestamp to ISO before storing:
+  ```python
+  "last_trade_seen_at": datetime.fromtimestamp(max_trade_timestamp, tz=timezone.utc).isoformat() if max_trade_timestamp else None,
+  ```
+- **Fix required in tests:** Add a test that backfills a trader, then runs selection again — trader with recent `last_trade_seen_at` should be re-included, trader with old `last_trade_seen_at` should be excluded.
 
 
 ---

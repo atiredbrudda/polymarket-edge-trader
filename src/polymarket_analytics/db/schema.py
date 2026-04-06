@@ -294,6 +294,24 @@ def run_migrations(db):
         if "tier" not in signals_cols:
             db.execute("ALTER TABLE signals ADD COLUMN tier TEXT")
 
+    if "traders" in db.table_names():
+        traders_cols = {col.name for col in db["traders"].columns}
+        if "last_backfilled_at" not in traders_cols:
+            db.execute("ALTER TABLE traders ADD COLUMN last_backfilled_at TEXT")
+        if "last_trade_seen_at" not in traders_cols:
+            db.execute("ALTER TABLE traders ADD COLUMN last_trade_seen_at TEXT")
+        # Migrate existing data: set last_backfilled_at for traders already marked complete
+        # This prevents mass re-fetch on first run after migration
+        # Only run UPDATE if table has rows (skip on fresh test databases)
+        row_count = db.execute("SELECT COUNT(*) FROM traders").fetchone()[0]
+        if row_count > 0:
+            db.execute("""
+                UPDATE traders
+                SET last_backfilled_at = datetime('now')
+                WHERE backfill_complete = 1
+                  AND last_backfilled_at IS NULL
+            """)
+
 
 def init_database(db_path: Path):
     """Initialize database with all tables and indexes.
