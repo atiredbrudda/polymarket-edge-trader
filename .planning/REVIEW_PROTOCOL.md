@@ -89,7 +89,8 @@ Reviewer:
    - "Next" line: reflect new remaining todos
    - Last updated: timestamp + one-line summary of what changed
 4. Updates ROADMAP.md phase status if last plan of a phase
-5. Commits STATE.md + REVIEW_QUEUE.md on a worker branch, merges to main
+5. If clearing a todo (not a phase plan): move the todo file from `todos/pending/` → `todos/done/`
+6. Commits STATE.md + REVIEW_QUEUE.md + any moved todo files on a worker branch, merges to main
 
 **Why --no-verify on merge commits:** The pre-commit hook blocks direct commits to main to protect against accidental code changes. Merge commits are explicitly authorized reviewer actions — bypassing the hook for merges is correct and intentional.
 
