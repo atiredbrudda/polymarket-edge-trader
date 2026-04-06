@@ -337,11 +337,22 @@ async def backfill_trader(
                 if max_trade_timestamp is None or ts > max_trade_timestamp:
                     max_trade_timestamp = ts
 
+        # Convert to ISO format if Unix timestamp
+        last_trade_iso = None
+        if max_trade_timestamp:
+            if isinstance(max_trade_timestamp, int):
+                last_trade_iso = datetime.fromtimestamp(
+                    max_trade_timestamp, tz=timezone.utc
+                ).isoformat()
+            else:
+                # Already ISO string
+                last_trade_iso = str(max_trade_timestamp)
+
         db["traders"].update(
             trader_address,
             {
                 "last_backfilled_at": datetime.now(timezone.utc).isoformat(),
-                "last_trade_seen_at": max_trade_timestamp,
+                "last_trade_seen_at": last_trade_iso,
                 "backfill_complete": True,
             },
         )

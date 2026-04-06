@@ -32,6 +32,17 @@ Reviewer moves it from Pending → Cleared (or Flagged) after checking.
 
 ## Cleared
 
+### Pipeline Todo #2 - Timestamp-based Selective Re-fetch — **CLEARED 2026-04-06**
+- **Branch:** worker/pipeline-todo-02-timestamps
+- **Cleared by:** Reviewer (Claude Sonnet 4.6)
+- **Tests:** pytest ✓ (93/93 — 6 new timestamp selection tests + 87 existing)
+- **Files in scope:**
+  - `src/polymarket_analytics/db/schema.py` — migration adds `last_backfilled_at` + `last_trade_seen_at` TEXT columns; migrates existing `backfill_complete=1` traders to prevent mass re-fetch on first run
+  - `src/polymarket_analytics/commands/backfill.py` — timestamp-based selection query replaces boolean; ISO conversion for `last_trade_seen_at`; both timestamps updated after backfill
+  - `tests/test_backfill_timestamps.py` (NEW) — 6 tests: NULL selection, recently-refreshed skip, recent-activity include, stale-trader skip, format conversion, ISO storage
+- **Reviewer fix (round 1):** Flagged `last_trade_seen_at` type mismatch — Unix int stored in TEXT column compared against ISO datetime string. Worker fixed with `isinstance(int)` guard + `datetime.fromtimestamp(...).isoformat()`.
+- **Notes:** Fix is correct and targeted. Minor: `test_db` fixture injected but unused in test signatures — harmless. No reviewer fixes required this round. **Ready to merge.**
+
 ### Phase 08 Plan 03 - Enrichment Test Coverage — **CLEARED 2026-04-06**
 - **Branch:** worker/08-detect-enrichment-p03
 - **Cleared by:** Reviewer (Claude Sonnet 4.6)
