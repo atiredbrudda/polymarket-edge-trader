@@ -18,7 +18,11 @@ import click
 
 
 def calculate_pnl(
-    direction: str, outcome: str, size: Decimal, avg_entry_price: Decimal
+    direction: str,
+    outcome: str,
+    size: Decimal,
+    avg_entry_price: Decimal,
+    avg_exit_price: Decimal = None,
 ) -> Decimal:
     """Calculate PnL for a single position using pure Python.
 
@@ -31,11 +35,14 @@ def calculate_pnl(
         outcome: Market outcome (YES, NO)
         size: Position size (absolute value)
         avg_entry_price: Average entry price (0.0 to 1.0)
+        avg_exit_price: Average exit price (optional, used for FLAT positions)
 
     Returns:
         PnL as Decimal (positive = profit, negative = loss)
     """
     if direction == "FLAT":
+        if avg_exit_price is not None:
+            return size * (avg_exit_price - avg_entry_price)
         return Decimal("0")
 
     if direction == "LONG":
@@ -86,7 +93,7 @@ def resolve_position_pnl(db: Any, niche_slug: str) -> int:
             "No unresolved positions found. All positions already resolved."
         )
 
-    # 2. Assert markets table has outcomes set
+    # 2. Assert markets table has outcomes set (relaxed for FLAT positions)
     markets_with_outcomes = db.execute(
         """
         SELECT COUNT(*) as cnt
@@ -95,13 +102,18 @@ def resolve_position_pnl(db: Any, niche_slug: str) -> int:
         """
     ).fetchone()[0]
 
-    if markets_with_outcomes == 0:
+    flat_resolvable = db.execute(
+        "SELECT COUNT(*) as cnt FROM positions WHERE direction = 'FLAT' AND avg_exit_price IS NOT NULL AND resolved = 0"
+    ).fetchone()[0]
+
+    if markets_with_outcomes == 0 and flat_resolvable == 0:
         raise click.ClickException(
-            "No market outcomes found. Run resolve-outcomes command first."
+            "No market outcomes found and no FLAT positions with exit price. "
+            "Run resolve-outcomes command first."
         )
 
     # 3. Assert at least one position can be resolved (JOIN produces results)
-    resolvable_count = db.execute(
+    resolvable_via_outcome = db.execute(
         """
         SELECT COUNT(*) as cnt
         FROM positions p
@@ -110,12 +122,32 @@ def resolve_position_pnl(db: Any, niche_slug: str) -> int:
         """
     ).fetchone()[0]
 
-    if resolvable_count == 0:
+    resolvable_via_flat = flat_resolvable
+
+    if resolvable_via_outcome == 0 and resolvable_via_flat == 0:
         raise click.ClickException(
             "No positions have resolvable markets. Either all resolved or markets lack outcomes."
         )
 
-    # Execute SQL UPDATE with CASE expression
+    # Execute FLAT-first UPDATE pass (resolve FLAT positions via exit price)
+    db.execute(
+        """
+        UPDATE positions
+        SET
+            resolved = 1,
+            outcome = CASE
+                WHEN size * (avg_exit_price - avg_entry_price) > 0 THEN 'WIN'
+                WHEN size * (avg_exit_price - avg_entry_price) < 0 THEN 'LOSS'
+                ELSE 'FLAT'
+            END,
+            pnl = size * (avg_exit_price - avg_entry_price)
+        WHERE direction = 'FLAT'
+          AND avg_exit_price IS NOT NULL
+          AND resolved = 0
+        """
+    )
+
+    # Execute SQL UPDATE with CASE expression for market-outcome resolution
     # Updates resolved, outcome, and pnl in a single query
     db.execute(
         """
@@ -161,4 +193,4 @@ def resolve_position_pnl(db: Any, niche_slug: str) -> int:
     db.conn.commit()
 
     # Return count of positions resolved
-    return resolvable_count
+    return resolvable_via_outcome + resolvable_via_flat

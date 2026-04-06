@@ -21,18 +21,6 @@ Reviewer moves it from Pending → Cleared (or Flagged) after checking.
 
 ## Cleared
 
-### Phase 08 Plan 01 - Schema Migration + Convergence Enrichment — **CLEARED 2026-04-06**
-- **Branch:** worker/08-detect-enrichment-p01
-- **Cleared by:** Reviewer (Claude Sonnet 4.6)
-- **Commits:** 06f13c8
-- **Tests:** pytest ✓ (68/68 pass)
-- **Files in scope:**
-  - `src/polymarket_analytics/db/schema.py` — migration-safe ALTER TABLE adds 4 signals columns
-  - `src/polymarket_analytics/detection/convergence.py` — 4 new fields computed inline in SQL
-  - `tests/conftest.py` — create_market() accepts optional end_date (backwards-compatible)
-  - `tests/test_detection.py` — future_end_date fixture, all tests pass end_date to create_market()
-- **Reviewer notes:** Clean pass. clv_dominant_count correctly scoped to Q5 traders (WHERE quintile=5 already applied). MIN/AVG entry price naturally scoped by direction via GROUP BY. Tier CASE correct; WATCH branch technically unreachable (HAVING >= 2) but spec-faithful. MAX(computed_at) subquery from Phase 6 reviewer fix intact. create_market() fixture fix is backwards-compatible — non-detection tests unaffected. No reviewer fixes required.
-
 ### Phase 07 Plan 03 - FLAT Position Test Coverage — **CLEARED 2026-04-05**
 - **Branch:** worker/07-flat-position-tracking-p02
 - **Cleared by:** Reviewer (Claude Sonnet 4.6)
