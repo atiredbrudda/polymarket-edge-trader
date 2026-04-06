@@ -12,17 +12,17 @@ enabling users to follow high-signal trades.
 
 ## Current Position
 
-**Phase:** 08-detect-enrichment
+**Phase:** Post-Phase-8 — Pipeline todos
 
-**Plan:** 02 - complete (08-03 remains)
-
-**Status:** 🔄 In Progress
+**Status:** ✅ Phase 8 Complete — working through pipeline data integrity todos
 
 **Progress:**
 
 ```
-[█████████████████████████████░] 93% - Phase 7/8 complete + Phase 8 Plans 01-02 merged
+[██████████████████████████████] 100% - All 8 phases complete
 ```
+
+**Next:** Pipeline todos (see Pending Todos below) — todo #1 done, #2–4 remain
 
 ---
 
