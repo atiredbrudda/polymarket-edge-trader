@@ -13,7 +13,7 @@ files:
 
 ## Solution
 
-Use the existing `closed` parameter on `GammaAPIClient.fetch_markets()` to branch on first vs subsequent runs:
+**1. Branch on first run vs re-run using market count:**
 
 ```python
 existing_count = db.execute(
@@ -21,13 +21,24 @@ existing_count = db.execute(
 ).fetchone()[0]
 
 if existing_count == 0:
-    markets = await client.fetch_markets(tag_id)           # full fetch — first run
+    markets = await client.fetch_markets(tag_id)            # full — first run
 else:
     markets = await client.fetch_markets(tag_id, closed=False)  # active only — re-run
 ```
 
-New markets always arrive as `active=True, closed=False`. Already-seen open markets re-upsert harmlessly via `ON CONFLICT DO UPDATE`. Resolution updates (closed markets gaining an outcome) are `resolve-outcomes`' responsibility — `ingest_events` doesn't own that state.
+New markets always arrive as `active=True, closed=False`. Already-seen open markets re-upsert harmlessly via `ON CONFLICT DO UPDATE`. Resolution updates (closed markets gaining an outcome) are `resolve-outcomes`' responsibility — but `resolve-outcomes` reads from `gamma_events`, so it can only resolve what `ingest_events` has stored. Newly resolved markets won't appear in the `closed=False` fetch and won't get their outcome updated in `gamma_events`. This is an accepted limitation of incremental mode.
 
-This reduces re-run cost from 96K markets to the small active subset.
+**2. Add a `--full` flag as explicit escape hatch:**
 
-**Prerequisite for todo #4** — `classify_tokens` DB-first approach depends on `ingest_events` storing `clobTokenIds`.
+```python
+@click.option("--full", is_flag=True, default=False,
+              help="Force full fetch regardless of existing data (use after failures or for resolution sweep)")
+```
+
+When `--full` is passed, always fetch `closed=None` (everything). This handles:
+- Partial failure recovery: if a previous run crashed mid-way, `existing_count > 0` but data is incomplete. Without `--full`, incremental mode runs forever and misses the skipped pages.
+- Periodic resolution sweep: run `--full` weekly/on-demand to catch markets that resolved since the last full fetch.
+
+Without `--full`, there's no escape from a partial failure — the count check permanently locks the command into incremental mode with a data gap.
+
+**Prerequisite for todo #4** — `classify_tokens` DB-first depends on `ingest_events` storing `clobTokenIds`.

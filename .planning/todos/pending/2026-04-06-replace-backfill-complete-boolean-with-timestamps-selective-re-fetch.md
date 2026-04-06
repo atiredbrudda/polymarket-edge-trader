@@ -17,14 +17,50 @@ The Data API has no `since=` parameter — every re-fetch is a full history pull
 
 ## Solution
 
-1. Add `last_backfilled_at` (TIMESTAMP) and `last_trade_seen_at` (TIMESTAMP) columns to the `traders` table (schema migration in `schema.py`).
+**1. Schema migration — add two columns to `traders` table:**
 
-2. After each successful backfill, set `last_backfilled_at = now()` and `last_trade_seen_at = max(trade.timestamp)` for that trader.
+```sql
+ALTER TABLE traders ADD COLUMN last_backfilled_at TEXT;
+ALTER TABLE traders ADD COLUMN last_trade_seen_at TEXT;
+```
 
-3. Re-fetch criteria: trader is eligible for re-fetch if:
-   - `last_trade_seen_at` is within the 40-day scoring window (still affects scores), AND
-   - `last_backfilled_at` is older than a refresh threshold (e.g. 6 hours)
+Add to `run_migrations()` in `schema.py` with existence check (same pattern as other migrations).
 
-4. Remove the `backfill_complete` boolean or keep it for legacy compatibility but stop using it as the sole gate.
+**2. Migration of existing data — prevent mass re-fetch on first run:**
 
-**Depends on todo #1 (stable trade_id) being done first — re-fetching without stable IDs corrupts data.**
+After adding the columns, set `last_backfilled_at = datetime.now()` for all traders where `backfill_complete = True`. Without this, all existing traders have `last_backfilled_at = NULL` and the re-fetch query treats them as "never backfilled" → triggers a full re-fetch of every trader on the first run after migration. This is the exact expensive scenario we're trying to avoid.
+
+```sql
+UPDATE traders
+SET last_backfilled_at = datetime('now')
+WHERE backfill_complete = 1
+```
+
+**3. Re-fetch selection query (replaces line 361 in backfill.py):**
+
+```sql
+SELECT address FROM traders
+WHERE
+  (last_trade_seen_at IS NULL OR last_trade_seen_at >= :cutoff)
+  AND (last_backfilled_at IS NULL OR last_backfilled_at < :threshold)
+```
+
+NULL handling is explicit:
+- `last_trade_seen_at IS NULL` → new trader, never backfilled, include
+- `last_backfilled_at IS NULL` → never backfilled (new trader not yet migrated), include
+- `last_trade_seen_at < cutoff` → last known trade older than 40 days, skip (doesn't affect scores)
+- `last_backfilled_at >= threshold` → recently refreshed, skip
+
+`cutoff` = now - 40 days. `threshold` = now - refresh interval (e.g. 6 hours, hardcoded initially).
+
+**4. After each successful backfill, update both timestamps:**
+
+```python
+db["traders"].update(trader_address, {
+    "last_backfilled_at": datetime.now(timezone.utc).isoformat(),
+    "last_trade_seen_at": max_trade_timestamp,  # max(trade["timestamp"]) from ingested trades
+    "backfill_complete": True,  # keep for backwards compatibility
+})
+```
+
+**Depends on todo #1 (stable trade_id) being done first.**
