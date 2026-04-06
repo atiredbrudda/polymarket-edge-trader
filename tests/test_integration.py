@@ -208,21 +208,20 @@ def test_schema_matches_guide(test_db: sqlite_utils.Database):
 
 
 def test_classify_tokens_uses_clob_token_ids(test_db: sqlite_utils.Database, tmp_path):
-    """TCAT-04: classify_tokens CLI correctly reads clobTokenIds from Gamma API.
+    """TCAT-04: classify_tokens reads clobTokenIds from database (not API).
 
-    This test mocks the Gamma API response with realistic clobTokenIds
-    and asserts that the stored token IDs match (not synthetic fallback).
+    This test verifies that classify_tokens correctly reads clob_token_ids
+    from the markets table and uses real token IDs (not synthetic fallback).
 
     Args:
         test_db: Temporary database fixture
         tmp_path: pytest tmp_path fixture for test database
 
     Asserts:
-        - Token IDs in catalog match clobTokenIds from mock API
-        - No synthetic token IDs generated when clobTokenIds present
+        - Token IDs in catalog match clob_token_ids from DB
+        - No synthetic token IDs generated when clob_token_ids present
+        - No Gamma API calls are made
     """
-    from unittest.mock import AsyncMock, patch
-
     db_path = tmp_path / "test.db"
 
     # Initialize schema
@@ -230,11 +229,11 @@ def test_classify_tokens_uses_clob_token_ids(test_db: sqlite_utils.Database, tmp
 
     db = init_database(db_path)
 
-    # Create markets table (dependency for classify_tokens)
+    # Create markets table with clob_token_ids populated (simulating post-ingest-events state)
     db["markets"].insert(
         {
             "condition_id": "0x123abc",
-            "question": "Test market",
+            "question": "Team A vs Team B",
             "outcome": None,
             "resolved": False,
             "niche_slug": "esports",
@@ -244,19 +243,10 @@ def test_classify_tokens_uses_clob_token_ids(test_db: sqlite_utils.Database, tmp
             "active": True,
             "tokens": "[]",
             "event_slug": None,
+            "clob_token_ids": '["12345678901234567890", "98765432109876543210"]',
         },
         pk="condition_id",
     )
-
-    # Mock Gamma API response with realistic clobTokenIds
-    mock_market = {
-        "conditionId": "0x123abc",
-        "question": "Team A vs Team B",
-        "outcomes": "YES,NO",
-        "clobTokenIds": ["12345678901234567890", "98765432109876543210"],
-        "category": "esports",
-        "tags": [],
-    }
 
     # Mock config object
     class MockConfig:
@@ -266,22 +256,12 @@ def test_classify_tokens_uses_clob_token_ids(test_db: sqlite_utils.Database, tmp
     class MockContext:
         obj = {"config": MockConfig()}
 
-    # Run classify_tokens with mocked API
-    from polymarket_analytics.commands.classify_tokens import _classify_tokens_async
+    # Run classify_tokens (DB-first, no API calls)
+    from polymarket_analytics.commands.classify_tokens import _classify_tokens_from_db
 
-    async def run_test():
-        with patch(
-            "polymarket_analytics.commands.classify_tokens.GammaAPIClient.fetch_markets",
-            new_callable=AsyncMock,
-        ) as mock_fetch:
-            mock_fetch.return_value = [mock_market]
-            await _classify_tokens_async(MockContext(), str(db_path))
+    _classify_tokens_from_db(MockContext(), str(db_path))
 
-    import asyncio
-
-    asyncio.run(run_test())
-
-    # Assert token IDs match clobTokenIds (not synthetic)
+    # Assert token IDs match clob_token_ids (not synthetic)
     stored_tokens = [row["token_id"] for row in db["token_catalog"].rows]
 
     expected_tokens = ["12345678901234567890", "98765432109876543210"]
