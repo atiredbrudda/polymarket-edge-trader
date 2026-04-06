@@ -9,20 +9,23 @@ Reviewer moves it from Pending → Cleared (or Flagged) after checking.
 
 <!-- Worker adds entries here -->
 
-### Pipeline Todo #2 - Timestamp-based Selective Re-fetch — **2026-04-06**
+### Pipeline Todo #2 - Timestamp-based Selective Re-fetch — **2026-04-06 (fix)**
 - **Branch:** worker/pipeline-todo-02-timestamps
 - **Todo:** .planning/todos/done/2026-04-06-replace-backfill-complete-boolean-with-timestamps-selective-re-fetch.md
-- **Commits:** 2d18fad
+- **Commits:** 2d18fad..ad804c9
+- **Fixes:** `last_trade_seen_at` type mismatch — now converts Unix timestamp to ISO format before storing
 - **Files changed:**
   - src/polymarket_analytics/db/schema.py (MODIFIED) — migration adds last_backfilled_at + last_trade_seen_at columns, migrates existing data
-  - src/polymarket_analytics/commands/backfill.py (MODIFIED) — timestamp-based query, update both timestamps after backfill
+  - src/polymarket_analytics/commands/backfill.py (MODIFIED) — timestamp-based query, ISO conversion, update both timestamps after backfill
+  - tests/test_backfill_timestamps.py (NEW) — 6 tests for timestamp selection logic
 - **Worker notes:**
   - Migration sets last_backfilled_at=datetime('now') for existing backfill_complete=1 traders to prevent mass re-fetch
   - UPDATE only runs if traders table has rows (avoids test fixture issues)
   - Selection query: includes traders where last_trade_seen_at IS NULL OR >= 40 days ago, AND last_backfilled_at IS NULL OR < 6 hours ago
-  - max_trade_timestamp computed from ingested trades (max of timestamp field)
+  - max_trade_timestamp converted to ISO via `datetime.fromtimestamp(ts, tz=timezone.utc).isoformat()`
+  - Handles both Unix int and ISO string input formats
 - **Checklist:**
-  - [x] Tests pass (pytest) — 87/87
+  - [x] Tests pass (pytest) — 93/93 (6 new + 87 existing)
   - [x] Linter clean (ruff check src/ tests/) — pre-existing E402 warnings in backfill.py, no new errors
   - [x] No debug artifacts
   - [x] STATE.md NOT touched (reviewer-only)
