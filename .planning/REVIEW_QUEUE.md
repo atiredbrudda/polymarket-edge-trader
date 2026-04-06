@@ -9,31 +9,6 @@ Reviewer moves it from Pending → Cleared (or Flagged) after checking.
 
 <!-- Worker adds entries here -->
 
-### Phase 08 Plan 01 - Schema Migration + Convergence Enrichment — 2026-04-06
-- **Branch:** worker/08-detect-enrichment-p01
-- **Plan:** .planning/phases/08-detect-enrichment/08-01-PLAN.md
-- **Summary:** .planning/phases/08-detect-enrichment/08-01-SUMMARY.md
-- **Commits:** 06f13c8 (1 commit)
-- **Tests:** pytest ✓ (68/68 pass)
-- **Files changed:**
-  - `src/polymarket_analytics/db/schema.py` (MODIFIED — run_migrations adds 4 signals columns)
-  - `src/polymarket_analytics/detection/convergence.py` (MODIFIED — query returns 4 new fields)
-  - `tests/conftest.py` (MODIFIED — create_market accepts end_date parameter)
-  - `tests/test_detection.py` (MODIFIED — all tests use future_end_date fixture)
-  - `.planning/phases/08-detect-enrichment/08-01-SUMMARY.md` (NEW)
-- **Worker notes:**
-  - Schema migration adds: clv_dominant_count, avg_entry_price, min_entry_price, tier
-  - Convergence query computes all 4 fields inline via SQL
-  - Test fixture bug fix: create_market() was setting end_date to yesterday, failing convergence filter
-  - All existing tests pass (12 detection tests + 56 others)
-- **Checklist:**
-  - [x] Tests pass (pytest — 68/68 pass)
-  - [x] Linter clean (ruff check src/ tests/)
-  - [x] No debug artifacts
-  - [x] STATE.md NOT touched (reviewer-only)
-  - [x] SUMMARY.md written (08-01-SUMMARY.md)
-  - [x] No cosmetic changes outside scope
-
 
 ---
 
@@ -45,6 +20,18 @@ Reviewer moves it from Pending → Cleared (or Flagged) after checking.
 ---
 
 ## Cleared
+
+### Phase 08 Plan 01 - Schema Migration + Convergence Enrichment — **CLEARED 2026-04-06**
+- **Branch:** worker/08-detect-enrichment-p01
+- **Cleared by:** Reviewer (Claude Sonnet 4.6)
+- **Commits:** 06f13c8
+- **Tests:** pytest ✓ (68/68 pass)
+- **Files in scope:**
+  - `src/polymarket_analytics/db/schema.py` — migration-safe ALTER TABLE adds 4 signals columns
+  - `src/polymarket_analytics/detection/convergence.py` — 4 new fields computed inline in SQL
+  - `tests/conftest.py` — create_market() accepts optional end_date (backwards-compatible)
+  - `tests/test_detection.py` — future_end_date fixture, all tests pass end_date to create_market()
+- **Reviewer notes:** Clean pass. clv_dominant_count correctly scoped to Q5 traders (WHERE quintile=5 already applied). MIN/AVG entry price naturally scoped by direction via GROUP BY. Tier CASE correct; WATCH branch technically unreachable (HAVING >= 2) but spec-faithful. MAX(computed_at) subquery from Phase 6 reviewer fix intact. create_market() fixture fix is backwards-compatible — non-detection tests unaffected. No reviewer fixes required.
 
 ### Phase 07 Plan 03 - FLAT Position Test Coverage — **CLEARED 2026-04-05**
 - **Branch:** worker/07-flat-position-tracking-p02
