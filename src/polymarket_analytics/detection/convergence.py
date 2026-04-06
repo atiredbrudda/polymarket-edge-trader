@@ -30,6 +30,10 @@ def detect_convergence(db: sqlite_utils.Database, niche_slug: str) -> pd.DataFra
             - avg_score: Average composite score of Q5 traders
             - first_position_time: Earliest entry timestamp
             - last_position_time: Most recent trade timestamp
+            - clv_dominant_count: Count of Q5 traders with clv_zscore > 0
+            - avg_entry_price: Average entry price across converging traders' positions
+            - min_entry_price: Minimum entry price across converging traders' positions
+            - tier: WATCH / CONSIDER / ACT based on q5_count thresholds
         Returns empty DataFrame if no convergence found or dependencies missing.
 
     Raises:
@@ -60,7 +64,15 @@ def detect_convergence(db: sqlite_utils.Database, niche_slug: str) -> pd.DataFra
             COUNT(DISTINCT p.trader_address) as q5_count,
             AVG(ls.composite_score) as avg_score,
             MIN(p.entry_timestamp) as first_position_time,
-            MAX(p.last_trade_timestamp) as last_position_time
+            MAX(p.last_trade_timestamp) as last_position_time,
+            COUNT(CASE WHEN ls.clv_zscore > 0 THEN 1 END) as clv_dominant_count,
+            AVG(p.avg_entry_price) as avg_entry_price,
+            MIN(p.avg_entry_price) as min_entry_price,
+            CASE
+                WHEN COUNT(DISTINCT p.trader_address) >= 3 THEN 'ACT'
+                WHEN COUNT(DISTINCT p.trader_address) = 2 THEN 'CONSIDER'
+                ELSE 'WATCH'
+            END as tier
         FROM positions p
         JOIN lift_scores ls ON ls.trader_address = p.trader_address
         JOIN markets m ON m.condition_id = p.market_id
@@ -105,4 +117,3 @@ def _assert_dependencies(db: sqlite_utils.Database, niche_slug: str) -> None:
         raise click.ClickException(
             "positions table does not exist. Run build-positions command first."
         )
-

@@ -30,6 +30,16 @@ from tests.conftest import (
 
 
 @pytest.fixture
+def future_end_date():
+    """Return a future end_date 30 days from now for open market tests."""
+    return (
+        (datetime.now(timezone.utc) + timedelta(days=30))
+        .isoformat()
+        .replace("+00:00", "Z")
+    )
+
+
+@pytest.fixture
 def detection_db(tmp_path):
     """Create in-memory database with full schema for detection tests.
 
@@ -82,7 +92,7 @@ class TestConvergenceDetection:
     """Tests for convergence detection logic."""
 
     def test_convergence_detection_basic(
-        self, detection_db, fixture_traders, fixture_markets
+        self, detection_db, fixture_traders, fixture_markets, future_end_date
     ):
         """Test basic convergence detection with 2 Q5 traders on same market+direction.
 
@@ -95,8 +105,8 @@ class TestConvergenceDetection:
         """
         db = detection_db
 
-        # Setup: Create markets
-        create_market(db, fixture_markets["market_a"], "esports", None)
+        # Setup: Create markets with future end_date (required for convergence query filter)
+        create_market(db, fixture_markets["market_a"], "esports", None, end_date=future_end_date)
 
         # Setup: Create 2 Q5 traders with lift_scores
         create_q5_trader(
@@ -143,7 +153,7 @@ class TestConvergenceDetection:
         assert abs(row["avg_score"] - expected_avg_score) < 0.001
 
     def test_convergence_requires_q5_traders(
-        self, detection_db, fixture_traders, fixture_markets
+        self, detection_db, fixture_traders, fixture_markets, future_end_date
     ):
         """Test that convergence requires quintile=5 traders only (not Q1-Q4).
 
@@ -156,7 +166,7 @@ class TestConvergenceDetection:
         db = detection_db
 
         # Setup: Create market
-        create_market(db, fixture_markets["market_a"], "esports", None)
+        create_market(db, fixture_markets["market_a"], "esports", None, end_date=future_end_date)
 
         # Setup: Create 2 Q3 traders (NOT Q5)
         create_qn_trader(db, fixture_traders["q3_trader"], "esports", quintile=3)
@@ -189,7 +199,7 @@ class TestConvergenceDetection:
         )
 
     def test_convergence_minimum_two_traders(
-        self, detection_db, fixture_traders, fixture_markets
+        self, detection_db, fixture_traders, fixture_markets, future_end_date
     ):
         """Test that convergence requires >=2 Q5 traders (single trader doesn't trigger).
 
@@ -202,7 +212,7 @@ class TestConvergenceDetection:
         db = detection_db
 
         # Setup: Create market
-        create_market(db, fixture_markets["market_a"], "esports", None)
+        create_market(db, fixture_markets["market_a"], "esports", None, end_date=future_end_date)
 
         # Setup: Create 1 Q5 trader
         create_q5_trader(
@@ -228,7 +238,7 @@ class TestConvergenceDetection:
         )
 
     def test_separate_signals_per_direction(
-        self, detection_db, fixture_traders, fixture_markets
+        self, detection_db, fixture_traders, fixture_markets, future_end_date
     ):
         """Test that LONG and SHORT are separate signals on same market.
 
@@ -242,7 +252,7 @@ class TestConvergenceDetection:
         db = detection_db
 
         # Setup: Create market
-        create_market(db, fixture_markets["market_a"], "esports", None)
+        create_market(db, fixture_markets["market_a"], "esports", None, end_date=future_end_date)
 
         # Setup: Create 4 Q5 traders (2 for LONG, 2 for SHORT)
         create_q5_trader(
@@ -308,7 +318,7 @@ class TestConvergenceDetection:
         assert directions == {"LONG", "SHORT"}
 
     def test_upsert_preserves_first_seen(
-        self, detection_db, fixture_traders, fixture_markets
+        self, detection_db, fixture_traders, fixture_markets, future_end_date
     ):
         """Test that upsert_signal preserves first_seen timestamp on updates.
 
@@ -324,7 +334,7 @@ class TestConvergenceDetection:
         db = detection_db
 
         # Setup: Create market
-        create_market(db, fixture_markets["market_a"], "esports", None)
+        create_market(db, fixture_markets["market_a"], "esports", None, end_date=future_end_date)
 
         # Act 1: Insert initial signal
         first_seen = (
@@ -391,7 +401,7 @@ class TestConvergenceDetection:
         )
 
     def test_upsert_resets_alerted(
-        self, detection_db, fixture_traders, fixture_markets
+        self, detection_db, fixture_traders, fixture_markets, future_end_date
     ):
         """Test that upsert_signal resets alerted=0 on updates.
 
@@ -405,7 +415,7 @@ class TestConvergenceDetection:
         db = detection_db
 
         # Setup: Create market
-        create_market(db, fixture_markets["market_a"], "esports", None)
+        create_market(db, fixture_markets["market_a"], "esports", None, end_date=future_end_date)
 
         # Act 1: Insert initial signal with alerted=1
         first_seen = (
@@ -457,7 +467,7 @@ class TestConvergenceDetection:
 class TestEdgeCases:
     """Edge case tests for convergence detection."""
 
-    def test_detect_no_q5_traders(self, detection_db, fixture_markets):
+    def test_detect_no_q5_traders(self, detection_db, fixture_markets, future_end_date):
         """Test detect_convergence handles zero Q5 traders gracefully.
 
         Fixture setup:
@@ -469,7 +479,7 @@ class TestEdgeCases:
         db = detection_db
 
         # Setup: Create market but NO traders
-        create_market(db, fixture_markets["market_a"], "esports", None)
+        create_market(db, fixture_markets["market_a"], "esports", None, end_date=future_end_date)
 
         # Act: Run convergence detection with no Q5 traders
         result_df = detect_convergence(db, "esports")
@@ -480,7 +490,7 @@ class TestEdgeCases:
         )
 
     def test_detect_all_positions_resolved(
-        self, detection_db, fixture_traders, fixture_markets
+        self, detection_db, fixture_traders, fixture_markets, future_end_date
     ):
         """Test detect_convergence returns empty when all positions resolved.
 
@@ -494,7 +504,7 @@ class TestEdgeCases:
         db = detection_db
 
         # Setup: Create market with outcome (resolved)
-        create_market(db, fixture_markets["market_a"], "esports", outcome="YES")
+        create_market(db, fixture_markets["market_a"], "esports", outcome="YES", end_date=future_end_date)
 
         # Setup: Create 2 Q5 traders
         create_q5_trader(
@@ -535,7 +545,7 @@ class TestEdgeCases:
         )
 
     def test_detect_flat_positions_excluded(
-        self, detection_db, fixture_traders, fixture_markets
+        self, detection_db, fixture_traders, fixture_markets, future_end_date
     ):
         """Test that FLAT (size=0) positions don't generate signals.
 
@@ -548,7 +558,7 @@ class TestEdgeCases:
         db = detection_db
 
         # Setup: Create market
-        create_market(db, fixture_markets["market_a"], "esports", None)
+        create_market(db, fixture_markets["market_a"], "esports", None, end_date=future_end_date)
 
         # Setup: Create 2 Q5 traders
         create_q5_trader(
@@ -584,7 +594,7 @@ class TestEdgeCases:
             f"Expected 0 convergence signals for FLAT positions, got {len(result_df)}"
         )
 
-    def test_detect_niche_scoping(self, detection_db, fixture_traders, fixture_markets):
+    def test_detect_niche_scoping(self, detection_db, fixture_traders, fixture_markets, future_end_date):
         """Test that convergence detection is scoped to niche.
 
         Fixture setup:
@@ -597,8 +607,8 @@ class TestEdgeCases:
         db = detection_db
 
         # Setup: Create markets in different niches
-        create_market(db, fixture_markets["market_a"], "esports", None)
-        create_market(db, fixture_markets["market_c"], "politics", None)
+        create_market(db, fixture_markets["market_a"], "esports", None, end_date=future_end_date)
+        create_market(db, fixture_markets["market_c"], "politics", None, end_date=future_end_date)
 
         # Setup: Create 2 Q5 traders in POLITICS niche (not esports)
         create_q5_trader(
@@ -659,7 +669,7 @@ class TestEdgeCases:
         assert "lift_scores table does not exist" in error_msg
 
     def test_convergence_counts_distinct_traders(
-        self, detection_db, fixture_traders, fixture_markets
+        self, detection_db, fixture_traders, fixture_markets, future_end_date
     ):
         """Test that q5_count counts distinct traders, not positions.
 
@@ -672,7 +682,7 @@ class TestEdgeCases:
         db = detection_db
 
         # Setup: Create market
-        create_market(db, fixture_markets["market_a"], "esports", None)
+        create_market(db, fixture_markets["market_a"], "esports", None, end_date=future_end_date)
 
         # Setup: Create 1 Q5 trader
         create_q5_trader(

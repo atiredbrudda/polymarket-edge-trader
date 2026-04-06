@@ -262,7 +262,11 @@ def create_position(
 
 
 def create_market(
-    db: sqlite_utils.Database, condition_id: str, niche_slug: str, outcome: str = None
+    db: sqlite_utils.Database,
+    condition_id: str,
+    niche_slug: str,
+    outcome: str = None,
+    end_date: str = None,
 ) -> None:
     """Helper function to create a market record.
 
@@ -271,6 +275,7 @@ def create_market(
         condition_id: Market condition ID
         niche_slug: Niche category
         outcome: Market outcome (YES/NO/None for unresolved)
+        end_date: Market end date (ISO format). Defaults to yesterday if not provided.
     """
     now = datetime.now(timezone.utc)
     db["markets"].insert(
@@ -280,7 +285,8 @@ def create_market(
             "category": niche_slug,
             "niche_slug": niche_slug,
             "outcome": outcome,
-            "end_date": (now - timedelta(days=1)).isoformat().replace("+00:00", "Z"),
+            "end_date": end_date
+            or (now - timedelta(days=1)).isoformat().replace("+00:00", "Z"),
             "active": outcome is None,
             "tokens": "[]",
             "created_at": (now - timedelta(days=30)).isoformat().replace("+00:00", "Z"),

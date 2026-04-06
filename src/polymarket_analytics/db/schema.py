@@ -283,6 +283,17 @@ def run_migrations(db):
         if "avg_exit_price" not in positions_cols:
             db.execute("ALTER TABLE positions ADD COLUMN avg_exit_price NUMERIC(10,6)")
 
+    if "signals" in db.table_names():
+        signals_cols = {col.name for col in db["signals"].columns}
+        if "clv_dominant_count" not in signals_cols:
+            db.execute("ALTER TABLE signals ADD COLUMN clv_dominant_count INTEGER")
+        if "avg_entry_price" not in signals_cols:
+            db.execute("ALTER TABLE signals ADD COLUMN avg_entry_price NUMERIC(10,6)")
+        if "min_entry_price" not in signals_cols:
+            db.execute("ALTER TABLE signals ADD COLUMN min_entry_price NUMERIC(10,6)")
+        if "tier" not in signals_cols:
+            db.execute("ALTER TABLE signals ADD COLUMN tier TEXT")
+
 
 def init_database(db_path: Path):
     """Initialize database with all tables and indexes.
