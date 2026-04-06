@@ -9,6 +9,27 @@ Reviewer moves it from Pending → Cleared (or Flagged) after checking.
 
 <!-- Worker adds entries here -->
 
+### Pipeline Todo #3 - Incremental Mode for ingest_events — 2026-04-06
+- **Branch:** worker/todo3-ingest-events-incremental
+- **Todo:** .planning/todos/pending/2026-04-06-add-incremental-mode-to-ingest-events-skip-full-fetch-on-re-runs.md
+- **Summary:** .planning/todos/done/2026-04-06-add-incremental-mode-to-ingest-events-skip-full-fetch-on-re-runs-SUMMARY.md
+- **Commits:** Initial implementation
+- **Files changed:**
+  - `src/polymarket_analytics/commands/ingest_events.py` (MODIFIED) — adds `--full` flag, market count check, incremental vs full fetch logic
+  - `tests/test_ingest_events_incremental.py` (NEW) — 4 tests: INCR-01 through INCR-04
+- **Worker notes:** 
+  - Implementation matches spec exactly
+  - First run: `closed=None` (fetch all)
+  - Re-run: `closed=False` (active only)
+  - `--full` flag forces full fetch for recovery/resolution sweep
+  - Accepted limitation: newly resolved markets won't appear in incremental fetch (user should run `--full` periodically)
+- **Checklist:**
+  - [x] Tests pass (source .venv/bin/activate && pytest) — 97/97 (4 new + 93 existing)
+  - [x] Linter clean (ruff check src/ tests/) — test file clean, pre-existing issues in other files unchanged
+  - [x] No debug artifacts, no cosmetic changes outside scope
+  - [x] STATE.md NOT touched (reviewer-only)
+  - [x] Plan SUMMARY.md written
+
 
 
 ---
