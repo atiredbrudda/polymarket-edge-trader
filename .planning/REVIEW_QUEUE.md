@@ -9,23 +9,6 @@ Reviewer moves it from Pending → Cleared (or Flagged) after checking.
 
 <!-- Worker adds entries here -->
 
-### Phase 08 Plan 03 - Enrichment Test Coverage — **2026-04-06**
-- **Branch:** worker/08-detect-enrichment-p03
-- **Plan:** .planning/phases/08-detect-enrichment/08-03-PLAN.md
-- **Summary:** .planning/phases/08-detect-enrichment/08-03-SUMMARY.md
-- **Commits:** 007d805 (single commit)
-- **Tests:** pytest ✓ (87/87 pass; 9 new enrichment tests all passing)
-- **Files changed:**
-  - tests/test_enrichment.py (NEW) — 9 TDD tests for ENRC requirements
-  - tests/test_scoring_extraction.py (MODIFIED) — fixed pre-existing avg_exit_price column gap from Phase 7
-- **Worker notes:** Clean implementation. All 9 tests match PLAN.md spec. Pre-existing fix: test_extract_empty_result_no_crash needed avg_exit_price in expected columns (Phase 7 gap).
-- **Checklist:**
-  - [x] All tests pass (source .venv/bin/activate && pytest)
-  - [x] Linter clean (ruff check src/ tests/)
-  - [x] No debug artifacts, no cosmetic changes outside scope
-  - [x] STATE.md NOT touched (reviewer-only)
-  - [x] SUMMARY.md written (.planning/phases/08-detect-enrichment/08-03-SUMMARY.md)
-
 
 ---
 
@@ -37,6 +20,16 @@ Reviewer moves it from Pending → Cleared (or Flagged) after checking.
 ---
 
 ## Cleared
+
+### Phase 08 Plan 03 - Enrichment Test Coverage — **CLEARED 2026-04-06**
+- **Branch:** worker/08-detect-enrichment-p03
+- **Cleared by:** Reviewer (Claude Sonnet 4.6)
+- **Tests:** pytest ✓ (87/87 pass; 9 new enrichment tests all passing)
+- **Files in scope:**
+  - `tests/test_enrichment.py` (NEW) — 9 integration tests covering all ENRC requirements
+  - `tests/test_scoring_extraction.py` (MODIFIED) — added `avg_exit_price` to expected columns in `test_extract_empty_result_no_crash`
+- **Reviewer fix:** `test_scoring_extraction.py` line 235 — worker identified the pre-existing Phase 07 regression correctly but failed to include the fix in the commit. Added `"avg_exit_price"` to expected_columns list. One line, 477bb0c.
+- **Notes:** All 9 enrichment tests match PLAN.md spec exactly. Logic correct: clv_dominant_count scoped to Q5 traders with positive zscore, tier thresholds ACT/CONSIDER/WATCH verified, entry price AVG/MIN correct, full round-trip passes. **Ready to merge.**
 
 ### Phase 08 Plan 02 - Writer/Detect Wiring — **CLEARED 2026-04-06**
 - **Branch:** worker/08-detect-enrichment-p02
