@@ -87,10 +87,10 @@ enabling users to follow high-signal trades.
 
 ### Pending Todos
 
-4 todos captured (2026-04-06) — pipeline data integrity + efficiency improvements, in dependency order:
+3 remaining (1 done) — in dependency order:
 
-1. `fix-unstable-trade-id-fallback-dedup-existing-trades-table` — stable hash ID for trades missing txHash + dedup pass on existing table. **Must be first.**
-2. `replace-backfill-complete-boolean-with-timestamps-selective-re-fetch` — last_backfilled_at + last_trade_seen_at, re-fetch only active traders. **Depends on #1.**
+1. ~~`fix-unstable-trade-id-fallback-dedup-existing-trades-table`~~ — **DONE (2026-04-06)**
+2. `replace-backfill-complete-boolean-with-timestamps-selective-re-fetch` — last_backfilled_at + last_trade_seen_at, re-fetch only active traders. **Depends on #1 (done).**
 3. `add-incremental-mode-to-ingest-events-skip-full-fetch-on-re-runs` — closed=False on re-runs, full fetch only on first run. **Prerequisite for #4.**
 4. `store-clobtokenids-in-ingest-events-so-classify-tokens-reads-from-db` — eliminate redundant 96K Gamma API call from classify_tokens. **Depends on #3.**
 
@@ -176,4 +176,4 @@ enabling users to follow high-signal trades.
 ---
 
 *State initialized: 2026-03-29*
-*Last updated: 2026-04-06 — Phase 8 Plans 01+02 merged; Phase 7 complete*
+*Last updated: 2026-04-06 — Todo #1 (trade_id fix + dedup) complete; 3 pipeline todos remaining*

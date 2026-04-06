@@ -248,15 +248,14 @@ async def backfill_trader(
             timestamp = trade["timestamp"]
         else:
             # API format
-            trade_id = (
-                trade.get("trade_id")
-                or f"{trader_address}_{trade.get('txHash', '')}_{trade.get('timestamp', '')}"
-            )
             token_id = trade.get("asset") or trade.get("asset_id")
             side = "BUY" if trade.get("side") == "BUY" else "SELL"
             price_str = str(trade.get("price", "0"))
             size_str = str(trade.get("size", "0"))
             timestamp = trade.get("timestamp")
+            trade_id = trade.get("trade_id") or trade.get("txHash") or hashlib.sha256(
+                f"{trader_address}:{token_id}:{side}:{price_str}:{size_str}:{timestamp}".encode()
+            ).hexdigest()[:32]
 
         if not token_id:
             stats["skipped"] += 1
@@ -356,6 +355,25 @@ async def backfill_async(ctx, db_path: str) -> None:
         raise click.ClickException(
             "token_catalog table does not exist. Run classify-tokens command first."
         )
+
+    # One-time dedup: remove duplicate trades caused by unstable fallback IDs or
+    # cross-source duplicates (same trade appearing via both API and Graph).
+    # Keeps the earliest insert (MIN(rowid)) per logical trade.
+    # Edge case: two genuinely identical trades same-second same-price same-size
+    # is accepted as an acceptable false-positive loss (extremely rare in practice).
+    dedup_result = db.execute(
+        """
+        DELETE FROM trades
+        WHERE rowid NOT IN (
+            SELECT MIN(rowid)
+            FROM trades
+            GROUP BY trader_address, token_id, side, price, size, timestamp
+        )
+        """
+    )
+    dedup_count = dedup_result.rowcount if dedup_result else 0
+    if dedup_count:
+        console.print(f"  [yellow]⚠ Removed {dedup_count:,} duplicate trade(s) from prior runs[/yellow]")
 
     # Query traders needing backfill
     traders = list(db.query(
