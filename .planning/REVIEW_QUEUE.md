@@ -9,32 +9,6 @@ Reviewer moves it from Pending → Cleared (or Flagged) after checking.
 
 <!-- Worker adds entries here -->
 
-### Phase 08 Plan 02 - Writer/Detect Wiring + Plan 08-01 Schema Migration — **2026-04-06**
-- **Branch:** worker/08-detect-enrichment-p02
-- **Plan:** .planning/phases/08-detect-enrichment/08-02-PLAN.md (includes 08-01 merged from worker/08-detect-enrichment-p01)
-- **Summary:** .planning/phases/08-detect-enrichment/08-02-SUMMARY.md
-- **Commits:** Will be created on submit
-- **Tests:** pytest ✓ (68/68 pass)
-- **Files changed:**
-  - `src/polymarket_analytics/detection/writer.py` (MODIFIED) — 4 new params, INSERT/UPDATE SQL, batch extraction
-  - `src/polymarket_analytics/commands/detect.py` (MODIFIED) — docstring update
-  - `src/polymarket_analytics/db/schema.py` (MODIFIED from 08-01) — 4 new signals columns
-  - `src/polymarket_analytics/detection/convergence.py` (MODIFIED from 08-01) — 4 new fields in SELECT
-  - `tests/conftest.py` (MODIFIED from 08-01) — create_market() accepts future end_date
-  - `tests/test_detection.py` (MODIFIED from 08-01) — future_end_date fixture
-  - `.planning/phases/08-detect-enrichment/08-01-PLAN.md` (NEW)
-  - `.planning/phases/08-detect-enrichment/08-01-SUMMARY.md` (NEW)
-  - `.planning/phases/08-detect-enrichment/08-02-PLAN.md` (NEW)
-  - `.planning/phases/08-detect-enrichment/08-02-SUMMARY.md` (NEW)
-  - `.planning/STATE.md` (NEW)
-- **Worker notes:** Plan 08-01 was previously CLEARED but not merged to main. Merged into this branch to provide schema foundation for 08-02 writer changes. All tests pass.
-- **Checklist:**
-  - [x] Tests pass (source .venv/bin/activate && pytest)
-  - [x] Linter clean (ruff check src/ tests/)
-  - [x] No debug artifacts
-  - [x] STATE.md NOT touched (reviewer-only)
-  - [x] SUMMARY.md written (.planning/phases/08-detect-enrichment/08-02-SUMMARY.md)
-
 
 ---
 
@@ -46,6 +20,26 @@ Reviewer moves it from Pending → Cleared (or Flagged) after checking.
 ---
 
 ## Cleared
+
+### Phase 08 Plan 02 - Writer/Detect Wiring — **CLEARED 2026-04-06**
+- **Branch:** worker/08-detect-enrichment-p02
+- **Cleared by:** Reviewer (Claude Sonnet 4.6)
+- **Tests:** pytest ✓ (68/68 pass)
+- **Files in scope:**
+  - `src/polymarket_analytics/detection/writer.py` — 4 new optional params (None defaults), INSERT/UPDATE SQL updated, batch extraction with `in row` + `pd.isna()` guards
+  - `src/polymarket_analytics/commands/detect.py` — docstring only
+- **Reviewer notes:** Clean pass. None defaults preserve all 12 existing detection tests. Column-existence guards in batch function handle old DataFrames. avg_score retained per ENRC-09. No reviewer fixes required. **Merged to main.**
+
+### Phase 08 Plan 01 - Schema Migration + Convergence Enrichment — **CLEARED 2026-04-06**
+- **Branch:** worker/08-detect-enrichment-p01
+- **Cleared by:** Reviewer (Claude Sonnet 4.6)
+- **Tests:** pytest ✓ (68/68 pass)
+- **Files in scope:**
+  - `src/polymarket_analytics/db/schema.py` — migration-safe ALTER TABLE adds 4 signals columns
+  - `src/polymarket_analytics/detection/convergence.py` — 4 new fields computed inline in SQL
+  - `tests/conftest.py` — create_market() accepts optional end_date (backwards-compatible)
+  - `tests/test_detection.py` — future_end_date fixture
+- **Reviewer notes:** Clean pass. clv_dominant_count correctly scoped to Q5 traders. MIN/AVG entry price scoped by direction via GROUP BY. MAX(computed_at) subquery intact. No reviewer fixes required. **Merged to main via worker/08-detect-enrichment-p02.**
 
 ### Phase 07 Plan 03 - FLAT Position Test Coverage — **CLEARED 2026-04-05**
 - **Branch:** worker/07-flat-position-tracking-p02

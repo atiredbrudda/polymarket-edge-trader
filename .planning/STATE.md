@@ -5,23 +5,23 @@
 **Core Value:** Reliably detect when multiple proven traders (top quintile by CLV, ROI, and Sharpe ratio) are positioned in the same new market,
 enabling users to follow high-signal trades.
 
-**Current Focus:** Phase 7 - FLAT Position Tracking
+**Current Focus:** Phase 8 - Detect Enrichment
 
 **Vision:** A trader analytics pipeline that identifies "smart money" on Polymarket and surfaces consensus signals via Telegram alerts. eSports is the first niche; architecture is niche-agnostic via YAML configs.
 ---
 
 ## Current Position
 
-**Phase:** 07-flat-position-tracking
+**Phase:** 08-detect-enrichment
 
-**Plan:** 02 - complete (07-03 remains)
+**Plan:** 02 - complete (08-03 remains)
 
 **Status:** 🔄 In Progress
 
 **Progress:**
 
 ```
-[██████████████████████████░░░░] 75% - Phase 6/8 complete (Phase 7 in progress)
+[█████████████████████████████░] 93% - Phase 7/8 complete + Phase 8 Plans 01-02 merged
 ```
 
 ---
@@ -159,10 +159,12 @@ enabling users to follow high-signal trades.
 - **q5_traders view** added to schema for easy Q5 lookup
 - **Phase 7 Plan 01 MERGED (2026-04-05):** avg_exit_price NUMERIC(10,6) migration added to positions; BUY/SELL split aggregation in aggregation.py; FLAT size = gross BUY volume
 - **Phase 7 Plan 02 MERGED (2026-04-05):** FLAT-first resolve pass in resolution.py; extract_resolved_positions() returns avg_exit_price + direction; calculate_clv() uses avg_exit_price for FLAT rows (CLV=0.75 for entry=0.40/exit=0.70). Reviewer fix: flat_mask.any() guard in metrics.py to prevent empty-Series assignment on non-FLAT DataFrames. 25/25 tests pass.
-- **Phase 7 Plan 03 remains:** tests only — BUY-only VWAP assertions, FLAT negative PnL, FLAT+LONG mixed CLV, full pipeline integration test
 - **Multi-model collaboration protocol established (2026-04-05):** `.planning/AGENTS.md` and `.planning/HANDOFF_PROTOCOL.md` created — Worker/Reviewer roles, state machine, branch protection, code standards
+- **Phase 7 COMPLETE (2026-04-06):** All 3 plans merged — avg_exit_price migration (07-01), FLAT-first resolution + CLV fix (07-02), FLAT position test coverage (07-03). All reviews cleared.
+- **Phase 8 Plan 01 MERGED (2026-04-06):** Schema migration adds 4 signals columns (clv_dominant_count, avg_entry_price, min_entry_price, tier); convergence query computes all 4 inline via SQL. Test fixture end_date bug fixed. 68/68 pass.
+- **Phase 8 Plan 02 MERGED (2026-04-06):** writer.py upserts all 4 new fields with None defaults (backwards-compatible) and pd.isna() guards. detect.py docstring updated. 68/68 pass.
 
 ---
 
 *State initialized: 2026-03-29*
-*Last updated: 2026-04-05 — Phase 7 Plan 02 merged (FLAT-first resolution + CLV fix)*
+*Last updated: 2026-04-06 — Phase 8 Plans 01+02 merged; Phase 7 complete*
