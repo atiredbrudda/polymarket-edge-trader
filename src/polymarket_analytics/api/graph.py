@@ -107,14 +107,24 @@ def parse_graph_event(event: dict, trader_address: str) -> dict:
 
     price = convert_price(str(price_raw))
 
-    # Size is the larger of the two amounts (in token terms)
-    size = max(maker_amt, taker_amt)
+    # Size is the token amount (not USDC). Graph amounts are raw 6-decimal integers
+    # (e.g., 30_000_000 = 30 tokens), so divide by 10^6 to get actual token count.
+    _DECIMALS = Decimal("1000000")
+    if maker_is_token:
+        size = maker_amt / _DECIMALS
+    else:
+        size = taker_amt / _DECIMALS
 
     return {
         "trade_id": f"{event.get('transactionHash', '')}_{event.get('id', '')}",
         "token_id": token_id,
         "timestamp": int(event.get("timestamp", "0")),
-        "side": "BUY" if is_maker else "SELL",
+        # BUY if trader pays USDC to receive tokens; SELL if trader pays tokens.
+        # Cannot use is_maker alone — a maker can sell tokens (makerAssetId = token).
+        "side": "BUY" if (
+            (is_maker and maker_asset_id == "0") or
+            (not is_maker and taker_asset_id == "0")
+        ) else "SELL",
         "size": str(size),
         "price": str(price),
         "market_id": None,  # Caller resolves via token_catalog
@@ -167,93 +177,83 @@ class GraphAPIClient:
     ) -> List[dict]:
         """Fetch all trades for a trader address.
 
-        Uses cursor-based pagination with id field ordering (ascending).
-        Fetches OrderFilledEvents where trader is maker OR taker.
+        Runs two separate paginated queries (maker role, taker role) and merges
+        results. A single `or` query cannot paginate correctly on this Goldsky
+        endpoint — combining `or` with `id_gt` returns 0 results on page 2+.
 
         Args:
             trader_address: Trader wallet address (0x-prefixed)
             batch_size: Number of records per batch (default: 100)
 
         Returns:
-            List of trade dicts with fields:
-            - id: Graph event ID
-            - transactionHash: Transaction hash
-            - timestamp: Unix timestamp
-            - orderHash: Order hash
-            - maker: Maker address
-            - taker: Taker address
-            - makerAssetId: Maker asset ID
-            - takerAssetId: Taker asset ID
-            - makerAmountFilled: Maker amount filled
-            - takerAmountFilled: Taker amount filled
-            - fee: Fee amount
+            List of raw OrderFilledEvent dicts (deduped by id).
         """
         client = await self._get_client()
-        all_trades: List[dict] = []
-        last_id: Optional[str] = None
 
-        while True:
-            # Build GraphQL query
-            where_clause: dict = {
-                "or": [
-                    {"maker": trader_address.lower()},
-                    {"taker": trader_address.lower()},
-                ]
-            }
-            if last_id:
-                where_clause["id_gt"] = last_id
+        _FIELDS = """
+            id
+            transactionHash
+            timestamp
+            orderHash
+            maker
+            taker
+            makerAssetId
+            takerAssetId
+            makerAmountFilled
+            takerAmountFilled
+            fee
+        """
 
-            query = """
-            query GetTraderTrades($trader: String!, $lastId: ID, $batchSize: Int!) {
-              orderFilledEvents(
-                first: $batchSize
-                where: {
-                  or: [
-                    { maker: $trader }
-                    { taker: $trader }
-                  ]
-                  id_gt: $lastId
-                }
-                orderBy: id
-                orderDirection: asc
-              ) {
-                id
-                transactionHash
-                timestamp
-                orderHash
-                maker
-                taker
-                makerAssetId
-                takerAssetId
-                makerAmountFilled
-                takerAmountFilled
-                fee
-              }
-            }
-            """
+        async def _paginate(role: str) -> List[dict]:
+            """Paginate a single-role query (maker or taker) to completion."""
+            events: List[dict] = []
+            last_id: Optional[str] = None
+            while True:
+                if last_id is None:
+                    query = f"""
+                    query {{
+                      orderFilledEvents(
+                        first: {batch_size}
+                        where: {{ {role}: "{trader_address.lower()}" }}
+                        orderBy: id
+                        orderDirection: asc
+                      ) {{ {_FIELDS} }}
+                    }}
+                    """
+                else:
+                    query = f"""
+                    query {{
+                      orderFilledEvents(
+                        first: {batch_size}
+                        where: {{ {role}: "{trader_address.lower()}", id_gt: "{last_id}" }}
+                        orderBy: id
+                        orderDirection: asc
+                      ) {{ {_FIELDS} }}
+                    }}
+                    """
+                response = await client.post(
+                    GRAPH_ENDPOINT,
+                    json={"query": query},
+                )
+                response.raise_for_status()
+                batch = response.json().get("data", {}).get("orderFilledEvents", [])
+                if not batch:
+                    break
+                events.extend(batch)
+                last_id = batch[-1]["id"]
+                if len(batch) < batch_size:
+                    break
+            return events
 
-            variables = {
-                "trader": trader_address.lower(),
-                "lastId": last_id,
-                "batchSize": batch_size,
-            }
+        maker_events = await _paginate("maker")
+        taker_events = await _paginate("taker")
 
-            response = await client.post(
-                GRAPH_ENDPOINT,
-                json={"query": query, "variables": variables},
-            )
-            response.raise_for_status()
-            data = response.json()
+        # Merge and deduplicate by event id (a fill can only appear once)
+        seen: set = set()
+        merged: List[dict] = []
+        for event in maker_events + taker_events:
+            if event["id"] not in seen:
+                seen.add(event["id"])
+                merged.append(event)
 
-            events = data.get("data", {}).get("orderFilledEvents", [])
-            if not events:
-                break
-
-            all_trades.extend(events)
-            last_id = events[-1]["id"]
-
-            # If we got fewer than batch_size, we've reached the end
-            if len(events) < batch_size:
-                break
-
-        return all_trades
+        return merged
