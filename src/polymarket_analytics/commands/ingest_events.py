@@ -26,18 +26,27 @@ console = Console()
     default="data/analytics.db",
     help="Path to SQLite database (default: data/analytics.db)",
 )
+@click.option(
+    "--full",
+    is_flag=True,
+    default=False,
+    help="Force full fetch regardless of existing data (use after failures or for resolution sweep)",
+)
 @click.pass_context
-def ingest_events(ctx, db_path: str):
+def ingest_events(ctx, db_path: str, full: bool):
     """Ingest markets from Gamma API for the specified niche.
 
     Fetches all markets for the niche's tag_id and populates:
     - gamma_events: Raw market data from Gamma API
     - markets: Market metadata for downstream processing
+
+    By default, uses incremental mode on re-runs (fetches only active markets).
+    Use --full to force a complete fetch of all markets.
     """
-    asyncio.run(_ingest_events_async(ctx, db_path))
+    asyncio.run(_ingest_events_async(ctx, db_path, full))
 
 
-async def _ingest_events_async(ctx, db_path: str):
+async def _ingest_events_async(ctx, db_path: str, full: bool):
     """Async implementation of ingest-events command."""
     config = ctx.obj["config"]
     niche_slug = config.slug
@@ -63,7 +72,24 @@ async def _ingest_events_async(ctx, db_path: str):
     try:
         # Get tag_id from config (already int from Phase 1 fix)
         tag_id = config.tag_id
-        click.echo(f"Fetching markets for tag_id: {tag_id}")
+
+        # Check if this is first run or re-run
+        existing_count = db.execute(
+            "SELECT COUNT(*) FROM markets WHERE niche_slug = ?", [niche_slug]
+        ).fetchone()[0]
+
+        # Incremental mode: first run fetches all, re-runs fetch only active
+        if full or existing_count == 0:
+            click.echo(f"Full fetch mode: fetching all markets for tag_id: {tag_id}")
+            markets_to_fetch_closed = None  # Fetch all
+        else:
+            click.echo(
+                f"Incremental mode: fetching active markets for tag_id: {tag_id}"
+            )
+            click.echo(
+                f"  (existing markets: {existing_count}, use --full to force full fetch)"
+            )
+            markets_to_fetch_closed = False  # Fetch only active
 
         # Fetch markets from Gamma API with page progress
         def on_page(page: int, total: int) -> None:
@@ -71,7 +97,9 @@ async def _ingest_events_async(ctx, db_path: str):
                 f"  Fetching... page {page} ({total} markets so far)", end="\r"
             )
 
-        markets = await client.fetch_markets(tag_id, on_page=on_page)
+        markets = await client.fetch_markets(
+            tag_id, closed=markets_to_fetch_closed, on_page=on_page
+        )
         console.print()  # newline after \r progress
 
         # Assert data fetched (RESL-02)
