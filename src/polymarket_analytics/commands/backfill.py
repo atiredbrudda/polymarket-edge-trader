@@ -230,12 +230,30 @@ async def backfill_trader(
                 continue
         return False
 
-    needs_graph = since_unix_ts is None and (not api_trades or not _api_covers_window(api_trades))
+    # Graph is needed when:
+    # 1. Data API doesn't cover the 40-day window, AND
+    # 2. DB also doesn't have trades older than the window for this trader
+    #    (if DB already has them from a prior Graph pass, no need to re-fetch)
+    #
+    # NOTE: we intentionally do NOT gate this on `since_unix_ts is None`.
+    # ingest_events sets last_trade_seen_at from recent SELL events before the
+    # first backfill runs, so since_unix_ts is often non-None on the very first
+    # backfill — but Graph still needs a full-history pass in that case.
+    def _db_covers_window() -> bool:
+        result = db.execute(
+            "SELECT 1 FROM trades WHERE trader_address = :addr AND timestamp <= :cutoff LIMIT 1",
+            {"addr": trader_address, "cutoff": coverage_cutoff.isoformat()},
+        ).fetchone()
+        return result is not None
+
+    needs_graph = (not api_trades or not _api_covers_window(api_trades)) and not _db_covers_window()
 
     if needs_graph:
         stats["fallback"] = True
+        # Full-history Graph pass (since_unix_ts=None): the API gap may be old trades
+        # that predate since_unix_ts, so we must not filter by timestamp here.
         graph_events = await graph_client.fetch_trader_trades(
-            trader_address, since_unix_ts=since_unix_ts
+            trader_address, since_unix_ts=None
         )
         # Merge Graph trades with API trades (union — INSERT OR IGNORE deduplicates)
         for event in graph_events:
