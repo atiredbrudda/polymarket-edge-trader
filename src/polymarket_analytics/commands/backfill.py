@@ -402,16 +402,17 @@ async def backfill_async(ctx, db_path: str) -> None:
     # Keeps the earliest insert (MIN(rowid)) per logical trade.
     # Edge case: two genuinely identical trades same-second same-price same-size
     # is accepted as an acceptable false-positive loss (extremely rare in practice).
-    dedup_result = db.execute(
-        """
-        DELETE FROM trades
-        WHERE rowid NOT IN (
-            SELECT MIN(rowid)
-            FROM trades
-            GROUP BY trader_address, token_id, side, price, size, timestamp
+    with console.status("Deduplicating trades table..."):
+        dedup_result = db.execute(
+            """
+            DELETE FROM trades
+            WHERE rowid NOT IN (
+                SELECT MIN(rowid)
+                FROM trades
+                GROUP BY trader_address, token_id, side, price, size, timestamp
+            )
+            """
         )
-        """
-    )
     dedup_count = dedup_result.rowcount if dedup_result else 0
     if dedup_count:
         console.print(
@@ -545,6 +546,24 @@ async def backfill_async(ctx, db_path: str) -> None:
         finally:
             await data_client.close()
             await graph_client.close()
+
+        # Post-run dedup: catch cross-source duplicates inserted during this run.
+        with console.status("Deduplicating trades table (post-run)..."):
+            dedup_result = db.execute(
+                """
+                DELETE FROM trades
+                WHERE rowid NOT IN (
+                    SELECT MIN(rowid)
+                    FROM trades
+                    GROUP BY trader_address, token_id, side, price, size, timestamp
+                )
+                """
+            )
+        dedup_count = dedup_result.rowcount if dedup_result else 0
+        if dedup_count:
+            console.print(
+                f"  [yellow]⚠ Removed {dedup_count:,} duplicate trade(s) from this run[/yellow]"
+            )
 
     # -------------------------------------------------------------------------
     # Step 2: Post-backfill entity extraction
