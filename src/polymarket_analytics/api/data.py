@@ -153,7 +153,10 @@ class DataAPIClient:
         return all_holders
 
     async def fetch_user_trades(
-        self, trader_address: str, limit: int = 1000
+        self,
+        trader_address: str,
+        limit: int = 1000,
+        since_unix_ts: Optional[int] = None,
     ) -> List[dict]:
         """Fetch all trades for a specific trader address.
 
@@ -163,6 +166,7 @@ class DataAPIClient:
         Args:
             trader_address: Trader wallet address (0x-prefixed)
             limit: Max trades per request (default: 1000)
+            since_unix_ts: Optional unix timestamp — if set, stop pagination when trades older than this are encountered (assumes newest-first ordering)
 
         Returns:
             List of trade dicts with fields:
@@ -203,10 +207,18 @@ class DataAPIClient:
             if not trades:
                 break
 
-            all_trades.extend(trades)
+            hit_boundary = False
+            if since_unix_ts is not None:
+                filtered = [
+                    t for t in trades if int(t.get("timestamp") or 0) >= since_unix_ts
+                ]
+                if len(filtered) < len(trades):
+                    hit_boundary = True
+                all_trades.extend(filtered)
+            else:
+                all_trades.extend(trades)
 
-            # If we got fewer than limit, we've reached the end
-            if len(trades) < limit:
+            if hit_boundary or len(trades) < limit:
                 break
 
             offset += limit

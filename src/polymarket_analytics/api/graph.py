@@ -121,10 +121,12 @@ def parse_graph_event(event: dict, trader_address: str) -> dict:
         "timestamp": int(event.get("timestamp", "0")),
         # BUY if trader pays USDC to receive tokens; SELL if trader pays tokens.
         # Cannot use is_maker alone — a maker can sell tokens (makerAssetId = token).
-        "side": "BUY" if (
-            (is_maker and maker_asset_id == "0") or
-            (not is_maker and taker_asset_id == "0")
-        ) else "SELL",
+        "side": "BUY"
+        if (
+            (is_maker and maker_asset_id == "0")
+            or (not is_maker and taker_asset_id == "0")
+        )
+        else "SELL",
         "size": str(size),
         "price": str(price),
         "market_id": None,  # Caller resolves via token_catalog
@@ -173,7 +175,10 @@ class GraphAPIClient:
             await self._client.aclose()
 
     async def fetch_trader_trades(
-        self, trader_address: str, batch_size: int = 100
+        self,
+        trader_address: str,
+        batch_size: int = 100,
+        since_unix_ts: Optional[int] = None,
     ) -> List[dict]:
         """Fetch all trades for a trader address.
 
@@ -184,6 +189,7 @@ class GraphAPIClient:
         Args:
             trader_address: Trader wallet address (0x-prefixed)
             batch_size: Number of records per batch (default: 100)
+            since_unix_ts: Optional unix timestamp — if set, only fetch trades at or after this time
 
         Returns:
             List of raw OrderFilledEvent dicts (deduped by id).
@@ -208,13 +214,18 @@ class GraphAPIClient:
             """Paginate a single-role query (maker or taker) to completion."""
             events: List[dict] = []
             last_id: Optional[str] = None
+            ts_clause = (
+                f', timestamp_gte: "{since_unix_ts}"'
+                if since_unix_ts is not None
+                else ""
+            )
             while True:
                 if last_id is None:
                     query = f"""
                     query {{
                       orderFilledEvents(
                         first: {batch_size}
-                        where: {{ {role}: "{trader_address.lower()}" }}
+                        where: {{ {role}: "{trader_address.lower()}"{ts_clause} }}
                         orderBy: id
                         orderDirection: asc
                       ) {{ {_FIELDS} }}
@@ -225,7 +236,7 @@ class GraphAPIClient:
                     query {{
                       orderFilledEvents(
                         first: {batch_size}
-                        where: {{ {role}: "{trader_address.lower()}", id_gt: "{last_id}" }}
+                        where: {{ {role}: "{trader_address.lower()}", id_gt: "{last_id}"{ts_clause} }}
                         orderBy: id
                         orderDirection: asc
                       ) {{ {_FIELDS} }}

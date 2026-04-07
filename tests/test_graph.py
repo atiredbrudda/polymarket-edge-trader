@@ -7,12 +7,13 @@ Covers:
 
 import pytest
 from decimal import Decimal
-from unittest.mock import AsyncMock, MagicMock, patch
+from unittest.mock import AsyncMock, MagicMock
 
 
 # ---------------------------------------------------------------------------
 # Fix 1: size normalization in parse_graph_event
 # ---------------------------------------------------------------------------
+
 
 class TestParseGraphEventSize:
     """parse_graph_event divides raw 6-decimal amounts by 10^6."""
@@ -42,7 +43,7 @@ class TestParseGraphEventSize:
         event = self._make_event(
             maker_asset_id="0",
             taker_asset_id=token_id,
-            maker_amt=5_100_000,   # 5.10 USDC (6 decimals)
+            maker_amt=5_100_000,  # 5.10 USDC (6 decimals)
             taker_amt=30_000_000,  # 30 tokens (6 decimals)
         )
 
@@ -64,7 +65,7 @@ class TestParseGraphEventSize:
             maker_asset_id=token_id,
             taker_asset_id="0",
             maker_amt=50_000_000,  # 50 tokens (maker pays)
-            taker_amt=1_000_000,   # 1 USDC (taker pays)
+            taker_amt=1_000_000,  # 1 USDC (taker pays)
         )
 
         result = parse_graph_event(event, "0xmaker")  # trader is the maker
@@ -122,11 +123,11 @@ class TestParseGraphEventSize:
             "transactionHash": "0xabc",
             "timestamp": "1700000000",
             "orderHash": "0xdef",
-            "maker": trader,        # trader is the maker for exchange-minted BUYs
+            "maker": trader,  # trader is the maker for exchange-minted BUYs
             "taker": "0xexchange",
-            "makerAssetId": "0",   # maker pays USDC
+            "makerAssetId": "0",  # maker pays USDC
             "takerAssetId": token_id,
-            "makerAmountFilled": "5100000",   # 5.10 USDC
+            "makerAmountFilled": "5100000",  # 5.10 USDC
             "takerAmountFilled": "30000000",  # 30 tokens
             "fee": "0",
         }
@@ -143,6 +144,7 @@ class TestParseGraphEventSize:
 # ---------------------------------------------------------------------------
 # Fix 2: fetch_trader_trades first-page query omits id_gt
 # ---------------------------------------------------------------------------
+
 
 class TestFetchTraderTradesQuery:
     """First page sends no id_gt; subsequent pages include id_gt cursor."""
@@ -177,7 +179,7 @@ class TestFetchTraderTradesQuery:
         # Two calls: maker first page, taker first page (both < batch_size → loops end)
         responses = [
             self._make_response(maker_events),  # maker page 1
-            self._make_response([]),             # taker page 1 (empty)
+            self._make_response([]),  # taker page 1 (empty)
         ]
 
         mock_client = AsyncMock()
@@ -195,7 +197,9 @@ class TestFetchTraderTradesQuery:
         for i, call in enumerate(mock_client.post.call_args_list):
             payload = call[1]["json"] if call[1] else call[0][1]
             query_text = payload["query"]
-            assert "id_gt" not in query_text, f"Call {i+1} (first page) must not include id_gt"
+            assert "id_gt" not in query_text, (
+                f"Call {i + 1} (first page) must not include id_gt"
+            )
 
     @pytest.mark.asyncio
     async def test_second_page_includes_id_gt_cursor(self):
@@ -207,8 +211,8 @@ class TestFetchTraderTradesQuery:
         maker_page1 = [self._sample_event(f"evt-{i}") for i in range(2)]
         responses = [
             self._make_response(maker_page1),  # maker page 1
-            self._make_response([]),            # maker page 2
-            self._make_response([]),            # taker page 1
+            self._make_response([]),  # maker page 2
+            self._make_response([]),  # taker page 1
         ]
 
         mock_client = AsyncMock()
@@ -252,3 +256,74 @@ class TestFetchTraderTradesQuery:
         result = await client.fetch_trader_trades("0xtrader", batch_size=2)
 
         assert len(result) == 3
+
+
+# ---------------------------------------------------------------------------
+# Task 4a: timestamp_gte filter tests
+# ---------------------------------------------------------------------------
+
+
+class TestFetchTraderTradesTimestampFilter:
+    """timestamp_gte is included in GraphQL where clause when since_unix_ts is set."""
+
+    def _make_response(self, events):
+        mock_resp = MagicMock()
+        mock_resp.raise_for_status = MagicMock()
+        mock_resp.json.return_value = {"data": {"orderFilledEvents": events}}
+        return mock_resp
+
+    @pytest.mark.asyncio
+    async def test_timestamp_gte_in_query_when_since_set(self):
+        """When since_unix_ts is set, timestamp_gte appears in the GraphQL where clause."""
+        from polymarket_analytics.api.graph import GraphAPIClient
+
+        responses = [
+            self._make_response([]),  # maker page 1 (empty → stops)
+            self._make_response([]),  # taker page 1 (empty → stops)
+        ]
+
+        mock_client = AsyncMock()
+        mock_client.is_closed = False
+        mock_client.post = AsyncMock(side_effect=responses)
+
+        client = GraphAPIClient()
+        client._client = mock_client
+
+        await client.fetch_trader_trades("0xtrader", since_unix_ts=1700000000)
+
+        assert mock_client.post.call_count == 2
+        for call in mock_client.post.call_args_list:
+            payload = call[1]["json"] if call[1] else call[0][1]
+            query_text = payload["query"]
+            assert "timestamp_gte" in query_text, (
+                "timestamp_gte must appear when since_unix_ts set"
+            )
+            assert "1700000000" in query_text, (
+                "since_unix_ts value must appear in query"
+            )
+
+    @pytest.mark.asyncio
+    async def test_no_timestamp_filter_when_since_none(self):
+        """When since_unix_ts is None, timestamp_gte is absent from the query."""
+        from polymarket_analytics.api.graph import GraphAPIClient
+
+        responses = [
+            self._make_response([]),
+            self._make_response([]),
+        ]
+
+        mock_client = AsyncMock()
+        mock_client.is_closed = False
+        mock_client.post = AsyncMock(side_effect=responses)
+
+        client = GraphAPIClient()
+        client._client = mock_client
+
+        await client.fetch_trader_trades("0xtrader", since_unix_ts=None)
+
+        for call in mock_client.post.call_args_list:
+            payload = call[1]["json"] if call[1] else call[0][1]
+            query_text = payload["query"]
+            assert "timestamp_gte" not in query_text, (
+                "timestamp_gte must be absent when since_unix_ts=None"
+            )
