@@ -177,6 +177,7 @@ function renderSignals(signals) {
 
 function render(data) {
   const main = document.getElementById('main');
+  const scrollY = window.scrollY;
   main.innerHTML = `
     <section>
       <h2>Q5 Traders &mdash; ${data.niche} &nbsp;(${(data.traders||[]).length} total)</h2>
@@ -186,6 +187,7 @@ function render(data) {
       <h2>Active Signals &mdash; ${(data.signals||[]).length} total</h2>
       ${renderSignals(data.signals)}
     </section>`;
+  window.scrollTo(0, scrollY);
   document.getElementById('updated').textContent = 'updated ' + new Date().toLocaleTimeString();
 }
 
