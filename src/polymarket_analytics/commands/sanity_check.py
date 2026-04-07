@@ -284,6 +284,62 @@ def run_sanity_checks(
             )
         )
 
+    # Check 6: No SELL-only positions (data ingestion gap detector)
+    # SELL-only = trader has SELLs but no BUYs for a market → avg_entry_price = "—"
+    # Scoped to unresolved markets to exclude normal resolution redemptions (price ~0.999).
+    # This is a WARNING (not a hard FAIL): it doesn't block scoring, but surfaces
+    # potential Graph ingestion gaps that need a backfill re-run.
+    try:
+        query = """
+            SELECT COUNT(*) as count
+            FROM (
+                SELECT t.trader_address, t.market_id
+                FROM trades t
+                JOIN positions p ON p.trader_address = t.trader_address
+                                 AND p.market_id = t.market_id
+                WHERE p.resolved = 0
+                GROUP BY t.trader_address, t.market_id
+                HAVING SUM(CASE WHEN t.side = 'BUY' THEN 1 ELSE 0 END) = 0
+                   AND SUM(CASE WHEN t.side = 'SELL' THEN 1 ELSE 0 END) > 0
+            )
+        """
+        result = list(db.query(query))
+        count = result[0]["count"] if result else 0
+        passed = count == 0
+        if passed:
+            console.print(
+                f"Check 6: No SELL-only open positions ........ [green]PASS[/green] (0 affected pairs)"
+            )
+        else:
+            console.print(
+                f"Check 6: No SELL-only open positions ........ [yellow]WARN[/yellow] ({count} trader/market pair(s) have SELL but no BUY — avg_entry will show '—')"
+            )
+        results.append(
+            SanityCheckResult(
+                name="No SELL-only open positions",
+                expected="0",
+                actual=str(count),
+                passed=passed,
+                details="Reset last_backfilled_at for affected traders and re-run backfill — Graph will do a full-history pass",
+            )
+        )
+        # NOTE: intentionally NOT incrementing failed_count — this is a warning,
+        # not a scoring blocker. Scoring can run; results just lack entry price for
+        # these positions.
+    except Exception as e:
+        console.print(
+            f"Check 6: No SELL-only open positions ........ [red]ERROR[/red] ({e})"
+        )
+        results.append(
+            SanityCheckResult(
+                name="No SELL-only open positions",
+                expected="0",
+                actual=f"ERROR: {e}",
+                passed=False,
+                details="Database error - check trades and positions tables exist",
+            )
+        )
+
     return results, failed_count
 
 
