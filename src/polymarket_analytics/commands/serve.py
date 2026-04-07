@@ -19,6 +19,7 @@ from urllib.parse import urlparse
 import click
 
 from polymarket_analytics.cli import cli
+from polymarket_analytics.db.connection import get_db
 from polymarket_analytics.db.schema import init_database
 
 # ── HTML page ──────────────────────────────────────────────────────────────────
@@ -178,15 +179,19 @@ function renderSignals(signals) {
 function render(data) {
   const main = document.getElementById('main');
   const scrollY = window.scrollY;
-  main.innerHTML = `
-    <section>
-      <h2>Q5 Traders &mdash; ${data.niche} &nbsp;(${(data.traders||[]).length} total)</h2>
-      ${renderTraders(data.traders)}
-    </section>
-    <section>
-      <h2>Active Signals &mdash; ${(data.signals||[]).length} total</h2>
-      ${renderSignals(data.signals)}
-    </section>`;
+  if (data.error) {
+    main.innerHTML = `<p class="no-data" style="color:var(--red)">Error loading data: ${data.error}</p>`;
+  } else {
+    main.innerHTML = `
+      <section>
+        <h2>Q5 Traders &mdash; ${data.niche} &nbsp;(${(data.traders||[]).length} total)</h2>
+        ${renderTraders(data.traders)}
+      </section>
+      <section>
+        <h2>Active Signals &mdash; ${(data.signals||[]).length} total</h2>
+        ${renderSignals(data.signals)}
+      </section>`;
+  }
   window.scrollTo(0, scrollY);
   document.getElementById('updated').textContent = 'updated ' + new Date().toLocaleTimeString();
 }
@@ -341,7 +346,7 @@ def make_handler(db_path: Path, niche_slug: str):
 
             elif path == "/api/data":
                 try:
-                    db = init_database(db_path)
+                    db = get_db(db_path)
                     data = _get_data(db, niche_slug)
                 except Exception as e:
                     data = {"error": str(e), "niche": niche_slug, "traders": [], "signals": []}
