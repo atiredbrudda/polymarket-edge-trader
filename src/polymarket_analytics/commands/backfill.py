@@ -489,8 +489,8 @@ async def backfill_async(ctx, db_path: str) -> None:
                 task = progress.add_task(_desc(), total=len(traders))
 
                 for trader in traders:
-                    trader_address = trader["address"]
-                    last_trade_seen_at = trader["last_trade_seen_at"]
+                    trader_address = trader[0]
+                    last_trade_seen_at = trader[1]
 
                     since_unix_ts: Optional[int] = None
                     if last_trade_seen_at:
