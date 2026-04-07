@@ -129,6 +129,7 @@ async def fetch_trades_with_retry(
     max_retries: int = 10,
     base_delay: float = 1.0,
     max_delay: float = 30.0,
+    since_unix_ts: Optional[int] = None,
 ) -> List[dict]:
     """Fetch trades from Data API with exponential backoff for HTTP 425.
 
@@ -138,6 +139,7 @@ async def fetch_trades_with_retry(
         max_retries: Maximum retry attempts
         base_delay: Initial delay in seconds
         max_delay: Maximum delay in seconds
+        since_unix_ts: Optional unix timestamp — if set, only fetch trades at or after this time
 
     Returns:
         List of trade dicts from API
@@ -150,7 +152,9 @@ async def fetch_trades_with_retry(
 
     for attempt in range(max_retries):
         try:
-            trades = await client.fetch_user_trades(trader_address)
+            trades = await client.fetch_user_trades(
+                trader_address, since_unix_ts=since_unix_ts
+            )
             return trades
         except Exception as e:
             error_str = str(e)
@@ -182,6 +186,7 @@ async def backfill_trader(
     trader_address: str,
     data_client: DataAPIClient,
     graph_client: GraphAPIClient,
+    since_unix_ts: Optional[int] = None,
 ) -> Dict[str, int]:
     """Backfill trades for a single trader with 2-tier logic.
 
@@ -190,6 +195,7 @@ async def backfill_trader(
         trader_address: Trader wallet address
         data_client: DataAPIClient for Tier 1
         graph_client: GraphAPIClient for Tier 2 fallback
+        since_unix_ts: Optional unix timestamp — if set, only fetch trades at or after this time
 
     Returns:
         Dict with ingested, skipped, fallback counts
@@ -201,7 +207,9 @@ async def backfill_trader(
     coverage_cutoff = datetime.now(timezone.utc) - timedelta(days=COVERAGE_DAYS)
 
     # Tier 1: Try Data API first
-    api_trades = await fetch_trades_with_retry(data_client, trader_address)
+    api_trades = await fetch_trades_with_retry(
+        data_client, trader_address, since_unix_ts=since_unix_ts
+    )
 
     # Tier 2: Graph fallback if API doesn't cover the full 40-day window.
     # "Covers" means at least one trade predates the cutoff (oldest trade >= 40 days ago).
@@ -222,11 +230,13 @@ async def backfill_trader(
                 continue
         return False
 
-    needs_graph = not api_trades or not _api_covers_window(api_trades)
+    needs_graph = since_unix_ts is None and (not api_trades or not _api_covers_window(api_trades))
 
     if needs_graph:
         stats["fallback"] = True
-        graph_events = await graph_client.fetch_trader_trades(trader_address)
+        graph_events = await graph_client.fetch_trader_trades(
+            trader_address, since_unix_ts=since_unix_ts
+        )
         # Merge Graph trades with API trades (union — INSERT OR IGNORE deduplicates)
         for event in graph_events:
             api_trades.append(parse_graph_event(event, trader_address))
@@ -424,7 +434,7 @@ async def backfill_async(ctx, db_path: str) -> None:
     traders = list(
         db.execute(
             """
-        SELECT address FROM traders
+        SELECT address, last_trade_seen_at FROM traders
         WHERE
             (last_trade_seen_at IS NULL OR last_trade_seen_at >= :cutoff)
             AND (last_backfilled_at IS NULL OR last_backfilled_at < :threshold)
@@ -480,6 +490,18 @@ async def backfill_async(ctx, db_path: str) -> None:
 
                 for trader in traders:
                     trader_address = trader["address"]
+                    last_trade_seen_at = trader["last_trade_seen_at"]
+
+                    since_unix_ts: Optional[int] = None
+                    if last_trade_seen_at:
+                        try:
+                            dt = datetime.fromisoformat(
+                                last_trade_seen_at.replace("Z", "+00:00")
+                            )
+                            since_unix_ts = int(dt.timestamp())
+                        except Exception:
+                            pass
+
                     progress.update(
                         task,
                         description=f"[cyan]↓ trades[/cyan]  [dim]{trader_address[:10]}...[/dim]",
@@ -491,6 +513,7 @@ async def backfill_async(ctx, db_path: str) -> None:
                             trader_address,
                             data_client,
                             graph_client,
+                            since_unix_ts=since_unix_ts,
                         )
 
                         total_stats["traders_processed"] += 1
