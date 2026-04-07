@@ -246,7 +246,11 @@ class TestBackfillTraderSinceTs:
             db, "0xtrader", mock_data, mock_graph, since_unix_ts=expected_ts
         )
 
-        # Verify Graph client received the timestamp
-        mock_graph.fetch_trader_trades.assert_called_once()
-        graph_kwargs = mock_graph.fetch_trader_trades.call_args[1]
-        assert graph_kwargs.get("since_unix_ts") == expected_ts
+        # In incremental mode, historical coverage is already in the DB — Graph should
+        # NOT be called (coverage window check is skipped when since_unix_ts is set).
+        mock_graph.fetch_trader_trades.assert_not_called()
+
+        # Data API should have been called with the timestamp
+        mock_data.fetch_user_trades.assert_called_once()
+        data_kwargs = mock_data.fetch_user_trades.call_args[1]
+        assert data_kwargs.get("since_unix_ts") == expected_ts

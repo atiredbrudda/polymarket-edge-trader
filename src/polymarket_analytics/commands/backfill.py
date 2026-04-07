@@ -230,7 +230,7 @@ async def backfill_trader(
                 continue
         return False
 
-    needs_graph = not api_trades or not _api_covers_window(api_trades)
+    needs_graph = since_unix_ts is None and (not api_trades or not _api_covers_window(api_trades))
 
     if needs_graph:
         stats["fallback"] = True
