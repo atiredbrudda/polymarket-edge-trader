@@ -9,25 +9,6 @@ Reviewer moves it from Pending → Cleared (or Flagged) after checking.
 
 <!-- Worker adds entries here -->
 
-### Pipeline Todo #5 - Incremental Fetch for Backfill — **2026-04-07**
-- **Branch:** worker/todo5-incremental-backfill-fetch
-- **Plan:** .planning/todos/pending/2026-04-07-add-incremental-fetch-to-backfill-pass-last-trade-seen-at-as-time-filter.md
-- **Summary:** .planning/todos/pending/99-05-SUMMARY.md
-- **Commits:** d702993
-- **Files changed:**
-  - src/polymarket_analytics/api/graph.py (MODIFIED) — fetch_trader_trades accepts since_unix_ts, adds timestamp_gte to GraphQL where clause
-  - src/polymarket_analytics/api/data.py (MODIFIED) — fetch_user_trades accepts since_unix_ts, early-exit pagination at historical boundary
-  - src/polymarket_analytics/commands/backfill.py (MODIFIED) — backfill_trader and fetch_trades_with_retry accept/forward since_unix_ts; backfill_async reads last_trade_seen_at and converts to unix ts
-  - tests/test_graph.py (MODIFIED) — added TestFetchTraderTradesTimestampFilter (2 tests)
-  - tests/test_incremental_backfill.py (NEW) — 5 tests: TestDataAPIIncrementalFetch (3), TestBackfillTraderSinceTs (2)
-- **Worker notes:** Implementation matches PLAN.md spec exactly. Pre-existing E402 linter warnings in backfill.py unrelated to this change.
-- **Checklist:**
-  - [x] All tests pass (.venv/bin/python3.13 -m pytest tests/ -x -q → 115 passed)
-  - [x] Linter clean for modified files (test files clean; backfill.py pre-existing warnings unchanged)
-  - [x] No debug artifacts
-  - [x] STATE.md NOT touched (reviewer-only)
-  - [x] Plan SUMMARY.md written
-
 ---
 
 ## Flagged
@@ -38,6 +19,19 @@ Reviewer moves it from Pending → Cleared (or Flagged) after checking.
 ---
 
 ## Cleared
+
+### Pipeline Todo #5 - Incremental Fetch for Backfill — **CLEARED 2026-04-07**
+- **Branch:** worker/todo5-incremental-backfill-fetch
+- **Cleared by:** Reviewer (Claude Sonnet 4.6)
+- **Tests:** pytest ✓ (115/115 — 7 new incremental tests + 108 existing)
+- **Files in scope:**
+  - `src/polymarket_analytics/api/graph.py` — fetch_trader_trades accepts since_unix_ts, adds timestamp_gte to GraphQL where clause
+  - `src/polymarket_analytics/api/data.py` — fetch_user_trades accepts since_unix_ts, early-exit pagination at historical boundary
+  - `src/polymarket_analytics/commands/backfill.py` — backfill_trader and fetch_trades_with_retry accept/forward since_unix_ts; backfill_async reads last_trade_seen_at and converts to unix ts
+  - `tests/test_graph.py` — added TestFetchTraderTradesTimestampFilter (2 tests)
+  - `tests/test_incremental_backfill.py` (NEW) — 5 tests: TestDataAPIIncrementalFetch (3), TestBackfillTraderSinceTs (2)
+- **Reviewer fix:** `backfill.py` — `needs_graph` always triggered Graph fallback during incremental fetches because `_api_covers_window` returns False when only recent trades are returned. Fixed: `needs_graph = since_unix_ts is None and (...)`. Updated `test_existing_last_trade_gives_incremental_fetch` to assert Graph is NOT called in incremental mode.
+- **Reviewer notes:** Core objective met — no more full re-fetch through trade history. Graph fallback correctly skipped for traders with existing history. **Merged to main.**
 
 ### Pipeline Todo #4 - Store clobTokenIds in DB for classify_tokens — **CLEARED 2026-04-06**
 - **Branch:** worker/todo4-clobtokenids-db
