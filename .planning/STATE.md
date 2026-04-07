@@ -87,12 +87,13 @@ enabling users to follow high-signal trades.
 
 ### Pending Todos
 
-All 4 done ✅
+All 5 done ✅
 
 1. ~~`fix-unstable-trade-id-fallback-dedup-existing-trades-table`~~ — **DONE (2026-04-06)**
 2. ~~`replace-backfill-complete-boolean-with-timestamps-selective-re-fetch`~~ — **DONE (2026-04-06)**
 3. ~~`add-incremental-mode-to-ingest-events-skip-full-fetch-on-re-runs`~~ — **DONE (2026-04-06)**
 4. ~~`store-clobtokenids-in-ingest-events-so-classify-tokens-reads-from-db`~~ — **DONE (2026-04-06)**
+5. ~~`add-incremental-fetch-to-backfill-pass-last-trade-seen-at-as-time-filter`~~ — **DONE (2026-04-07)**
 
 ### Open Questions
 
@@ -177,8 +178,9 @@ All 4 done ✅
 - **Pipeline Todo #2 MERGED (2026-04-06):** Timestamp-based selective re-fetch live. last_backfilled_at + last_trade_seen_at columns in traders table. Migration sets timestamps for existing backfill_complete=True traders to prevent mass re-fetch. 93/93 pass.
 - **Pipeline Todo #3 MERGED (2026-04-06):** Incremental mode for ingest-events. First run fetches all (closed=None); re-runs fetch active only (closed=False); --full flag forces complete fetch. 97/97 pass.
 - **Pipeline Todo #4 MERGED (2026-04-06):** classify_tokens now reads clob_token_ids from markets table (stored by ingest-events) instead of re-fetching 96K markets from Gamma API. API call eliminated. 100/100 pass.
+- **Pipeline Todo #5 MERGED (2026-04-07):** Incremental fetch for backfill. Both API clients (Graph + Data) accept since_unix_ts. backfill_async reads last_trade_seen_at per trader, converts to unix ts, passes to backfill_trader. Graph fallback skipped in incremental mode (reviewer fix). 115/115 pass.
 
 ---
 
 *State initialized: 2026-03-29*
-*Last updated: 2026-04-06 — All 4 pipeline todos complete. Project fully operational.*
+*Last updated: 2026-04-07 — All 5 pipeline todos complete. Project fully operational.*
