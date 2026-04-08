@@ -14,15 +14,18 @@ enabling users to follow high-signal trades.
 
 **Phase:** Post-Phase-8 — Pipeline todos
 
-**Status:** ✅ Phase 8 Complete — working through pipeline data integrity todos
+**Status:** 🔧 Pipeline todo #5 complete. Now executing todo #6 (backfill fixes).
+
+**Active Plan:** `.planning/phases/99-pipeline-todos/99-05-PLAN.md`
 
 **Progress:**
 
 ```
 [██████████████████████████████] 100% - All 8 phases complete
+[████████████████████░░░░░░░░░░] ~67% - Pipeline todos (5/7 done, #6 in progress)
 ```
 
-**Next:** All pipeline todos complete. Project fully operational.
+**Next:** Execute 99-05-PLAN.md — 5 backfill fixes (dedup, timestamps, concurrency, batching, bulk lookup).
 
 ---
 
