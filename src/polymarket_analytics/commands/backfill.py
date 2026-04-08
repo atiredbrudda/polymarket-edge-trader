@@ -11,6 +11,7 @@ Usage:
 import asyncio
 import hashlib
 import json
+import os
 import re
 import time
 from datetime import datetime, timedelta, timezone
@@ -20,7 +21,10 @@ from typing import Any, Dict, List, Optional
 from contextlib import contextmanager
 
 import click
+from dotenv import load_dotenv
 from rich.console import Console
+
+load_dotenv()
 from rich.progress import (
     BarColumn,
     MofNCompleteColumn,
@@ -165,9 +169,9 @@ def print_timing_summary():
 async def fetch_trades_with_retry(
     client: DataAPIClient,
     trader_address: str,
-    max_retries: int = 10,
+    max_retries: int = 4,
     base_delay: float = 1.0,
-    max_delay: float = 30.0,
+    max_delay: float = 8.0,
     since_unix_ts: Optional[int] = None,
 ) -> List[dict]:
     """Fetch trades from Data API with exponential backoff for HTTP 425.
@@ -197,21 +201,13 @@ async def fetch_trades_with_retry(
             return trades
         except Exception as e:
             error_str = str(e)
-            # Check for HTTP 425 (CLOB API restart) or similar rate-limit errors
-            if "425" in error_str or "Too Early" in error_str:
+            # Retry on rate-limit and transient errors: 408, 425, 429
+            if any(code in error_str for code in ("408", "425", "429", "Too Early", "Too Many Requests", "Request Timeout")):
                 last_error = e
-                console.print(
-                    f"  [yellow]HTTP 425 for {trader_address[:8]}... (attempt {attempt + 1}/{max_retries}), "
-                    f"retrying in {delay:.1f}s[/yellow]"
-                )
                 await asyncio.sleep(delay)
                 delay = min(delay * 2, max_delay)
                 continue
             else:
-                # Other errors - don't retry, just warn
-                console.print(
-                    f"  [red]Error fetching trades for {trader_address[:8]}...: {e}[/red]"
-                )
                 return []
 
     # Max retries exceeded
@@ -277,21 +273,45 @@ async def backfill_trader(
     # Graph is needed when:
     # 1. since_unix_ts is None (full backfill, not incremental), AND
     # 2. Data API doesn't cover the 40-day window, AND
-    # 3. DB also doesn't have trades older than the window for this trader
+    # 3. DB also doesn't have trades older than the window for each market in this batch
     #
     # In incremental mode (since_unix_ts is set), skip Graph fallback entirely —
     # historical coverage is already in the DB from prior full backfills.
-    def _db_covers_window() -> bool:
+    #
+    # Per-market check: old trades for Market A must not suppress Graph fallback for
+    # Market B. Build a partial catalog cache from API trades to resolve token_ids ->
+    # market_ids, then check DB coverage per market.
+    def _build_catalog_cache(trades: list, existing: dict | None = None) -> dict[str, str]:
+        cache = dict(existing) if existing else {}
+        new_ids = set()
+        for t in trades:
+            tid = t.get("token_id") or t.get("asset") or t.get("asset_id")
+            if tid and str(tid) not in cache:
+                new_ids.add(str(tid))
+        if new_ids:
+            placeholders = ",".join("?" * len(new_ids))
+            for row in db.execute(
+                f"SELECT token_id, condition_id FROM token_catalog WHERE token_id IN ({placeholders})",
+                list(new_ids),
+            ).fetchall():
+                cache[row[0]] = row[1]
+        return cache
+
+    def _db_covers_market(market_id: str) -> bool:
         result = db.execute(
-            "SELECT 1 FROM trades WHERE trader_address = :addr AND timestamp <= :cutoff LIMIT 1",
-            {"addr": trader_address, "cutoff": coverage_cutoff.isoformat()},
+            "SELECT 1 FROM trades WHERE trader_address = :addr AND market_id = :market AND timestamp <= :cutoff LIMIT 1",
+            {"addr": trader_address, "market": market_id, "cutoff": coverage_cutoff.isoformat()},
         ).fetchone()
         return result is not None
+
+    # Build early catalog cache from API trades to resolve markets for the coverage check
+    catalog_cache: dict[str, str] = _build_catalog_cache(api_trades)
+    api_markets = {cid for cid in catalog_cache.values() if cid}
 
     needs_graph = (
         since_unix_ts is None
         and (not api_trades or not _api_covers_window(api_trades))
-        and not _db_covers_window()
+        and not (api_markets and all(_db_covers_market(m) for m in api_markets))
     )
 
     if needs_graph:
@@ -305,6 +325,8 @@ async def backfill_trader(
         # Merge Graph trades with API trades (union — INSERT OR IGNORE deduplicates)
         for event in graph_events:
             api_trades.append(parse_graph_event(event, trader_address))
+        # Extend catalog cache with any new token_ids from Graph trades
+        catalog_cache = _build_catalog_cache(api_trades, existing=catalog_cache)
 
     if not api_trades:
         return stats
@@ -326,21 +348,7 @@ async def backfill_trader(
                 pass
         return datetime.now(timezone.utc).replace(microsecond=0).isoformat()
 
-    # Build token_id -> condition_id cache: one query for all trades
-    all_token_ids = set()
-    for t in api_trades:
-        tid = t.get("token_id") or t.get("asset") or t.get("asset_id")
-        if tid:
-            all_token_ids.add(str(tid))
-
-    catalog_cache: dict[str, str] = {}
-    if all_token_ids:
-        placeholders = ",".join("?" * len(all_token_ids))
-        for row in db.execute(
-            f"SELECT token_id, condition_id FROM token_catalog WHERE token_id IN ({placeholders})",
-            list(all_token_ids),
-        ).fetchall():
-            catalog_cache[row[0]] = row[1]
+    # catalog_cache is already built above (reused, no duplicate queries)
 
     trade_batch: list[dict] = []
 
@@ -549,21 +557,28 @@ async def backfill_async(ctx, db_path: str) -> None:
     if traders:
         # Initialize API clients
         data_client = DataAPIClient()
-        graph_client = GraphAPIClient(api_key=None)
+        graph_client = GraphAPIClient(api_key=os.getenv("GRAPH_API_KEY"))
 
         CONCURRENT_LIMIT = 10
         semaphore = asyncio.Semaphore(CONCURRENT_LIMIT)
 
+        fetch_completed = 0
+        fetch_total = 0
+
         async def _fetch_one(trader_address: str, since_unix_ts) -> tuple[str, list]:
             """Fetch trades for one trader under semaphore, return (address, trades)."""
+            nonlocal fetch_completed
             async with semaphore:
                 try:
-                    return trader_address, await fetch_trades_with_retry(
+                    result = trader_address, await fetch_trades_with_retry(
                         data_client, trader_address, since_unix_ts=since_unix_ts
                     )
-                except Exception as e:
-                    console.print(f"  [yellow]⚠ fetch failed {trader_address[:10]}...: {e}[/yellow]")
-                    return trader_address, []
+                except Exception:
+                    result = trader_address, []
+                fetch_completed += 1
+                if fetch_completed % 100 == 0 or fetch_completed == fetch_total:
+                    print(f"\r  [{fetch_completed}/{fetch_total}] fetching traders...    ", end="", flush=True)
+                return result
 
         start_time = time.time()
         total_stats = {
@@ -602,12 +617,14 @@ async def backfill_async(ctx, db_path: str) -> None:
                 trader_meta[trader_address] = {"since_unix_ts": since_unix_ts}
                 fetch_tasks.append(_fetch_one(trader_address, since_unix_ts))
 
+            fetch_total = len(fetch_tasks)
             console.print(
-                f"  Fetching {len(fetch_tasks):,} traders concurrently (limit={CONCURRENT_LIMIT})..."
+                f"  Fetching {fetch_total:,} traders concurrently (limit={CONCURRENT_LIMIT})..."
             )
             fetch_results: list[tuple[str, list]] = await asyncio.gather(
                 *fetch_tasks, return_exceptions=False
             )
+            print()  # end the \r progress line
 
             # Phase B: Sequential process
             with Progress(
