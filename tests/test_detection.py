@@ -13,7 +13,6 @@ Verifies:
 """
 
 import pytest
-import sqlite_utils
 from datetime import datetime, timezone, timedelta
 
 from polymarket_analytics.db.schema import init_database

@@ -12,9 +12,8 @@ Usage:
 """
 
 import sys
-from datetime import datetime
 from pathlib import Path
-from typing import Any, Dict, List, Optional, Tuple
+from typing import Any, List, Optional, Tuple
 
 import click
 from rich.console import Console
@@ -308,7 +307,7 @@ def run_sanity_checks(
         passed = count == 0
         if passed:
             console.print(
-                f"Check 6: No SELL-only open positions ........ [green]PASS[/green] (0 affected pairs)"
+                "Check 6: No SELL-only open positions ........ [green]PASS[/green] (0 affected pairs)"
             )
         else:
             console.print(
