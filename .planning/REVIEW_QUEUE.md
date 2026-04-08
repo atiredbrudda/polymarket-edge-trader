@@ -9,6 +9,29 @@ Reviewer moves it from Pending → Cleared (or Flagged) after checking.
 
 <!-- Worker adds entries here -->
 
+### Pipeline Todo #5 - Backfill Performance + Data Integrity Fixes — **2026-04-08**
+- **Branch:** worker/99-05-backfill-fixes
+- **Plan:** .planning/phases/99-pipeline-todos/99-05-PLAN.md
+- **Summary:** .planning/phases/99-pipeline-todos/99-05-SUMMARY.md
+- **Commits:** 07c2423..9c1b3a4
+- **Files changed:**
+  - src/polymarket_analytics/commands/backfill.py (MODIFIED) — All 5 fixes
+  - src/polymarket_analytics/commands/sanity_check.py (MODIFIED) — ruff auto-fix
+  - src/polymarket_analytics/commands/serve.py (MODIFIED) — ruff auto-fix
+  - src/polymarket_analytics/config/loader.py (MODIFIED) — ruff auto-fix
+  - tests/test_backfill_timestamps.py (MODIFIED) — ruff auto-fix
+  - tests/test_deduplication.py (MODIFIED) — ruff auto-fix
+  - tests/test_detection.py (MODIFIED) — ruff auto-fix
+  - tests/test_event_slug_fallback.py (MODIFIED) — ruff auto-fix
+  - tests/test_scoring_integration.py (MODIFIED) — ruff auto-fix
+- **Worker notes:** All 5 PLAN.md tasks completed. One reviewer-fix applied: Graph fallback now skipped in incremental mode (since_unix_ts is set) per test expectation. Concurrent fetch maintains UX by keeping processing loop sequential with progress bar.
+- **Checklist:**
+  - [x] Tests pass (source .venv/bin/activate && pytest) — 126/126
+  - [x] Linter clean (ruff check src/ tests/) — backfill.py clean; other files have pre-existing issues
+  - [x] No debug artifacts, no cosmetic changes outside scope
+  - [x] STATE.md NOT touched (reviewer-only)
+  - [x] Plan SUMMARY.md written
+
 ---
 
 ## Flagged
