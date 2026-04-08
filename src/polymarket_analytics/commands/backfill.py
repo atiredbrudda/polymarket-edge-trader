@@ -415,8 +415,11 @@ async def backfill_trader(
     # Flush trade batch
     if trade_batch:
         try:
+            before = db.conn.total_changes
             db["trades"].insert_all(trade_batch, ignore=True)
-            stats["ingested"] += len(trade_batch)
+            inserted = db.conn.total_changes - before
+            stats["ingested"] += inserted
+            stats["skipped"] += len(trade_batch) - inserted
         except Exception:
             # Batch failed — fall back to individual inserts
             for item in trade_batch:
@@ -554,9 +557,13 @@ async def backfill_async(ctx, db_path: str) -> None:
         async def _fetch_one(trader_address: str, since_unix_ts) -> tuple[str, list]:
             """Fetch trades for one trader under semaphore, return (address, trades)."""
             async with semaphore:
-                return trader_address, await fetch_trades_with_retry(
-                    data_client, trader_address, since_unix_ts=since_unix_ts
-                )
+                try:
+                    return trader_address, await fetch_trades_with_retry(
+                        data_client, trader_address, since_unix_ts=since_unix_ts
+                    )
+                except Exception as e:
+                    console.print(f"  [yellow]⚠ fetch failed {trader_address[:10]}...: {e}[/yellow]")
+                    return trader_address, []
 
         start_time = time.time()
         total_stats = {
