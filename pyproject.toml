@@ -12,6 +12,7 @@ dependencies = [
     "pandas>=3.0.1",
     "pydantic>=2.12.5",
     "pytest>=9.0.2",
+    "python-dotenv>=1.2.2",
     "pyyaml>=6.0.3",
     "rich>=14.3.3",
     "sqlite-utils>=3.39",
@@ -22,3 +23,6 @@ where = ["src"]
 
 [project.scripts]
 polymarket = "polymarket_analytics.cli:cli"
+
+[dependency-groups]
+dev = ["line_profiler>=4.0"]

@@ -17,6 +17,7 @@ from datetime import datetime, timedelta, timezone
 from decimal import Decimal
 from pathlib import Path
 from typing import Any, Dict, List, Optional
+from contextlib import contextmanager
 
 # Map event_slug game prefix → canonical game name (must match market_entities.game values)
 _SLUG_GAME_MAP: Dict[str, str] = {
@@ -123,6 +124,45 @@ from polymarket_analytics.extraction.llm import LLMFallback
 console = Console()
 
 
+# Component timing tracking
+component_timers: Dict[str, float] = {}
+
+
+@contextmanager
+def time_component(name: str):
+    """Time a specific component (API, dedup, processing, DB, Graph fallback).
+
+    Args:
+        name: Component name for tracking
+
+    Yields:
+        None
+
+    Example:
+        with time_component("API fetch"):
+            trades = await fetch_trades_with_retry(...)
+    """
+    start = time.perf_counter()
+    yield
+    elapsed = time.perf_counter() - start
+    component_timers[name] = component_timers.get(name, 0) + elapsed
+
+
+def print_timing_summary():
+    """Print component timing breakdown at end of backfill."""
+    if not component_timers:
+        return
+
+    print("\n=== COMPONENT TIMING BREAKDOWN ===")
+    total = sum(component_timers.values())
+    for name, elapsed in sorted(
+        component_timers.items(), key=lambda x: x[1], reverse=True
+    ):
+        pct = (elapsed / total * 100) if total > 0 else 0
+        console.print(f"  {name:20s}: {elapsed:8.3f}s ({pct:5.1f}%)")
+    console.print(f"  {'TOTAL':20s}: {total:8.3f}s (100.0%)")
+
+
 async def fetch_trades_with_retry(
     client: DataAPIClient,
     trader_address: str,
@@ -207,9 +247,10 @@ async def backfill_trader(
     coverage_cutoff = datetime.now(timezone.utc) - timedelta(days=COVERAGE_DAYS)
 
     # Tier 1: Try Data API first
-    api_trades = await fetch_trades_with_retry(
-        data_client, trader_address, since_unix_ts=since_unix_ts
-    )
+    with time_component(f"API fetch ({trader_address[:8]}...)"):
+        api_trades = await fetch_trades_with_retry(
+            data_client, trader_address, since_unix_ts=since_unix_ts
+        )
 
     # Tier 2: Graph fallback if API doesn't cover the full 40-day window.
     # "Covers" means at least one trade predates the cutoff (oldest trade >= 40 days ago).
@@ -246,15 +287,18 @@ async def backfill_trader(
         ).fetchone()
         return result is not None
 
-    needs_graph = (not api_trades or not _api_covers_window(api_trades)) and not _db_covers_window()
+    needs_graph = (
+        not api_trades or not _api_covers_window(api_trades)
+    ) and not _db_covers_window()
 
     if needs_graph:
         stats["fallback"] = True
         # Full-history Graph pass (since_unix_ts=None): the API gap may be old trades
         # that predate since_unix_ts, so we must not filter by timestamp here.
-        graph_events = await graph_client.fetch_trader_trades(
-            trader_address, since_unix_ts=None
-        )
+        with time_component(f"Graph fallback ({trader_address[:8]}...)"):
+            graph_events = await graph_client.fetch_trader_trades(
+                trader_address, since_unix_ts=None
+            )
         # Merge Graph trades with API trades (union — INSERT OR IGNORE deduplicates)
         for event in graph_events:
             api_trades.append(parse_graph_event(event, trader_address))
@@ -421,16 +465,17 @@ async def backfill_async(ctx, db_path: str) -> None:
     # Edge case: two genuinely identical trades same-second same-price same-size
     # is accepted as an acceptable false-positive loss (extremely rare in practice).
     with console.status("Deduplicating trades table..."):
-        dedup_result = db.execute(
-            """
-            DELETE FROM trades
-            WHERE rowid NOT IN (
-                SELECT MIN(rowid)
-                FROM trades
-                GROUP BY trader_address, token_id, side, price, size, timestamp
+        with time_component("Deduplication (pre-run)"):
+            dedup_result = db.execute(
+                """
+                DELETE FROM trades
+                WHERE rowid NOT IN (
+                    SELECT MIN(rowid)
+                    FROM trades
+                    GROUP BY trader_address, token_id, side, price, size, timestamp
+                )
+                """
             )
-            """
-        )
     dedup_count = dedup_result.rowcount if dedup_result else 0
     if dedup_count:
         console.print(
@@ -567,16 +612,17 @@ async def backfill_async(ctx, db_path: str) -> None:
 
         # Post-run dedup: catch cross-source duplicates inserted during this run.
         with console.status("Deduplicating trades table (post-run)..."):
-            dedup_result = db.execute(
-                """
-                DELETE FROM trades
-                WHERE rowid NOT IN (
-                    SELECT MIN(rowid)
-                    FROM trades
-                    GROUP BY trader_address, token_id, side, price, size, timestamp
+            with time_component("Deduplication (post-run)"):
+                dedup_result = db.execute(
+                    """
+                    DELETE FROM trades
+                    WHERE rowid NOT IN (
+                        SELECT MIN(rowid)
+                        FROM trades
+                        GROUP BY trader_address, token_id, side, price, size, timestamp
+                    )
+                    """
                 )
-                """
-            )
         dedup_count = dedup_result.rowcount if dedup_result else 0
         if dedup_count:
             console.print(
@@ -761,6 +807,9 @@ async def backfill_async(ctx, db_path: str) -> None:
             f"(pattern: {pattern_count - event_slug_count - slug_parse_count:,}, "
             f"event_slug: {event_slug_count:,}, slug_parse: {slug_parse_count:,}, LLM: {llm_count:,})"
         )
+
+    # Print component timing breakdown
+    print_timing_summary()
 
     return
 
