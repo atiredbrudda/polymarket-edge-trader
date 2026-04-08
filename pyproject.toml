@@ -22,3 +22,6 @@ where = ["src"]
 
 [project.scripts]
 polymarket = "polymarket_analytics.cli:cli"
+
+[dependency-groups]
+dev = ["line_profiler>=4.0"]
