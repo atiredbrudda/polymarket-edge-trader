@@ -12,10 +12,7 @@ Tests:
 - No fallback when sibling has no game extracted
 """
 
-import sqlite_utils
-import pytest
 
-from polymarket_analytics.db.schema import init_database
 
 
 def _insert_market(db, condition_id, event_slug=None):
@@ -33,7 +30,8 @@ def _insert_market(db, condition_id, event_slug=None):
 
 
 def _insert_entity(db, condition_id, game, team_a, team_b="TeamB", tournament="TournX"):
-    import hashlib, json
+    import hashlib
+    import json
     entities = {"game": game, "team_a": team_a, "team_b": team_b, "tournament": tournament, "market_type": "match_winner"}
     eid = hashlib.sha256(f"{condition_id}:{json.dumps(entities, sort_keys=True)}".encode()).hexdigest()[:16]
     db.conn.execute(

@@ -19,6 +19,25 @@ from pathlib import Path
 from typing import Any, Dict, List, Optional
 from contextlib import contextmanager
 
+import click
+from rich.console import Console
+from rich.progress import (
+    BarColumn,
+    MofNCompleteColumn,
+    Progress,
+    SpinnerColumn,
+    TaskProgressColumn,
+    TimeElapsedColumn,
+    TextColumn,
+)
+
+from polymarket_analytics.cli import cli
+from polymarket_analytics.api.data import DataAPIClient
+from polymarket_analytics.api.graph import GraphAPIClient, parse_graph_event
+from polymarket_analytics.db.schema import init_database
+from polymarket_analytics.extraction.patterns import EntityPatternMatcher
+from polymarket_analytics.extraction.llm import LLMFallback
+
 # Map event_slug game prefix → canonical game name (must match market_entities.game values)
 _SLUG_GAME_MAP: Dict[str, str] = {
     "cs2": "CS2",
@@ -99,26 +118,6 @@ def _parse_event_slug(slug: str) -> Dict[str, Optional[str]]:
         if slug.startswith(tournament_prefix):
             return {"game": tournament_game}
     return {}
-
-
-import click
-from rich.console import Console
-from rich.progress import (
-    BarColumn,
-    MofNCompleteColumn,
-    Progress,
-    SpinnerColumn,
-    TaskProgressColumn,
-    TimeElapsedColumn,
-    TextColumn,
-)
-
-from polymarket_analytics.cli import cli
-from polymarket_analytics.api.data import DataAPIClient
-from polymarket_analytics.api.graph import GraphAPIClient, parse_graph_event
-from polymarket_analytics.db.schema import init_database
-from polymarket_analytics.extraction.patterns import EntityPatternMatcher
-from polymarket_analytics.extraction.llm import LLMFallback
 
 
 console = Console()
@@ -227,6 +226,7 @@ async def backfill_trader(
     data_client: DataAPIClient,
     graph_client: GraphAPIClient,
     since_unix_ts: Optional[int] = None,
+    prefetched_trades: Optional[list] = None,
 ) -> Dict[str, int]:
     """Backfill trades for a single trader with 2-tier logic.
 
@@ -248,9 +248,12 @@ async def backfill_trader(
 
     # Tier 1: Try Data API first
     with time_component(f"API fetch ({trader_address[:8]}...)"):
-        api_trades = await fetch_trades_with_retry(
-            data_client, trader_address, since_unix_ts=since_unix_ts
-        )
+        if prefetched_trades is not None:
+            api_trades = prefetched_trades
+        else:
+            api_trades = await fetch_trades_with_retry(
+                data_client, trader_address, since_unix_ts=since_unix_ts
+            )
 
     # Tier 2: Graph fallback if API doesn't cover the full 40-day window.
     # "Covers" means at least one trade predates the cutoff (oldest trade >= 40 days ago).
@@ -272,14 +275,12 @@ async def backfill_trader(
         return False
 
     # Graph is needed when:
-    # 1. Data API doesn't cover the 40-day window, AND
-    # 2. DB also doesn't have trades older than the window for this trader
-    #    (if DB already has them from a prior Graph pass, no need to re-fetch)
+    # 1. since_unix_ts is None (full backfill, not incremental), AND
+    # 2. Data API doesn't cover the 40-day window, AND
+    # 3. DB also doesn't have trades older than the window for this trader
     #
-    # NOTE: we intentionally do NOT gate this on `since_unix_ts is None`.
-    # ingest_events sets last_trade_seen_at from recent SELL events before the
-    # first backfill runs, so since_unix_ts is often non-None on the very first
-    # backfill — but Graph still needs a full-history pass in that case.
+    # In incremental mode (since_unix_ts is set), skip Graph fallback entirely —
+    # historical coverage is already in the DB from prior full backfills.
     def _db_covers_window() -> bool:
         result = db.execute(
             "SELECT 1 FROM trades WHERE trader_address = :addr AND timestamp <= :cutoff LIMIT 1",
@@ -288,8 +289,10 @@ async def backfill_trader(
         return result is not None
 
     needs_graph = (
-        not api_trades or not _api_covers_window(api_trades)
-    ) and not _db_covers_window()
+        since_unix_ts is None
+        and (not api_trades or not _api_covers_window(api_trades))
+        and not _db_covers_window()
+    )
 
     if needs_graph:
         stats["fallback"] = True
@@ -307,7 +310,39 @@ async def backfill_trader(
         return stats
 
     # Process trades
-    now = datetime.now(timezone.utc).isoformat()
+    def _normalize_ts(ts) -> str:
+        """Return ISO timestamp truncated to seconds. Prevents API/Graph precision mismatch."""
+        if isinstance(ts, int):
+            return (
+                datetime.fromtimestamp(ts, tz=timezone.utc)
+                .replace(microsecond=0)
+                .isoformat()
+            )
+        if ts:
+            try:
+                dt = datetime.fromisoformat(str(ts).replace("Z", "+00:00"))
+                return dt.replace(microsecond=0).isoformat()
+            except Exception:
+                pass
+        return datetime.now(timezone.utc).replace(microsecond=0).isoformat()
+
+    # Build token_id -> condition_id cache: one query for all trades
+    all_token_ids = set()
+    for t in api_trades:
+        tid = t.get("token_id") or t.get("asset") or t.get("asset_id")
+        if tid:
+            all_token_ids.add(str(tid))
+
+    catalog_cache: dict[str, str] = {}
+    if all_token_ids:
+        placeholders = ",".join("?" * len(all_token_ids))
+        for row in db.execute(
+            f"SELECT token_id, condition_id FROM token_catalog WHERE token_id IN ({placeholders})",
+            list(all_token_ids),
+        ).fetchall():
+            catalog_cache[row[0]] = row[1]
+
+    trade_batch: list[dict] = []
 
     for trade in api_trades:
         # Handle both API and Graph trade formats
@@ -338,19 +373,11 @@ async def backfill_trader(
             stats["skipped"] += 1
             continue
 
-        # Token catalog lookup: resolve token_id -> condition_id
-        catalog_result = list(
-            db.query(
-                "SELECT condition_id FROM token_catalog WHERE token_id = :token_id",
-                {"token_id": str(token_id)},
-            )
-        )
-
-        if not catalog_result:
+        # Token catalog lookup: resolve token_id -> condition_id (from cache)
+        condition_id = catalog_cache.get(str(token_id))
+        if not condition_id:
             stats["skipped"] += 1
             continue
-
-        condition_id = catalog_result[0]["condition_id"]
 
         # Convert price to Decimal
         try:
@@ -367,18 +394,8 @@ async def backfill_trader(
         except Exception:
             size = Decimal("0")
 
-        # Convert timestamp to ISO format
-        if isinstance(timestamp, int):
-            # Unix timestamp from Graph
-            try:
-                timestamp_iso = datetime.fromtimestamp(
-                    timestamp, tz=timezone.utc
-                ).isoformat()
-            except (ValueError, OSError):
-                timestamp_iso = now
-        else:
-            # Already ISO format or None
-            timestamp_iso = timestamp if timestamp else now
+        # Convert timestamp to ISO format (second precision)
+        timestamp_iso = _normalize_ts(timestamp)
 
         # Prepare trade record
         trade_data = {
@@ -392,12 +409,25 @@ async def backfill_trader(
             "trader_address": trader_address,
         }
 
-        # Insert with INSERT OR IGNORE (idempotent via PRIMARY KEY)
+        # Collect for batch insert
+        trade_batch.append(trade_data)
+
+    # Flush trade batch
+    if trade_batch:
         try:
-            db["trades"].insert(trade_data, replace=False)
-            stats["ingested"] += 1
+            before = db.conn.total_changes
+            db["trades"].insert_all(trade_batch, ignore=True)
+            inserted = db.conn.total_changes - before
+            stats["ingested"] += inserted
+            stats["skipped"] += len(trade_batch) - inserted
         except Exception:
-            stats["skipped"] += 1
+            # Batch failed — fall back to individual inserts
+            for item in trade_batch:
+                try:
+                    db["trades"].insert(item, replace=False)
+                    stats["ingested"] += 1
+                except Exception:
+                    stats["skipped"] += 1
 
     # Mark trader as backfill complete and update timestamps
     if stats["ingested"] > 0 or stats["skipped"] > 0:
@@ -472,7 +502,7 @@ async def backfill_async(ctx, db_path: str) -> None:
                 WHERE rowid NOT IN (
                     SELECT MIN(rowid)
                     FROM trades
-                    GROUP BY trader_address, token_id, side, price, size, timestamp
+                    GROUP BY trader_address, market_id, token_id, side, price, size, timestamp
                 )
                 """
             )
@@ -521,6 +551,20 @@ async def backfill_async(ctx, db_path: str) -> None:
         data_client = DataAPIClient()
         graph_client = GraphAPIClient(api_key=None)
 
+        CONCURRENT_LIMIT = 10
+        semaphore = asyncio.Semaphore(CONCURRENT_LIMIT)
+
+        async def _fetch_one(trader_address: str, since_unix_ts) -> tuple[str, list]:
+            """Fetch trades for one trader under semaphore, return (address, trades)."""
+            async with semaphore:
+                try:
+                    return trader_address, await fetch_trades_with_retry(
+                        data_client, trader_address, since_unix_ts=since_unix_ts
+                    )
+                except Exception as e:
+                    console.print(f"  [yellow]⚠ fetch failed {trader_address[:10]}...: {e}[/yellow]")
+                    return trader_address, []
+
         start_time = time.time()
         total_stats = {
             "traders_processed": 0,
@@ -540,6 +584,32 @@ async def backfill_async(ctx, db_path: str) -> None:
             )
 
         try:
+            # Phase A: Concurrent fetch
+            fetch_tasks = []
+            trader_meta: dict[str, dict] = {}
+            for trader in traders:
+                trader_address = trader[0]
+                last_trade_seen_at = trader[1]
+                since_unix_ts: Optional[int] = None
+                if last_trade_seen_at:
+                    try:
+                        dt = datetime.fromisoformat(
+                            last_trade_seen_at.replace("Z", "+00:00")
+                        )
+                        since_unix_ts = int(dt.timestamp())
+                    except Exception:
+                        pass
+                trader_meta[trader_address] = {"since_unix_ts": since_unix_ts}
+                fetch_tasks.append(_fetch_one(trader_address, since_unix_ts))
+
+            console.print(
+                f"  Fetching {len(fetch_tasks):,} traders concurrently (limit={CONCURRENT_LIMIT})..."
+            )
+            fetch_results: list[tuple[str, list]] = await asyncio.gather(
+                *fetch_tasks, return_exceptions=False
+            )
+
+            # Phase B: Sequential process
             with Progress(
                 SpinnerColumn(),
                 TextColumn("{task.description}"),
@@ -552,19 +622,8 @@ async def backfill_async(ctx, db_path: str) -> None:
             ) as progress:
                 task = progress.add_task(_desc(), total=len(traders))
 
-                for trader in traders:
-                    trader_address = trader[0]
-                    last_trade_seen_at = trader[1]
-
-                    since_unix_ts: Optional[int] = None
-                    if last_trade_seen_at:
-                        try:
-                            dt = datetime.fromisoformat(
-                                last_trade_seen_at.replace("Z", "+00:00")
-                            )
-                            since_unix_ts = int(dt.timestamp())
-                        except Exception:
-                            pass
+                for trader_address, api_trades in fetch_results:
+                    since_unix_ts = trader_meta[trader_address]["since_unix_ts"]
 
                     progress.update(
                         task,
@@ -578,6 +637,7 @@ async def backfill_async(ctx, db_path: str) -> None:
                             data_client,
                             graph_client,
                             since_unix_ts=since_unix_ts,
+                            prefetched_trades=api_trades,
                         )
 
                         total_stats["traders_processed"] += 1
@@ -619,7 +679,7 @@ async def backfill_async(ctx, db_path: str) -> None:
                     WHERE rowid NOT IN (
                         SELECT MIN(rowid)
                         FROM trades
-                        GROUP BY trader_address, token_id, side, price, size, timestamp
+                        GROUP BY trader_address, market_id, token_id, side, price, size, timestamp
                     )
                     """
                 )

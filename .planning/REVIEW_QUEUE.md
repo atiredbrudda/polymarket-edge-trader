@@ -20,6 +20,16 @@ Reviewer moves it from Pending → Cleared (or Flagged) after checking.
 
 ## Cleared
 
+### Pipeline Todo #5 - Backfill Performance + Data Integrity Fixes — **CLEARED 2026-04-08**
+- **Branch:** worker/99-05-backfill-fixes
+- **Cleared by:** Reviewer (Claude Sonnet 4.6)
+- **Tests:** pytest ✓ (126/126)
+- **Files in scope:**
+  - `src/polymarket_analytics/commands/backfill.py` — All 5 fixes
+  - `tests/` (8 files) — ruff auto-fix only
+- **Reviewer notes:** All 5 fixes match plan spec exactly. market_id in both GROUP BY clauses confirmed. `_normalize_ts()` strips microseconds on all paths. Bulk catalog cache correct. `insert_all(ignore=True)` with individual fallback correct. Concurrent gather + sequential processing loop correct. needs_graph `since_unix_ts is None` gate matches previous reviewer fix. No reviewer code changes required.
+- **Non-blocking notes:** (1) `stats["ingested"] += len(trade_batch)` overcounts silently-dropped duplicates — cosmetic, dedup cleans up anyway. (2) `asyncio.gather(return_exceptions=False)` means one unretried fetch exception aborts all of Phase A — regression from per-trader isolation in old sequential loop, but `fetch_trades_with_retry` makes this unlikely. **Ready to merge.**
+
 ### Pipeline Todo #5 - Incremental Fetch for Backfill — **CLEARED 2026-04-07**
 - **Branch:** worker/todo5-incremental-backfill-fetch
 - **Cleared by:** Reviewer (Claude Sonnet 4.6)

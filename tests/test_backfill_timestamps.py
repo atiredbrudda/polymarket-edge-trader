@@ -1,6 +1,5 @@
 """Tests for backfill timestamp-based selection logic."""
 
-import pytest
 from datetime import datetime, timedelta, timezone
 
 

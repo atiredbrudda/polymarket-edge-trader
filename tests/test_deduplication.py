@@ -14,7 +14,6 @@ Both dedup phases use identical GROUP BY logic:
 Keeps the earliest insert (MIN(rowid)) per logical trade.
 """
 
-import pytest
 from datetime import datetime, timezone, timedelta
 from decimal import Decimal
 import sqlite_utils

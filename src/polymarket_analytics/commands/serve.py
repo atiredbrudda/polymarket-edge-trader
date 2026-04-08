@@ -10,7 +10,6 @@ Usage:
 
 import json
 import os
-import threading
 from http.server import BaseHTTPRequestHandler, HTTPServer
 from pathlib import Path
 from typing import Any
@@ -20,7 +19,6 @@ import click
 
 from polymarket_analytics.cli import cli
 from polymarket_analytics.db.connection import get_db
-from polymarket_analytics.db.schema import init_database
 
 # ── HTML page ──────────────────────────────────────────────────────────────────
 
@@ -381,12 +379,12 @@ def serve(ctx: Any, db_path: str, port: int) -> None:
     handler = make_handler(db_path_obj, niche)
     server = HTTPServer(("localhost", port), handler)
 
-    click.echo(f"=== Polymarket Dashboard ===")
+    click.echo("=== Polymarket Dashboard ===")
     click.echo(f"  Niche   : {niche}")
     click.echo(f"  DB      : {db_path_obj.resolve()}")
     click.echo(f"  URL     : http://localhost:{port}")
-    click.echo(f"  Updates : automatically on DB change")
-    click.echo(f"\nPress Ctrl+C to stop.\n")
+    click.echo("  Updates : automatically on DB change")
+    click.echo("\nPress Ctrl+C to stop.\n")
 
     try:
         server.serve_forever()
