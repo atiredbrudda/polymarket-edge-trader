@@ -116,7 +116,7 @@ def run_backfill_with_profiling(
     """
     # Import here to avoid circular imports and ensure we're profiling the actual execution
     from polymarket_analytics.commands.backfill import backfill_async
-    from polymarket_analytics.cli import cli
+    from polymarket_analytics.config.loader import load_niche_config
 
     if output_file is None:
         timestamp = datetime.now(timezone.utc).strftime("%Y%m%d_%H%M%S")
@@ -124,15 +124,19 @@ def run_backfill_with_profiling(
 
     profiler = BackfillProfiler(output_file=output_file)
 
-    # Create a mock context object for the backfill
+    # Load niche config
+    config_path = Path(__file__).parent.parent / "niches" / f"{niche}.yaml"
+    config = load_niche_config(config_path)
+
+    # Create context object for the backfill
     class MockContext:
-        def __init__(self, niche: str):
+        def __init__(self, niche: str, config):
             self.obj = {
                 "niche": niche,
-                "config": None,  # Will be loaded by backfill_async
+                "config": config,
             }
 
-    ctx = MockContext(niche)
+    ctx = MockContext(niche, config)
 
     def run_backfill():
         """Wrapper to run async backfill synchronously."""
