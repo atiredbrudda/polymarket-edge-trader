@@ -13,6 +13,7 @@ import hashlib
 import json
 import os
 import re
+import signal
 import time
 from datetime import datetime, timedelta, timezone
 from decimal import Decimal
@@ -52,6 +53,73 @@ GRAPH_RETRY_LIMIT = 3
 # Component timing tracking
 component_timers: Dict[str, float] = {}
 
+
+class ShutdownManager:
+    """Manages graceful shutdown on SIGINT/SIGTERM.
+
+    First signal: sets shutdown_requested, workers finish current item then stop.
+    Second signal: forces immediate exit.
+    """
+
+    def __init__(self):
+        self.shutdown_requested = False
+        self._force_count = 0
+        self._original_handlers: Dict[int, Any] = {}
+        self._traders_completed: List[str] = []
+        self._traders_skipped: List[str] = []
+
+    def install(self, loop: asyncio.AbstractEventLoop) -> None:
+        """Register signal handlers on the running event loop."""
+        for sig in (signal.SIGINT, signal.SIGTERM):
+            self._original_handlers[sig] = signal.getsignal(sig)
+            loop.add_signal_handler(sig, self._handle_signal, sig)
+
+    def uninstall(self, loop: asyncio.AbstractEventLoop) -> None:
+        """Restore original signal handlers."""
+        for sig in (signal.SIGINT, signal.SIGTERM):
+            try:
+                loop.remove_signal_handler(sig)
+            except Exception:
+                pass
+            original = self._original_handlers.get(sig)
+            if original and original not in (signal.SIG_DFL, signal.SIG_IGN):
+                signal.signal(sig, original)
+
+    def _handle_signal(self, sig: signal.Signals) -> None:
+        if not self.shutdown_requested:
+            self.shutdown_requested = True
+            console.print(
+                "\n[bold yellow]⚠ Graceful shutdown requested — "
+                "finishing in-progress traders, skipping remaining...[/bold yellow]"
+            )
+            console.print(
+                "[dim]Press Ctrl+C again to force immediate exit.[/dim]"
+            )
+        else:
+            console.print("\n[bold red]Force shutdown.[/bold red]")
+            raise SystemExit(1)
+
+    def record_completed(self, trader_address: str) -> None:
+        self._traders_completed.append(trader_address)
+
+    def record_skipped(self, trader_address: str) -> None:
+        self._traders_skipped.append(trader_address)
+
+    def print_interrupted_summary(self) -> None:
+        if not self.shutdown_requested:
+            return
+        console.print(
+            f"\n[bold yellow]Interrupted — shutdown summary:[/bold yellow]\n"
+            f"  Traders completed before shutdown: {len(self._traders_completed):,}\n"
+            f"  Traders skipped (not started):     {len(self._traders_skipped):,}"
+        )
+        console.print(
+            "[dim]No partial data was written — skipped traders will resume on next run.[/dim]"
+        )
+
+
+# Module-level instance so backfill_trader can check it (optional future use)
+_shutdown = ShutdownManager()
 
 
 @contextmanager
@@ -510,6 +578,10 @@ async def backfill_async(ctx, db_path: str) -> None:
 
     db = init_database(db_path_obj)
 
+    # Install graceful shutdown handlers
+    _shutdown.__init__()  # reset state from any prior run
+    loop = asyncio.get_running_loop()
+    _shutdown.install(loop)
 
     console.print("[bold]=== Backfilling Trade History ===[/bold]\n")
 
@@ -594,7 +666,11 @@ async def backfill_async(ctx, db_path: str) -> None:
         async def _fetch_one(trader_address: str, since_unix_ts) -> tuple[str, list]:
             """Fetch trades for one trader under semaphore, return (address, trades)."""
             nonlocal fetch_completed
+            if _shutdown.shutdown_requested:
+                return trader_address, []
             async with semaphore:
+                if _shutdown.shutdown_requested:
+                    return trader_address, []
                 try:
                     result = (
                         trader_address,
@@ -643,7 +719,11 @@ async def backfill_async(ctx, db_path: str) -> None:
         async def _graph_fetch_one(trader_address: str) -> tuple[str, list]:
             """Fetch full Graph history for one trader under semaphore."""
             nonlocal graph_fetch_completed
+            if _shutdown.shutdown_requested:
+                return trader_address, []
             async with semaphore:
+                if _shutdown.shutdown_requested:
+                    return trader_address, []
                 try:
                     events = await graph_client.fetch_trader_trades(
                         trader_address, since_unix_ts=None
@@ -736,7 +816,15 @@ async def backfill_async(ctx, db_path: str) -> None:
             async def _process_one(
                 trader_address: str, api_trades: list, progress, task
             ) -> None:
+                if _shutdown.shutdown_requested:
+                    _shutdown.record_skipped(trader_address)
+                    progress.advance(task)
+                    return
                 async with process_sem:
+                    if _shutdown.shutdown_requested:
+                        _shutdown.record_skipped(trader_address)
+                        progress.advance(task)
+                        return
                     since_unix_ts = trader_meta[trader_address]["since_unix_ts"]
                     try:
                         stats = await backfill_trader(
@@ -757,12 +845,14 @@ async def backfill_async(ctx, db_path: str) -> None:
                         total_stats["trades_skipped"] += stats["skipped"]
                         if stats["fallback"]:
                             total_stats["graph_fallbacks"] += 1
+                        _shutdown.record_completed(trader_address)
 
                     except click.ClickException:
                         raise
                     except Exception as e:
                         total_stats["errors"] += 1
                         total_stats["traders_processed"] += 1
+                        _shutdown.record_completed(trader_address)
                         console.print(
                             f"  [red]✗ {trader_address[:10]}...: {e}[/red]"
                         )
@@ -789,14 +879,20 @@ async def backfill_async(ctx, db_path: str) -> None:
                 )
 
             elapsed = time.time() - start_time
+            status_label = (
+                "[bold yellow]Backfill interrupted[/bold yellow]"
+                if _shutdown.shutdown_requested
+                else "[bold green]Backfill complete[/bold green]"
+            )
             console.print(
-                f"\n[bold green]Backfill complete[/bold green] ({elapsed:.1f}s)\n"
+                f"\n{status_label} ({elapsed:.1f}s)\n"
                 f"  Traders processed:    {total_stats['traders_processed']:,}\n"
                 f"  Trades ingested:      {total_stats['trades_ingested']:,}\n"
                 f"  Trades skipped:       {total_stats['trades_skipped']:,}\n"
                 f"  Graph fallbacks used: {total_stats['graph_fallbacks']:,}\n"
                 f"  Errors:               {total_stats['errors']:,}"
             )
+            _shutdown.print_interrupted_summary()
 
             # Report incomplete positions that can still be retried
             try:
@@ -827,6 +923,7 @@ async def backfill_async(ctx, db_path: str) -> None:
         finally:
             await data_client.close()
             await graph_client.close()
+            _shutdown.uninstall(loop)
 
         # Post-run dedup: catch cross-source duplicates inserted during this run.
         with console.status("Deduplicating trades table (post-run)..."):
@@ -846,6 +943,12 @@ async def backfill_async(ctx, db_path: str) -> None:
             console.print(
                 f"  [yellow]⚠ Removed {dedup_count:,} duplicate trade(s) from this run[/yellow]"
             )
+
+    # Skip entity extraction on interrupted shutdown — trades are consistent
+    # but we don't want to start a long LLM extraction pass.
+    if _shutdown.shutdown_requested:
+        print_timing_summary()
+        return
 
     # -------------------------------------------------------------------------
     # Step 2: Post-backfill entity extraction
@@ -1066,6 +1169,10 @@ async def retry_incomplete_async(ctx, db_path: str) -> None:
     db_path_obj = Path(db_path)
     db = init_database(db_path_obj)
 
+    # Install graceful shutdown handlers
+    _shutdown.__init__()  # reset state from any prior run
+    loop = asyncio.get_running_loop()
+    _shutdown.install(loop)
 
     console.print("[bold]=== Retrying Incomplete Positions ===[/bold]\n")
 
@@ -1110,7 +1217,11 @@ async def retry_incomplete_async(ctx, db_path: str) -> None:
 
         async def _retry_one(trader_address: str, markets: list) -> None:
             nonlocal completed, total_fixed, total_still_incomplete, total_exhausted
+            if _shutdown.shutdown_requested:
+                return
             async with semaphore:
+                if _shutdown.shutdown_requested:
+                    return
                 try:
                     graph_events = await graph_client.fetch_trader_trades(
                         trader_address, since_unix_ts=None
@@ -1231,13 +1342,23 @@ async def retry_incomplete_async(ctx, db_path: str) -> None:
 
     finally:
         await graph_client.close()
+        _shutdown.uninstall(loop)
 
+    status_label = (
+        "[bold yellow]Retry interrupted[/bold yellow]"
+        if _shutdown.shutdown_requested
+        else "[bold green]Retry complete[/bold green]"
+    )
     console.print(
-        f"\n[bold green]Retry complete[/bold green]\n"
+        f"\n{status_label}\n"
         f"  Fixed (BUYs found):       {total_fixed:,}\n"
         f"  Still incomplete:         {total_still_incomplete:,}\n"
         f"  Exhausted ({GRAPH_RETRY_LIMIT}/{GRAPH_RETRY_LIMIT} attempts): {total_exhausted:,}"
     )
+    if _shutdown.shutdown_requested:
+        console.print(
+            "[dim]Interrupted traders were not modified — they will resume on next run.[/dim]"
+        )
 
 
 @cli.command("retry-incomplete")

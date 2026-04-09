@@ -17,6 +17,7 @@ Usage:
 import asyncio
 import hashlib
 import json
+import signal
 import time
 from datetime import datetime, timedelta, timezone
 from decimal import Decimal, InvalidOperation
@@ -299,6 +300,24 @@ def discover(ctx, db_path: str, closing_within: Optional[int], use_llm: bool) ->
     # -------------------------------------------------------------------------
     console.print(f"[bold]Step 4/4[/bold] Processing {to_process:,} new markets...")
 
+    # Graceful shutdown: on first Ctrl+C, break the loop and flush accumulated data.
+    _discover_shutdown = False
+    _original_sigint = signal.getsignal(signal.SIGINT)
+
+    def _handle_sigint(sig, frame):
+        nonlocal _discover_shutdown
+        if not _discover_shutdown:
+            _discover_shutdown = True
+            console.print(
+                "\n[bold yellow]⚠ Graceful shutdown — finishing current market, "
+                "then flushing accumulated data...[/bold yellow]"
+            )
+        else:
+            console.print("\n[bold red]Force shutdown.[/bold red]")
+            raise SystemExit(1)
+
+    signal.signal(signal.SIGINT, _handle_sigint)
+
     traders: Dict[str, Dict[str, Any]] = {}
     trade_records: List[Dict[str, Any]] = []
     entity_records: List[Dict[str, Any]] = []
@@ -333,6 +352,9 @@ def discover(ctx, db_path: str, closing_within: Optional[int], use_llm: bool) ->
         task = progress.add_task(_desc(), total=len(gamma_markets))
 
         for m in gamma_markets:
+            if _discover_shutdown:
+                break
+
             cid = m.get("conditionId", "")
             question = m.get("question", "")
             end_date_str = m.get("endDate")
@@ -516,9 +538,17 @@ def discover(ctx, db_path: str, closing_within: Optional[int], use_llm: bool) ->
             progress.update(task, description=_desc())
             progress.advance(task)
 
+    # Restore original signal handler
+    signal.signal(signal.SIGINT, _original_sigint)
+
     # -------------------------------------------------------------------------
-    # Step 5: Batch write to DB
+    # Step 5: Batch write to DB (runs even on interrupt — flush accumulated data)
     # -------------------------------------------------------------------------
+    if _discover_shutdown:
+        console.print(
+            "\n[bold yellow]Flushing accumulated data before exit...[/bold yellow]"
+        )
+
     if trade_records:
         with console.status(
             f"[bold green]Writing {len(trade_records):,} trades to DB...",
@@ -575,8 +605,13 @@ def discover(ctx, db_path: str, closing_within: Optional[int], use_llm: bool) ->
         console.print(f"  [green]✓[/green] {len(entity_records):,} entities written")
 
     elapsed = time.time() - start_time
+    status_label = (
+        "[bold yellow]Discover interrupted[/bold yellow]"
+        if _discover_shutdown
+        else "[bold green]Discover complete[/bold green]"
+    )
     console.print(
-        f"\n[bold green]Discover complete[/bold green] ({elapsed:.1f}s)\n"
+        f"\n{status_label} ({elapsed:.1f}s)\n"
         f"  Live markets fetched:  {len(gamma_markets):,}\n"
         f"  New markets processed: {new_markets_count:,}\n"
         f"  Cached (skipped):      {skipped_count:,}\n"
