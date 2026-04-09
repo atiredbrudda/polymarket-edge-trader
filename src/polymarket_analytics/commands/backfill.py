@@ -236,6 +236,7 @@ async def backfill_trader(
     graph_client: GraphAPIClient,
     since_unix_ts: Optional[int] = None,
     prefetched_trades: Optional[list] = None,
+    prefetched_graph: Optional[list] = None,
 ) -> Dict[str, int]:
     """Backfill trades for a single trader with 2-tier logic.
 
@@ -245,6 +246,7 @@ async def backfill_trader(
         data_client: DataAPIClient for Tier 1
         graph_client: GraphAPIClient for Tier 2 fallback
         since_unix_ts: Optional unix timestamp — if set, only fetch trades at or after this time
+        prefetched_graph: Optional pre-fetched Graph events (from concurrent Phase A.5)
 
     Returns:
         Dict with ingested, skipped, fallback counts
@@ -382,12 +384,15 @@ async def backfill_trader(
 
     if needs_graph:
         stats["fallback"] = True
-        # Full-history Graph pass (since_unix_ts=None): the API gap may be old trades
-        # that predate since_unix_ts, so we must not filter by timestamp here.
-        with time_component(f"Graph fallback ({trader_address[:8]}...)"):
-            graph_events = await graph_client.fetch_trader_trades(
-                trader_address, since_unix_ts=None
-            )
+        # Use pre-fetched Graph data if available (from concurrent Phase A.5),
+        # otherwise fall back to sequential fetch.
+        if prefetched_graph is not None:
+            graph_events = prefetched_graph
+        else:
+            with time_component(f"Graph fallback ({trader_address[:8]}...)"):
+                graph_events = await graph_client.fetch_trader_trades(
+                    trader_address, since_unix_ts=None
+                )
         # Merge Graph trades with API trades (union — INSERT OR IGNORE deduplicates)
         for event in graph_events:
             api_trades.append(parse_graph_event(event, trader_address))
@@ -646,6 +651,51 @@ async def backfill_async(ctx, db_path: str) -> None:
                     )
                 return result
 
+        # Pre-scan: identify traders with sell-only positions needing Graph fallback.
+        # Fetching Graph data concurrently here avoids sequential blocking in Phase B.
+        trader_addresses_in_batch = {t[0] for t in traders}
+        sell_only_traders: set[str] = set()
+        try:
+            rows = db.execute(
+                """
+                SELECT DISTINCT t.trader_address
+                FROM trades t
+                JOIN positions p ON p.trader_address = t.trader_address
+                    AND p.market_id = t.market_id
+                WHERE p.resolved = 0 AND COALESCE(p.data_incomplete, 0) = 0
+                GROUP BY t.trader_address, t.market_id
+                HAVING SUM(CASE WHEN t.side = 'BUY' THEN 1 ELSE 0 END) = 0
+                   AND SUM(CASE WHEN t.side = 'SELL' THEN 1 ELSE 0 END) > 0
+                """
+            ).fetchall()
+            sell_only_traders = {r[0] for r in rows} & trader_addresses_in_batch
+        except Exception:
+            pass  # pre-scan failure is non-fatal; Phase B detection still works
+
+        graph_prefetch: dict[str, list] = {}  # trader_address -> Graph events
+
+        graph_fetch_completed = 0
+        graph_fetch_total = 0
+
+        async def _graph_fetch_one(trader_address: str) -> tuple[str, list]:
+            """Fetch full Graph history for one trader under semaphore."""
+            nonlocal graph_fetch_completed
+            async with semaphore:
+                try:
+                    events = await graph_client.fetch_trader_trades(
+                        trader_address, since_unix_ts=None
+                    )
+                except Exception:
+                    events = []
+                graph_fetch_completed += 1
+                if graph_fetch_completed % 10 == 0 or graph_fetch_completed == graph_fetch_total:
+                    print(
+                        f"\r  [{graph_fetch_completed}/{graph_fetch_total}] fetching Graph history...    ",
+                        end="",
+                        flush=True,
+                    )
+                return trader_address, events
+
         start_time = time.time()
         total_stats = {
             "traders_processed": 0,
@@ -665,7 +715,7 @@ async def backfill_async(ctx, db_path: str) -> None:
             )
 
         try:
-            # Phase A: Concurrent fetch
+            # Phase A: Concurrent fetch (API + Graph pre-fetch for sell-only traders)
             fetch_tasks = []
             trader_meta: dict[str, dict] = {}
             for trader in traders:
@@ -691,6 +741,19 @@ async def backfill_async(ctx, db_path: str) -> None:
                 *fetch_tasks, return_exceptions=False
             )
             print()  # end the \r progress line
+
+            # Phase A.5: Concurrent Graph pre-fetch for sell-only traders
+            if sell_only_traders:
+                graph_tasks = [_graph_fetch_one(addr) for addr in sell_only_traders]
+                graph_fetch_total = len(graph_tasks)
+                console.print(
+                    f"  Pre-fetching Graph history for {graph_fetch_total:,} sell-only traders (limit={CONCURRENT_LIMIT})..."
+                )
+                graph_results = await asyncio.gather(*graph_tasks, return_exceptions=False)
+                print()  # end the \r progress line
+                for addr, events in graph_results:
+                    if events:
+                        graph_prefetch[addr] = events
 
             # Phase B: Sequential process
             with Progress(
@@ -721,6 +784,7 @@ async def backfill_async(ctx, db_path: str) -> None:
                             graph_client,
                             since_unix_ts=since_unix_ts,
                             prefetched_trades=api_trades,
+                            prefetched_graph=graph_prefetch.get(trader_address),
                         )
 
                         total_stats["traders_processed"] += 1

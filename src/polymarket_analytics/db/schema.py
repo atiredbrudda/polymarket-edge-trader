@@ -288,6 +288,8 @@ def run_migrations(db):
         positions_cols = {col.name for col in db["positions"].columns}
         if "avg_exit_price" not in positions_cols:
             db.execute("ALTER TABLE positions ADD COLUMN avg_exit_price NUMERIC(10,6)")
+        if "data_incomplete" not in positions_cols:
+            db.execute("ALTER TABLE positions ADD COLUMN data_incomplete INTEGER DEFAULT 0")
 
     if "signals" in db.table_names():
         signals_cols = {col.name for col in db["signals"].columns}

@@ -134,6 +134,7 @@ def build_positions_from_trades(db: Any, niche_slug: str) -> int:
                 "resolved": 0,
                 "outcome": None,
                 "pnl": None,
+                "data_incomplete": 1 if row["avg_entry_price"] is None else 0,
             }
         )
 
