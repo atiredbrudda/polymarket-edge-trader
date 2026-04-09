@@ -24,7 +24,7 @@ import click
 from dotenv import load_dotenv
 from rich.console import Console
 
-load_dotenv()
+load_dotenv(Path(__file__).resolve().parents[3] / ".env")
 from rich.progress import (
     BarColumn,
     MofNCompleteColumn,
@@ -218,6 +218,9 @@ async def fetch_trades_with_retry(
                 delay = min(delay * 2, max_delay)
                 continue
             else:
+                console.print(
+                    f"  [yellow]⚠ Non-retryable error for {trader_address[:10]}...: {e}[/yellow]"
+                )
                 return []
 
     # Max retries exceeded
@@ -333,17 +336,46 @@ async def backfill_trader(
     # SELL-only detection: On Polymarket, you must buy before you can sell/redeem.
     # SELL-only positions = missing historical BUY trades, not legitimate edge cases.
     # Force Graph fallback to fetch full history for affected markets.
+    #
+    # Scoped to current-batch markets (api_markets) to avoid:
+    # 1. Redundant Graph fallbacks for unrelated markets
+    # 2. Infinite retry loops for post-resolution redemptions (legitimate sell-only)
+    #
+    # SELL-only detection: check for markets where this trader has SELLs but no BUYs.
+    # In incremental mode (since_unix_ts set), also check: new markets in this batch
+    # may have only SELLs because BUYs predate the incremental window.
     if not needs_graph:
-        sell_only_markets = db.execute(
-            """
-            SELECT DISTINCT market_id FROM trades
-            WHERE trader_address = :addr
-            GROUP BY trader_address, market_id
-            HAVING SUM(CASE WHEN side = 'BUY' THEN 1 ELSE 0 END) = 0
-               AND SUM(CASE WHEN side = 'SELL' THEN 1 ELSE 0 END) > 0
-            """,
-            {"addr": trader_address},
-        ).fetchall()
+        if api_markets:
+            # Scope to current-batch markets when we have API trades
+            market_list = list(api_markets)
+            placeholders = ",".join("?" * len(market_list))
+            sell_only_markets = db.execute(
+                f"""
+                SELECT DISTINCT market_id FROM trades
+                WHERE trader_address = ? AND market_id IN ({placeholders})
+                GROUP BY trader_address, market_id
+                HAVING SUM(CASE WHEN side = 'BUY' THEN 1 ELSE 0 END) = 0
+                   AND SUM(CASE WHEN side = 'SELL' THEN 1 ELSE 0 END) > 0
+                """,
+                [trader_address] + market_list,
+            ).fetchall()
+        else:
+            # No API trades in this batch — check DB for any sell-only positions
+            # on unresolved markets. Runs in both full and incremental mode:
+            # incremental batches won't have api_markets for old markets whose
+            # BUYs predate the since_unix_ts window.
+            sell_only_markets = db.execute(
+                """
+                SELECT DISTINCT t.market_id FROM trades t
+                JOIN positions p ON p.trader_address = t.trader_address
+                    AND p.market_id = t.market_id
+                WHERE t.trader_address = ? AND p.resolved = 0
+                GROUP BY t.trader_address, t.market_id
+                HAVING SUM(CASE WHEN t.side = 'BUY' THEN 1 ELSE 0 END) = 0
+                   AND SUM(CASE WHEN t.side = 'SELL' THEN 1 ELSE 0 END) > 0
+                """,
+                [trader_address],
+            ).fetchall()
 
         if sell_only_markets:
             needs_graph = True
@@ -474,23 +506,16 @@ async def backfill_trader(
     # Mark trader as backfill complete and update timestamps
     if stats["ingested"] > 0 or stats["skipped"] > 0:
         # Compute max trade timestamp from ingested trades
-        max_trade_timestamp = None
+        # Normalize all timestamps to ISO strings before comparing to avoid
+        # TypeError from mixed int (Graph) vs str (API) types.
+        last_trade_iso = None
         for trade in api_trades:
             ts = trade.get("timestamp")
-            if ts:
-                if max_trade_timestamp is None or ts > max_trade_timestamp:
-                    max_trade_timestamp = ts
-
-        # Convert to ISO format if Unix timestamp
-        last_trade_iso = None
-        if max_trade_timestamp:
-            if isinstance(max_trade_timestamp, int):
-                last_trade_iso = datetime.fromtimestamp(
-                    max_trade_timestamp, tz=timezone.utc
-                ).isoformat()
-            else:
-                # Already ISO string
-                last_trade_iso = str(max_trade_timestamp)
+            if ts is None:
+                continue
+            ts_iso = _normalize_ts(ts)
+            if last_trade_iso is None or ts_iso > last_trade_iso:
+                last_trade_iso = ts_iso
 
         db["traders"].update(
             trader_address,

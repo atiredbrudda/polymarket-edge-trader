@@ -405,7 +405,9 @@ def discover(ctx, db_path: str, closing_within: Optional[int], use_llm: bool) ->
                 # Build trade record (same format as backfill)
                 raw_token_id = trade.get("asset") or trade.get("asset_id")
                 tx_hash = trade.get("transactionHash", "")
-                trade_id = tx_hash or f"{address}_{trade.get('timestamp', '')}_{cid}"
+                trade_id = tx_hash or hashlib.sha256(
+                    f"{address}:{raw_token_id}:{trade.get('side', '')}:{trade.get('price', '')}:{trade.get('size', '')}:{raw_ts}".encode()
+                ).hexdigest()[:32]
 
                 # Resolve market_id via token catalog; fall back to conditionId
                 if raw_token_id and raw_token_id in catalog_by_token:

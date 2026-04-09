@@ -211,6 +211,12 @@ def create_indexes(db):
         if_not_exists=True,
         index_name="idx_trades_trader_market",
     )
+    # Composite index for dedup DELETE query (avoids full table scan)
+    db["trades"].create_index(
+        ["trader_address", "market_id", "token_id", "side", "price", "size", "timestamp"],
+        if_not_exists=True,
+        index_name="idx_trades_dedup",
+    )
 
     # market_entities - UNIQUE constraint on condition_id via unique index
     db["market_entities"].create_index(
@@ -300,17 +306,24 @@ def run_migrations(db):
             db.execute("ALTER TABLE traders ADD COLUMN last_backfilled_at TEXT")
         if "last_trade_seen_at" not in traders_cols:
             db.execute("ALTER TABLE traders ADD COLUMN last_trade_seen_at TEXT")
-        # Migrate existing data: set last_backfilled_at for traders already marked complete
-        # This prevents mass re-fetch on first run after migration
-        # Only run UPDATE if table has rows (skip on fresh test databases)
-        row_count = db.execute("SELECT COUNT(*) FROM traders").fetchone()[0]
-        if row_count > 0:
-            db.execute("""
-                UPDATE traders
-                SET last_backfilled_at = datetime('now')
-                WHERE backfill_complete = 1
-                  AND last_backfilled_at IS NULL
-            """)
+        # One-time migration: seed last_backfilled_at for traders that were
+        # marked complete before this column existed. Guarded by _migrated flag
+        # in the DB so it doesn't overwrite intentional NULL resets.
+        migrated = db.execute(
+            "SELECT value FROM _migrations WHERE key = 'backfill_ts_seeded' LIMIT 1"
+        ).fetchone() if "_migrations" in db.table_names() else None
+        if not migrated:
+            row_count = db.execute("SELECT COUNT(*) FROM traders").fetchone()[0]
+            if row_count > 0:
+                db.execute("""
+                    UPDATE traders
+                    SET last_backfilled_at = datetime('now')
+                    WHERE backfill_complete = 1
+                      AND last_backfilled_at IS NULL
+                """)
+            if "_migrations" not in db.table_names():
+                db.execute("CREATE TABLE _migrations (key TEXT PRIMARY KEY, value TEXT)")
+            db.execute("INSERT OR REPLACE INTO _migrations VALUES ('backfill_ts_seeded', '1')")
 
     if "markets" in db.table_names():
         markets_cols = {col.name for col in db["markets"].columns}

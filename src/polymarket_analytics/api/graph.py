@@ -4,6 +4,7 @@ This module provides an async client for fetching OrderFilledEvent records
 from The Graph's orderbook subgraph, used as fallback for complete trade history.
 """
 
+import asyncio
 from decimal import Decimal
 from typing import List, Optional
 
@@ -242,12 +243,23 @@ class GraphAPIClient:
                       ) {{ {_FIELDS} }}
                     }}
                     """
-                response = await client.post(
-                    GRAPH_ENDPOINT,
-                    json={"query": query},
-                )
-                response.raise_for_status()
-                batch = response.json().get("data", {}).get("orderFilledEvents", [])
+                # Retry with exponential backoff for transient errors
+                batch = None
+                for _attempt in range(4):
+                    response = await client.post(
+                        GRAPH_ENDPOINT,
+                        json={"query": query},
+                    )
+                    if response.status_code in (429, 502, 503, 504):
+                        await asyncio.sleep(2 ** _attempt)
+                        continue
+                    response.raise_for_status()
+                    batch = response.json().get("data", {}).get("orderFilledEvents", [])
+                    break
+                else:
+                    # All retries exhausted — raise last status
+                    response.raise_for_status()
+                    batch = []
                 if not batch:
                     break
                 events.extend(batch)

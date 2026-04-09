@@ -47,8 +47,16 @@ def calculate_clv(positions_df: pd.DataFrame) -> pd.DataFrame:
     # Drop rows where resolution_price is still NaN (edge case guard)
     df = df.dropna(subset=["resolution_price"])
 
-    # CLV per position: (resolution_price - avg_entry_price) / avg_entry_price
+    # CLV per position: direction-aware formula
+    # LONG: (resolution_price - entry) / entry  — profit when resolution > entry
+    # SHORT: (entry - resolution_price) / entry — profit when resolution < entry
     df["clv"] = (df["resolution_price"] - df["avg_entry_price"]) / df["avg_entry_price"]
+    if "direction" in df.columns:
+        short_mask = df["direction"] == "SHORT"
+        if short_mask.any():
+            df.loc[short_mask, "clv"] = (
+                df.loc[short_mask, "avg_entry_price"] - df.loc[short_mask, "resolution_price"]
+            ) / df.loc[short_mask, "avg_entry_price"]
 
     # Aggregate: mean CLV per trader
     trader_clv = df.groupby("trader_address")["clv"].mean().reset_index()
