@@ -145,10 +145,12 @@ def discover(ctx, db_path: str, closing_within: Optional[int], use_llm: bool) ->
 
     # Apply --closing-within filter
     now_utc = datetime.now(timezone.utc)
-    refresh_cutoff = now_utc + timedelta(minutes=30)
 
     if closing_within is not None:
         cutoff = now_utc + timedelta(hours=closing_within)
+        # Cache refresh window matches the filter — re-fetch trades for any
+        # cached market that falls inside --closing-within, not just 30 min.
+        refresh_cutoff = cutoff
         before = len(gamma_markets)
         gamma_markets = [
             m
@@ -166,6 +168,9 @@ def discover(ctx, db_path: str, closing_within: Optional[int], use_llm: bool) ->
         if not gamma_markets:
             console.print("[yellow]No markets match the filter. Exiting.[/yellow]")
             return
+    else:
+        # Default: only refresh cached markets closing within 30 minutes
+        refresh_cutoff = now_utc + timedelta(minutes=30)
 
     # -------------------------------------------------------------------------
     # Step 2: Upsert live markets into DB

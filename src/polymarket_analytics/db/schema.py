@@ -236,6 +236,12 @@ def create_indexes(db):
     db["positions"].create_index(
         ["resolved"], if_not_exists=True, index_name="idx_positions_resolved"
     )
+    # Composite index for serve.py contributor query (market_id + direction + resolved)
+    db["positions"].create_index(
+        ["market_id", "direction", "resolved"],
+        if_not_exists=True,
+        index_name="idx_positions_market_direction_resolved",
+    )
 
     # lift_scores indexes
     db["lift_scores"].create_index(
@@ -243,6 +249,17 @@ def create_indexes(db):
     )
     db["lift_scores"].create_index(
         ["quintile"], if_not_exists=True, index_name="idx_lift_quintile"
+    )
+    # Composite index for q5_traders view subquery (category + computed_at)
+    db["lift_scores"].create_index(
+        ["category", "computed_at"],
+        if_not_exists=True,
+        index_name="idx_lift_category_computed",
+    )
+
+    # signals indexes (serve.py dashboard queries)
+    db["signals"].create_index(
+        ["market_id"], if_not_exists=True, index_name="idx_signals_market"
     )
 
 

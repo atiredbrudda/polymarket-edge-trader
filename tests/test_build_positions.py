@@ -246,18 +246,18 @@ def test_build_positions_aggregates_trades(test_db: sqlite_utils.Database):
     # Run build_positions
     count = build_positions_from_trades(test_db, "esports")
 
-    # Assert count matches expected (5 positions: 3 traders on market-1, 2 traders on market-2)
-    assert count == 5, f"Expected 5 positions, got {count}"
+    # Assert count: 4 positions (Alice market-2 is sell-only, excluded by HAVING clause)
+    assert count == 4, f"Expected 4 positions, got {count}"
 
     # Query positions table
     positions = list(test_db["positions"].rows)
-    assert len(positions) == 5, f"Expected 5 position rows, got {len(positions)}"
+    assert len(positions) == 4, f"Expected 4 position rows, got {len(positions)}"
 
     # Verify one row per (trader, market) pair
+    # Alice market-2 excluded: only SELL trades, no BUYs (sell-only)
     pairs = {(p["trader_address"], p["market_id"]) for p in positions}
     expected_pairs = {
         ("0xAlice", "market-1"),
-        ("0xAlice", "market-2"),
         ("0xBob", "market-1"),
         ("0xCarol", "market-1"),
         ("0xCarol", "market-2"),

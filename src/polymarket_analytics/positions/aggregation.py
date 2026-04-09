@@ -140,8 +140,7 @@ def build_positions_from_trades(db: Any, niche_slug: str) -> int:
         )
 
     # Upsert positions (idempotent, batched in single transaction)
-    with db.conn:
-        for position in positions:
-            db["positions"].upsert(position, pk="id")
+    if positions:
+        db["positions"].upsert_all(positions, pk="id")
 
     return len(positions)
