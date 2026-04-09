@@ -202,7 +202,17 @@ async def fetch_trades_with_retry(
         except Exception as e:
             error_str = str(e)
             # Retry on rate-limit and transient errors: 408, 425, 429
-            if any(code in error_str for code in ("408", "425", "429", "Too Early", "Too Many Requests", "Request Timeout")):
+            if any(
+                code in error_str
+                for code in (
+                    "408",
+                    "425",
+                    "429",
+                    "Too Early",
+                    "Too Many Requests",
+                    "Request Timeout",
+                )
+            ):
                 last_error = e
                 await asyncio.sleep(delay)
                 delay = min(delay * 2, max_delay)
@@ -281,7 +291,9 @@ async def backfill_trader(
     # Per-market check: old trades for Market A must not suppress Graph fallback for
     # Market B. Build a partial catalog cache from API trades to resolve token_ids ->
     # market_ids, then check DB coverage per market.
-    def _build_catalog_cache(trades: list, existing: dict | None = None) -> dict[str, str]:
+    def _build_catalog_cache(
+        trades: list, existing: dict | None = None
+    ) -> dict[str, str]:
         cache = dict(existing) if existing else {}
         new_ids = set()
         for t in trades:
@@ -300,7 +312,11 @@ async def backfill_trader(
     def _db_covers_market(market_id: str) -> bool:
         result = db.execute(
             "SELECT 1 FROM trades WHERE trader_address = :addr AND market_id = :market AND timestamp <= :cutoff LIMIT 1",
-            {"addr": trader_address, "market": market_id, "cutoff": coverage_cutoff.isoformat()},
+            {
+                "addr": trader_address,
+                "market": market_id,
+                "cutoff": coverage_cutoff.isoformat(),
+            },
         ).fetchone()
         return result is not None
 
@@ -313,6 +329,24 @@ async def backfill_trader(
         and (not api_trades or not _api_covers_window(api_trades))
         and not (api_markets and all(_db_covers_market(m) for m in api_markets))
     )
+
+    # SELL-only detection: On Polymarket, you must buy before you can sell/redeem.
+    # SELL-only positions = missing historical BUY trades, not legitimate edge cases.
+    # Force Graph fallback to fetch full history for affected markets.
+    if not needs_graph:
+        sell_only_markets = db.execute(
+            """
+            SELECT DISTINCT market_id FROM trades
+            WHERE trader_address = :addr
+            GROUP BY trader_address, market_id
+            HAVING SUM(CASE WHEN side = 'BUY' THEN 1 ELSE 0 END) = 0
+               AND SUM(CASE WHEN side = 'SELL' THEN 1 ELSE 0 END) > 0
+            """,
+            {"addr": trader_address},
+        ).fetchall()
+
+        if sell_only_markets:
+            needs_graph = True
 
     if needs_graph:
         stats["fallback"] = True
@@ -570,14 +604,21 @@ async def backfill_async(ctx, db_path: str) -> None:
             nonlocal fetch_completed
             async with semaphore:
                 try:
-                    result = trader_address, await fetch_trades_with_retry(
-                        data_client, trader_address, since_unix_ts=since_unix_ts
+                    result = (
+                        trader_address,
+                        await fetch_trades_with_retry(
+                            data_client, trader_address, since_unix_ts=since_unix_ts
+                        ),
                     )
                 except Exception:
                     result = trader_address, []
                 fetch_completed += 1
                 if fetch_completed % 100 == 0 or fetch_completed == fetch_total:
-                    print(f"\r  [{fetch_completed}/{fetch_total}] fetching traders...    ", end="", flush=True)
+                    print(
+                        f"\r  [{fetch_completed}/{fetch_total}] fetching traders...    ",
+                        end="",
+                        flush=True,
+                    )
                 return result
 
         start_time = time.time()
