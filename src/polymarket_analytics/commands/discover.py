@@ -41,6 +41,7 @@ from polymarket_analytics.cli import cli
 from polymarket_analytics.db.schema import init_database
 from polymarket_analytics.extraction.llm import LLMFallback
 from polymarket_analytics.extraction.patterns import EntityPatternMatcher
+from polymarket_analytics.extraction.slug_parser import parse_event_slug
 
 console = Console()
 
@@ -304,6 +305,7 @@ def discover(ctx, db_path: str, closing_within: Optional[int], use_llm: bool) ->
     llm_count = 0
     pattern_count = 0
     event_slug_count = 0
+    slug_parse_count = 0
     new_markets_count = 0
     skipped_count = 0
     error_count = 0
@@ -461,7 +463,19 @@ def discover(ctx, db_path: str, closing_within: Optional[int], use_llm: bool) ->
                         event_slug_count += 1
                         pattern_incomplete = False
 
-                # LLM fallback: only if pattern and event_slug both failed
+                # slug parse fallback: extract game+teams from slug structure
+                if pattern_incomplete:
+                    slug = cid_to_event_slug.get(cid)
+                    if slug:
+                        parsed = parse_event_slug(slug)
+                        if parsed.get("game"):
+                            entities = parsed
+                            slug_parse_count += 1
+                            pattern_incomplete = False
+                            if slug not in event_slug_entities:
+                                event_slug_entities[slug] = entities
+
+                # LLM fallback: only if pattern, event_slug, and slug parse all failed
                 if (
                     pattern_incomplete
                     and use_llm
@@ -569,6 +583,6 @@ def discover(ctx, db_path: str, closing_within: Optional[int], use_llm: bool) ->
         f"  Errors:                {error_count:,}\n"
         f"  Trades stored:         {len(trade_records):,}\n"
         f"  Entities extracted:    {len(entity_records):,} "
-        f"(pattern: {pattern_count - event_slug_count:,}, event_slug: {event_slug_count:,}, LLM: {llm_count:,})\n"
+        f"(pattern: {pattern_count - event_slug_count - slug_parse_count:,}, event_slug: {event_slug_count:,}, slug_parse: {slug_parse_count:,}, LLM: {llm_count:,})\n"
         f"  Traders discovered:    {len(traders):,}"
     )

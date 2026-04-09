@@ -77,6 +77,7 @@ def detect_convergence(db: sqlite_utils.Database, niche_slug: str) -> pd.DataFra
         JOIN lift_scores ls ON ls.trader_address = p.trader_address
         JOIN markets m ON m.condition_id = p.market_id
         WHERE p.resolved = 0
+          AND COALESCE(p.data_incomplete, 0) = 0
           AND ls.quintile = 5
           AND ls.category = :niche_slug
           AND ls.computed_at = (

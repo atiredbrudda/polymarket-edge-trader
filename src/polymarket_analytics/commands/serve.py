@@ -281,6 +281,7 @@ def _get_data(db, niche_slug: str) -> dict:
                 WHERE p.market_id = :market_id
                   AND p.direction = :direction
                   AND p.resolved = 0
+                  AND COALESCE(p.data_incomplete, 0) = 0
                   AND p.size > 0
                   AND ls.quintile = 5
                   AND ls.category = :niche_slug
