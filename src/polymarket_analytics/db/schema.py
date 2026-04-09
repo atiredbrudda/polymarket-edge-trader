@@ -290,6 +290,10 @@ def run_migrations(db):
             db.execute("ALTER TABLE positions ADD COLUMN avg_exit_price NUMERIC(10,6)")
         if "data_incomplete" not in positions_cols:
             db.execute("ALTER TABLE positions ADD COLUMN data_incomplete INTEGER DEFAULT 0")
+        if "graph_retry_count" not in positions_cols:
+            db.execute("ALTER TABLE positions ADD COLUMN graph_retry_count INTEGER DEFAULT 0")
+            # Backfill: existing data_incomplete positions already had exhaustive Graph attempts
+            db.execute("UPDATE positions SET graph_retry_count = 3 WHERE data_incomplete = 1")
 
     if "signals" in db.table_names():
         signals_cols = {col.name for col in db["signals"].columns}

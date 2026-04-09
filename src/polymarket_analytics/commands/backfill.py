@@ -46,9 +46,12 @@ from polymarket_analytics.extraction.slug_parser import parse_event_slug as _par
 
 console = Console()
 
+# Max Graph retry attempts before marking a position as permanently data_incomplete
+GRAPH_RETRY_LIMIT = 3
 
 # Component timing tracking
 component_timers: Dict[str, float] = {}
+
 
 
 @contextmanager
@@ -157,6 +160,7 @@ async def backfill_trader(
     since_unix_ts: Optional[int] = None,
     prefetched_trades: Optional[list] = None,
     prefetched_graph: Optional[list] = None,
+    global_catalog: Optional[Dict[str, str]] = None,
 ) -> Dict[str, int]:
     """Backfill trades for a single trader with 2-tier logic.
 
@@ -246,7 +250,8 @@ async def backfill_trader(
         return result is not None
 
     # Build early catalog cache from API trades to resolve markets for the coverage check
-    catalog_cache: dict[str, str] = _build_catalog_cache(api_trades)
+    # Use pre-built global catalog if available (avoids per-trader DB queries)
+    catalog_cache: dict[str, str] = _build_catalog_cache(api_trades, existing=global_catalog)
     api_markets = {cid for cid in catalog_cache.values() if cid}
 
     needs_graph = (
@@ -269,34 +274,40 @@ async def backfill_trader(
     if not needs_graph:
         if api_markets:
             # Scope to current-batch markets when we have API trades
+            # Skip positions that have exhausted Graph retry attempts
             market_list = list(api_markets)
             placeholders = ",".join("?" * len(market_list))
             sell_only_markets = db.execute(
                 f"""
-                SELECT DISTINCT market_id FROM trades
-                WHERE trader_address = ? AND market_id IN ({placeholders})
-                GROUP BY trader_address, market_id
-                HAVING SUM(CASE WHEN side = 'BUY' THEN 1 ELSE 0 END) = 0
-                   AND SUM(CASE WHEN side = 'SELL' THEN 1 ELSE 0 END) > 0
+                SELECT DISTINCT t.market_id FROM trades t
+                LEFT JOIN positions p ON p.trader_address = t.trader_address
+                    AND p.market_id = t.market_id
+                WHERE t.trader_address = ? AND t.market_id IN ({placeholders})
+                  AND COALESCE(p.graph_retry_count, 0) < ?
+                GROUP BY t.trader_address, t.market_id
+                HAVING SUM(CASE WHEN t.side = 'BUY' THEN 1 ELSE 0 END) = 0
+                   AND SUM(CASE WHEN t.side = 'SELL' THEN 1 ELSE 0 END) > 0
                 """,
-                [trader_address] + market_list,
+                [trader_address] + market_list + [GRAPH_RETRY_LIMIT],
             ).fetchall()
         else:
             # No API trades in this batch — check DB for any sell-only positions
             # on unresolved markets. Runs in both full and incremental mode:
             # incremental batches won't have api_markets for old markets whose
             # BUYs predate the since_unix_ts window.
+            # Skip positions that have exhausted Graph retry attempts.
             sell_only_markets = db.execute(
                 """
                 SELECT DISTINCT t.market_id FROM trades t
                 JOIN positions p ON p.trader_address = t.trader_address
                     AND p.market_id = t.market_id
                 WHERE t.trader_address = ? AND p.resolved = 0
+                  AND COALESCE(p.graph_retry_count, 0) < ?
                 GROUP BY t.trader_address, t.market_id
                 HAVING SUM(CASE WHEN t.side = 'BUY' THEN 1 ELSE 0 END) = 0
                    AND SUM(CASE WHEN t.side = 'SELL' THEN 1 ELSE 0 END) > 0
                 """,
-                [trader_address],
+                [trader_address, GRAPH_RETRY_LIMIT],
             ).fetchall()
 
         if sell_only_markets:
@@ -428,6 +439,36 @@ async def backfill_trader(
                 except Exception:
                     stats["skipped"] += 1
 
+    # After Graph fallback, check if positions are still sell-only and track retry count
+    if stats["fallback"]:
+        still_sell_only = db.execute(
+            """
+            SELECT DISTINCT t.market_id FROM trades t
+            JOIN positions p ON p.trader_address = t.trader_address
+                AND p.market_id = t.market_id
+            WHERE t.trader_address = ?
+            GROUP BY t.trader_address, t.market_id
+            HAVING SUM(CASE WHEN t.side = 'BUY' THEN 1 ELSE 0 END) = 0
+               AND SUM(CASE WHEN t.side = 'SELL' THEN 1 ELSE 0 END) > 0
+            """,
+            [trader_address],
+        ).fetchall()
+
+        for row in still_sell_only:
+            market_id = row[0]
+            db.execute(
+                """
+                UPDATE positions
+                SET graph_retry_count = COALESCE(graph_retry_count, 0) + 1,
+                    data_incomplete = CASE
+                        WHEN COALESCE(graph_retry_count, 0) + 1 >= ? THEN 1
+                        ELSE data_incomplete
+                    END
+                WHERE trader_address = ? AND market_id = ?
+                """,
+                [GRAPH_RETRY_LIMIT, trader_address, market_id],
+            )
+
     # Mark trader as backfill complete and update timestamps
     if stats["ingested"] > 0 or stats["skipped"] > 0:
         # Compute max trade timestamp from ingested trades
@@ -468,6 +509,7 @@ async def backfill_async(ctx, db_path: str) -> None:
         db_path_obj.parent.mkdir(parents=True, exist_ok=True)
 
     db = init_database(db_path_obj)
+
 
     console.print("[bold]=== Backfilling Trade History ===[/bold]\n")
 
@@ -582,11 +624,12 @@ async def backfill_async(ctx, db_path: str) -> None:
                 FROM trades t
                 JOIN positions p ON p.trader_address = t.trader_address
                     AND p.market_id = t.market_id
-                WHERE p.resolved = 0 AND COALESCE(p.data_incomplete, 0) = 0
+                WHERE p.resolved = 0 AND COALESCE(p.graph_retry_count, 0) < ?
                 GROUP BY t.trader_address, t.market_id
                 HAVING SUM(CASE WHEN t.side = 'BUY' THEN 1 ELSE 0 END) = 0
                    AND SUM(CASE WHEN t.side = 'SELL' THEN 1 ELSE 0 END) > 0
-                """
+                """,
+                [GRAPH_RETRY_LIMIT],
             ).fetchall()
             sell_only_traders = {r[0] for r in rows} & trader_addresses_in_batch
         except Exception:
@@ -675,27 +718,26 @@ async def backfill_async(ctx, db_path: str) -> None:
                     if events:
                         graph_prefetch[addr] = events
 
-            # Phase B: Sequential process
-            with Progress(
-                SpinnerColumn(),
-                TextColumn("{task.description}"),
-                BarColumn(),
-                MofNCompleteColumn(),
-                TaskProgressColumn(),
-                TimeElapsedColumn(),
-                console=console,
-                transient=False,
-            ) as progress:
-                task = progress.add_task(_desc(), total=len(traders))
+            # Phase B: Concurrent processing
+            # Pre-load entire token catalog to avoid per-trader DB queries
+            global_catalog = {
+                row[0]: row[1]
+                for row in db.execute(
+                    "SELECT token_id, condition_id FROM token_catalog"
+                ).fetchall()
+            }
+            console.print(
+                f"  Loaded {len(global_catalog):,} token catalog entries"
+            )
 
-                for trader_address, api_trades in fetch_results:
+            PROCESS_LIMIT = 10
+            process_sem = asyncio.Semaphore(PROCESS_LIMIT)
+
+            async def _process_one(
+                trader_address: str, api_trades: list, progress, task
+            ) -> None:
+                async with process_sem:
                     since_unix_ts = trader_meta[trader_address]["since_unix_ts"]
-
-                    progress.update(
-                        task,
-                        description=f"[cyan]↓ trades[/cyan]  [dim]{trader_address[:10]}...[/dim]",
-                    )
-
                     try:
                         stats = await backfill_trader(
                             db,
@@ -704,7 +746,10 @@ async def backfill_async(ctx, db_path: str) -> None:
                             graph_client,
                             since_unix_ts=since_unix_ts,
                             prefetched_trades=api_trades,
-                            prefetched_graph=graph_prefetch.get(trader_address),
+                            prefetched_graph=graph_prefetch.get(
+                                trader_address
+                            ),
+                            global_catalog=global_catalog,
                         )
 
                         total_stats["traders_processed"] += 1
@@ -718,10 +763,30 @@ async def backfill_async(ctx, db_path: str) -> None:
                     except Exception as e:
                         total_stats["errors"] += 1
                         total_stats["traders_processed"] += 1
-                        console.print(f"  [red]✗ {trader_address[:10]}...: {e}[/red]")
+                        console.print(
+                            f"  [red]✗ {trader_address[:10]}...: {e}[/red]"
+                        )
 
                     progress.update(task, description=_desc())
                     progress.advance(task)
+
+            with Progress(
+                SpinnerColumn(),
+                TextColumn("{task.description}"),
+                BarColumn(),
+                MofNCompleteColumn(),
+                TaskProgressColumn(),
+                TimeElapsedColumn(),
+                console=console,
+                transient=False,
+            ) as progress:
+                task = progress.add_task(_desc(), total=len(traders))
+                await asyncio.gather(
+                    *[
+                        _process_one(addr, trades, progress, task)
+                        for addr, trades in fetch_results
+                    ]
+                )
 
             elapsed = time.time() - start_time
             console.print(
@@ -732,6 +797,32 @@ async def backfill_async(ctx, db_path: str) -> None:
                 f"  Graph fallbacks used: {total_stats['graph_fallbacks']:,}\n"
                 f"  Errors:               {total_stats['errors']:,}"
             )
+
+            # Report incomplete positions that can still be retried
+            try:
+                retryable = db.execute(
+                    """
+                    SELECT COUNT(*) FROM positions
+                    WHERE data_incomplete = 1
+                      AND COALESCE(graph_retry_count, 0) < ?
+                    """,
+                    [GRAPH_RETRY_LIMIT],
+                ).fetchone()[0]
+                exhausted = db.execute(
+                    "SELECT COUNT(*) FROM positions WHERE data_incomplete = 1 AND graph_retry_count >= ?",
+                    [GRAPH_RETRY_LIMIT],
+                ).fetchone()[0]
+                if retryable > 0:
+                    console.print(
+                        f"\n  [yellow]ℹ {retryable:,} incomplete position(s) with retries remaining.[/yellow]\n"
+                        f"  Run [bold]polymarket --niche {niche} retry-incomplete[/bold] to retry."
+                    )
+                if exhausted > 0:
+                    console.print(
+                        f"  [dim]{exhausted:,} position(s) confirmed irreducible ({GRAPH_RETRY_LIMIT}/{GRAPH_RETRY_LIMIT} attempts).[/dim]"
+                    )
+            except Exception:
+                pass
 
         finally:
             await data_client.close()
@@ -966,3 +1057,202 @@ def backfill(ctx, db_path: str) -> None:
         db_path: Path to SQLite database
     """
     asyncio.run(backfill_async(ctx, db_path))
+
+
+async def retry_incomplete_async(ctx, db_path: str) -> None:
+    """Retry Graph fallback for incomplete positions that haven't exhausted attempts."""
+    niche = ctx.obj.get("niche", "esports")
+
+    db_path_obj = Path(db_path)
+    db = init_database(db_path_obj)
+
+
+    console.print("[bold]=== Retrying Incomplete Positions ===[/bold]\n")
+
+    # Find positions with retries remaining
+    retryable = db.execute(
+        """
+        SELECT p.trader_address, p.market_id, p.graph_retry_count
+        FROM positions p
+        WHERE p.data_incomplete = 1
+          AND COALESCE(p.graph_retry_count, 0) < ?
+          AND p.resolved = 0
+        """,
+        [GRAPH_RETRY_LIMIT],
+    ).fetchall()
+
+    if not retryable:
+        console.print("[green]No incomplete positions with retries remaining.[/green]")
+        return
+
+    # Group by trader for efficient Graph fetching
+    trader_markets: Dict[str, list] = {}
+    for row in retryable:
+        trader_markets.setdefault(row[0], []).append(
+            {"market_id": row[1], "retry_count": row[2]}
+        )
+
+    console.print(
+        f"  Found {len(retryable):,} position(s) across {len(trader_markets):,} trader(s)"
+    )
+
+    graph_client = GraphAPIClient(api_key=os.getenv("GRAPH_API_KEY"))
+
+    total_fixed = 0
+    total_still_incomplete = 0
+    total_exhausted = 0
+
+    try:
+        CONCURRENT_LIMIT = 10
+        semaphore = asyncio.Semaphore(CONCURRENT_LIMIT)
+        completed = 0
+        total = len(trader_markets)
+
+        async def _retry_one(trader_address: str, markets: list) -> None:
+            nonlocal completed, total_fixed, total_still_incomplete, total_exhausted
+            async with semaphore:
+                try:
+                    graph_events = await graph_client.fetch_trader_trades(
+                        trader_address, since_unix_ts=None
+                    )
+                except Exception as e:
+                    console.print(
+                        f"  [red]✗ {trader_address[:10]}...: {e}[/red]"
+                    )
+                    completed += 1
+                    return
+
+                # Parse and insert any new trades
+                if graph_events:
+                    trade_batch = []
+                    for event in graph_events:
+                        parsed = parse_graph_event(event, trader_address)
+                        token_id = parsed.get("token_id")
+                        if not token_id:
+                            continue
+                        # Resolve token_id -> condition_id
+                        cid_row = db.execute(
+                            "SELECT condition_id FROM token_catalog WHERE token_id = ?",
+                            [str(token_id)],
+                        ).fetchone()
+                        if not cid_row:
+                            continue
+                        condition_id = cid_row[0]
+
+                        price = Decimal(str(parsed.get("price", "0")))
+                        if price > 1:
+                            price = Decimal("1") / price
+                        size = Decimal(str(parsed.get("size", "0")))
+                        ts = parsed.get("timestamp")
+                        if isinstance(ts, int):
+                            ts_iso = datetime.fromtimestamp(
+                                ts, tz=timezone.utc
+                            ).replace(microsecond=0).isoformat()
+                        else:
+                            ts_iso = str(ts) if ts else datetime.now(
+                                timezone.utc
+                            ).replace(microsecond=0).isoformat()
+
+                        trade_batch.append({
+                            "trade_id": parsed.get("trade_id", ""),
+                            "token_id": str(token_id),
+                            "timestamp": ts_iso,
+                            "side": parsed.get("side", ""),
+                            "price": price,
+                            "size": size,
+                            "market_id": condition_id,
+                            "trader_address": trader_address,
+                        })
+
+                    if trade_batch:
+                        try:
+                            db["trades"].insert_all(trade_batch, ignore=True)
+                        except Exception:
+                            pass
+
+                # Check each market: still sell-only?
+                for market_info in markets:
+                    market_id = market_info["market_id"]
+                    still_sell_only_row = db.execute(
+                        """
+                        SELECT 1 FROM trades
+                        WHERE trader_address = ? AND market_id = ?
+                        GROUP BY trader_address, market_id
+                        HAVING SUM(CASE WHEN side = 'BUY' THEN 1 ELSE 0 END) = 0
+                           AND SUM(CASE WHEN side = 'SELL' THEN 1 ELSE 0 END) > 0
+                        """,
+                        [trader_address, market_id],
+                    ).fetchone()
+
+                    new_count = (market_info["retry_count"] or 0) + 1
+
+                    if still_sell_only_row:
+                        if new_count >= GRAPH_RETRY_LIMIT:
+                            total_exhausted += 1
+                        else:
+                            total_still_incomplete += 1
+                        db.execute(
+                            """
+                            UPDATE positions
+                            SET graph_retry_count = ?,
+                                data_incomplete = CASE WHEN ? >= ? THEN 1 ELSE 1 END
+                            WHERE trader_address = ? AND market_id = ?
+                            """,
+                            [new_count, new_count, GRAPH_RETRY_LIMIT,
+                             trader_address, market_id],
+                        )
+                    else:
+                        # BUYs found — fixed!
+                        total_fixed += 1
+                        db.execute(
+                            """
+                            UPDATE positions
+                            SET data_incomplete = 0, graph_retry_count = ?
+                            WHERE trader_address = ? AND market_id = ?
+                            """,
+                            [new_count, trader_address, market_id],
+                        )
+
+                completed += 1
+                if completed % 10 == 0 or completed == total:
+                    print(
+                        f"\r  [{completed}/{total}] retrying traders...    ",
+                        end="",
+                        flush=True,
+                    )
+
+        console.print(
+            f"  Retrying {total:,} traders concurrently (limit={CONCURRENT_LIMIT})..."
+        )
+        await asyncio.gather(
+            *[_retry_one(addr, mkts) for addr, mkts in trader_markets.items()]
+        )
+        print()
+
+    finally:
+        await graph_client.close()
+
+    console.print(
+        f"\n[bold green]Retry complete[/bold green]\n"
+        f"  Fixed (BUYs found):       {total_fixed:,}\n"
+        f"  Still incomplete:         {total_still_incomplete:,}\n"
+        f"  Exhausted ({GRAPH_RETRY_LIMIT}/{GRAPH_RETRY_LIMIT} attempts): {total_exhausted:,}"
+    )
+
+
+@cli.command("retry-incomplete")
+@click.option(
+    "--db-path",
+    default="data/analytics.db",
+    help="Path to SQLite database (default: data/analytics.db)",
+)
+@click.pass_context
+def retry_incomplete(ctx, db_path: str) -> None:
+    """Retry Graph fallback for incomplete sell-only positions.
+
+    Targets positions flagged data_incomplete=1 that haven't exhausted
+    their Graph retry attempts (< 3). Run this at your convenience to
+    give sell-only positions additional chances before they're confirmed
+    as irreducible.
+    """
+    asyncio.run(retry_incomplete_async(ctx, db_path))
