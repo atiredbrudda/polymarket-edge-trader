@@ -115,6 +115,19 @@ class GammaAPIClient:
         return all_markets
 
 
+    async def fetch_market_by_condition(self, condition_id: str) -> Optional[dict]:
+        """Fetch a single market by condition_id from Gamma API."""
+        client = await self._get_client()
+        async with self.limiter:
+            response = await client.get(
+                f"{GAMMA_BASE_URL}/markets",
+                params={"condition_id": condition_id},
+            )
+            response.raise_for_status()
+            markets = response.json()
+            return markets[0] if markets else None
+
+
 async def fetch_tag_id(slug: str) -> int:
     """Convenience function to fetch tag_id for a slug.
 

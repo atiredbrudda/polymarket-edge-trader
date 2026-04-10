@@ -349,6 +349,8 @@ def run_migrations(db):
             db.execute("ALTER TABLE traders ADD COLUMN last_backfilled_at TEXT")
         if "last_trade_seen_at" not in traders_cols:
             db.execute("ALTER TABLE traders ADD COLUMN last_trade_seen_at TEXT")
+        if "last_monitored_at" not in traders_cols:
+            db.execute("ALTER TABLE traders ADD COLUMN last_monitored_at TEXT")
         # One-time migration: seed last_backfilled_at for traders that were
         # marked complete before this column existed. Guarded by _migrated flag
         # in the DB so it doesn't overwrite intentional NULL resets.
