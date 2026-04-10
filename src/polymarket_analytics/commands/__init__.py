@@ -5,6 +5,7 @@ from polymarket_analytics.commands.build_positions import build_positions
 from polymarket_analytics.commands.classify_tokens import classify_tokens
 from polymarket_analytics.commands.detect import detect
 from polymarket_analytics.commands.discover import discover
+from polymarket_analytics.commands.paper_bridge import paper_bridge
 from polymarket_analytics.commands.ingest_events import ingest_events
 from polymarket_analytics.commands.resolve_outcomes import resolve_outcomes
 from polymarket_analytics.commands.resolve_positions import resolve_positions
@@ -19,6 +20,7 @@ __all__ = [
     "classify_tokens",
     "detect",
     "discover",
+    "paper_bridge",
     "ingest_events",
     "resolve_outcomes",
     "resolve_positions",
