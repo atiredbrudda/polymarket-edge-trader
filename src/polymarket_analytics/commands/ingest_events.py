@@ -150,34 +150,43 @@ async def _ingest_events_async(ctx, db_path: str, full: bool):
             category = market.get("category", niche_slug)
 
             # Determine outcome for resolved markets.
-            # Gamma API encodes resolution in outcomePrices: ["1","0"] = first outcome won.
-            # Falls back to result/winner fields if present.
+            # Normalize to YES/NO: index 0 in outcomes/outcomePrices = YES,
+            # index 1 = NO.  Gamma API encodes resolution in outcomePrices:
+            # ["1","0"] = first outcome won = YES.
             outcome = None
             if closed or not active:
+                # Parse the outcomes array once (needed by all paths).
+                if isinstance(outcomes, str) and outcomes.startswith("["):
+                    outcome_list = json.loads(outcomes)
+                elif isinstance(outcomes, str):
+                    outcome_list = [o.strip() for o in outcomes.split(",")]
+                else:
+                    outcome_list = list(outcomes) if outcomes else []
+                outcome_list_upper = [o.strip().upper() for o in outcome_list]
+
                 result = market.get("result")
                 winner = market.get("winner")
                 outcome_prices_raw = market.get("outcomePrices")
 
-                if result and isinstance(result, str):
-                    outcome = result.upper()
-                elif winner and isinstance(winner, str):
-                    outcome = winner.upper()
-                elif outcome_prices_raw:
+                # Path 1: result/winner field — map name to index then YES/NO
+                raw_winner = (result or winner or "").strip().upper()
+                if raw_winner and raw_winner in outcome_list_upper:
+                    idx = outcome_list_upper.index(raw_winner)
+                    outcome = "YES" if idx == 0 else "NO"
+                elif raw_winner in ("YES", "NO"):
+                    outcome = raw_winner
+
+                # Path 2: outcomePrices — price >= 0.99 means that side won
+                if outcome is None and outcome_prices_raw:
                     try:
                         prices = (
                             json.loads(outcome_prices_raw)
                             if isinstance(outcome_prices_raw, str)
                             else outcome_prices_raw
                         )
-                        if isinstance(outcomes, str) and outcomes.startswith("["):
-                            outcome_list = json.loads(outcomes)
-                        elif isinstance(outcomes, str):
-                            outcome_list = [o.strip() for o in outcomes.split(",")]
-                        else:
-                            outcome_list = outcomes
                         for i, price in enumerate(prices):
-                            if float(price) >= 0.99 and i < len(outcome_list):
-                                outcome = outcome_list[i].strip().upper()
+                            if float(price) >= 0.99:
+                                outcome = "YES" if i == 0 else "NO"
                                 break
                     except (ValueError, TypeError, json.JSONDecodeError):
                         pass

@@ -22,7 +22,7 @@ from polymarket_analytics.positions.resolution import resolve_position_pnl
 console = Console()
 
 
-async def _resolve_positions_async(ctx: Any, db_path: str) -> None:
+async def _resolve_positions_async(ctx: Any, db_path: str, repair: bool) -> None:
     """Async resolve-positions implementation."""
     niche = ctx.obj.get("niche", "esports")
     config = ctx.obj.get("config")
@@ -41,17 +41,35 @@ async def _resolve_positions_async(ctx: Any, db_path: str) -> None:
     console.print("[bold]=== Resolving Positions ===[/bold]\n")
 
     # Dependency assertions
-    # Assert positions table exists
     if not db["positions"].exists():
         raise click.ClickException(
             "positions table does not exist. Check schema initialization."
         )
-
-    # Assert markets table exists
     if not db["markets"].exists():
         raise click.ClickException(
             "markets table does not exist. Check schema initialization."
         )
+
+    # --repair: reset positions that were resolved with NULL outcome/pnl
+    # (caused by non-YES/NO market outcomes like team names)
+    if repair:
+        repair_count = db.execute(
+            """
+            UPDATE positions
+            SET resolved = 0, outcome = NULL, pnl = NULL
+            WHERE resolved = 1
+              AND outcome IS NULL
+              AND pnl IS NULL
+            """
+        ).rowcount
+        db.conn.commit()
+        if repair_count:
+            console.print(
+                f"  [yellow]Repaired {repair_count:,} positions "
+                f"(reset broken resolved=1 with NULL outcome/pnl)[/yellow]\n"
+            )
+        else:
+            console.print("  [green]No broken positions found to repair[/green]\n")
 
     # Check for unresolved positions before running
     unresolved_count = db.execute(
@@ -99,8 +117,14 @@ async def _resolve_positions_async(ctx: Any, db_path: str) -> None:
     default="data/analytics.db",
     help="Path to SQLite database (default: data/analytics.db)",
 )
+@click.option(
+    "--repair",
+    is_flag=True,
+    default=False,
+    help="Reset positions that were resolved with NULL outcome/pnl before re-resolving.",
+)
 @click.pass_context
-def resolve_positions(ctx: Any, db_path: str) -> None:
+def resolve_positions(ctx: Any, db_path: str, repair: bool) -> None:
     """Resolve positions and compute PnL for the specified niche.
 
     This command:
@@ -109,15 +133,7 @@ def resolve_positions(ctx: Any, db_path: str) -> None:
     3. Updates positions with resolved=1, outcome (WIN/LOSS/FLAT), and pnl
     4. Uses SQL CASE expression for PnL calculation
 
-    PnL formulas:
-    - LONG + YES: size * (1.0 - entry) → WIN
-    - LONG + NO: size * (0.0 - entry) → LOSS
-    - SHORT + NO: size * entry → WIN
-    - SHORT + YES: size * (entry - 1.0) → LOSS
-    - FLAT: 0 → FLAT
-
-    Args:
-        ctx: Click context with niche and config
-        db_path: Path to SQLite database
+    Use --repair to first reset positions that were incorrectly resolved
+    with NULL outcome/pnl (e.g. from non-YES/NO market outcomes).
     """
-    asyncio.run(_resolve_positions_async(ctx, db_path))
+    asyncio.run(_resolve_positions_async(ctx, db_path, repair))
