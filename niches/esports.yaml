@@ -10,3 +10,63 @@ entity_fields:           # Entity types to extract from market questions
   - team                 # e.g., "FaZe", "NAVI", "T1"
   - player               # e.g., "s1mple", "Faker"
   - tournament           # e.g., "IEM Katowice", "Worlds 2025"
+
+# Allowed event_slug prefixes (first segment before the first hyphen).
+# Markets whose slug prefix is not in this list are rejected at discover time.
+# Polymarket's esports tag includes some non-esports markets; this filters them.
+event_slug_prefixes:
+  # Game codes
+  - cs2
+  - csgo
+  - dota2
+  - dota
+  - lol
+  - val
+  - valorant
+  - hok
+  - r6siege
+  - sc2
+  - codmw
+  - mlbb
+  - rl
+  - ow
+  - apex
+  - fncs
+  - vgc
+  - cs
+  - counter
+  - call
+  - rainbow
+  - league
+  # Tournament / org names
+  - blast
+  - blasttv
+  - blastopen
+  - iem
+  - pgl
+  - esl
+  - vct
+  - ewc
+  - starladder
+  - dreamhack
+  - dreamleague
+  - cdl
+  - cblol
+  - betboom
+  - thunderpick
+  - msi
+  - worlds
+  - lck
+  - lec
+  - lpl
+  - lcs
+  # Other esports
+  - archcs2
+  - archcas2
+  - hltv
+  - esports
+  - optic
+  - fissure
+  - first
+  - dream
+  - game

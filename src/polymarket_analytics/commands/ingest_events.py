@@ -111,6 +111,30 @@ async def _ingest_events_async(ctx, db_path: str, full: bool):
 
         click.echo(f"Fetched {len(markets)} markets from Gamma API")
 
+        # Prefix allowlist filter — reject markets whose event_slug prefix
+        # is not in the config's event_slug_prefixes list.
+        allowed_prefixes = set(getattr(config, "event_slug_prefixes", []) or [])
+        if allowed_prefixes:
+            accepted = []
+            rejected_prefixes: dict[str, int] = {}
+            for m in markets:
+                events = m.get("events", [])
+                slug = events[0].get("slug", "") if events else ""
+                prefix = slug.split("-")[0] if slug else ""
+                if prefix in allowed_prefixes:
+                    accepted.append(m)
+                else:
+                    rejected_prefixes[prefix] = rejected_prefixes.get(prefix, 0) + 1
+            rejected_count = len(markets) - len(accepted)
+            markets = accepted
+            if rejected_count:
+                top = sorted(rejected_prefixes.items(), key=lambda x: -x[1])
+                summary = ", ".join(f"{p} ({n})" for p, n in top[:10])
+                click.echo(
+                    f"  Skipped {rejected_count} market(s) with "
+                    f"unknown prefix: {summary}"
+                )
+
         # Prepare records for gamma_events
         gamma_events_records = []
         markets_records = []

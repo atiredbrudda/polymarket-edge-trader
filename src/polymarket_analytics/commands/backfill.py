@@ -1176,6 +1176,34 @@ async def retry_incomplete_async(ctx, db_path: str) -> None:
 
     console.print("[bold]=== Retrying Incomplete Positions ===[/bold]\n")
 
+    # Purge exhausted positions older than 40 days.
+    # After 40 days the Graph has rotated past those trades entirely — no
+    # chance of recovering the missing BUYs.  Deleting frees them from the
+    # data_incomplete list; if the trader trades on that market again,
+    # discover will recreate the position with fresh data.
+    cutoff_40d = (
+        datetime.now(timezone.utc) - timedelta(days=40)
+    ).replace(microsecond=0).isoformat()
+    purge_count = db.execute(
+        """
+        DELETE FROM positions
+        WHERE data_incomplete = 1
+          AND graph_retry_count >= ?
+          AND resolved = 0
+          AND trader_address IN (
+              SELECT address FROM traders
+              WHERE last_backfilled_at IS NOT NULL
+                AND last_backfilled_at < ?
+          )
+        """,
+        [GRAPH_RETRY_LIMIT, cutoff_40d],
+    ).rowcount
+    if purge_count:
+        console.print(
+            f"  [yellow]✂ Purged {purge_count:,} exhausted position(s) "
+            f"(last backfilled >40 days ago)[/yellow]"
+        )
+
     # Find positions with retries remaining
     retryable = db.execute(
         """

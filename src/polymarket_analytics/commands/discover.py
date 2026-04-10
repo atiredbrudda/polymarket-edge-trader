@@ -173,6 +173,32 @@ def discover(ctx, db_path: str, closing_within: Optional[int], use_llm: bool) ->
         refresh_cutoff = now_utc + timedelta(minutes=30)
 
     # -------------------------------------------------------------------------
+    # Prefix allowlist filter — reject markets whose event_slug prefix is
+    # not in the config's event_slug_prefixes list.
+    # -------------------------------------------------------------------------
+    allowed_prefixes = set(getattr(config, "event_slug_prefixes", []) or [])
+    if allowed_prefixes:
+        accepted = []
+        rejected_prefixes: Dict[str, int] = {}
+        for m in gamma_markets:
+            events = m.get("events", [])
+            slug = events[0].get("slug", "") if events else ""
+            prefix = slug.split("-")[0] if slug else ""
+            if prefix in allowed_prefixes:
+                accepted.append(m)
+            else:
+                rejected_prefixes[prefix] = rejected_prefixes.get(prefix, 0) + 1
+        rejected_count = len(gamma_markets) - len(accepted)
+        gamma_markets = accepted
+        if rejected_count:
+            top = sorted(rejected_prefixes.items(), key=lambda x: -x[1])
+            summary = ", ".join(f"{p} ({n})" for p, n in top[:10])
+            console.print(
+                f"  [yellow]⚠ Skipped {rejected_count:,} market(s) with "
+                f"unknown prefix: {summary}[/yellow]"
+            )
+
+    # -------------------------------------------------------------------------
     # Step 2: Upsert live markets into DB
     # -------------------------------------------------------------------------
     console.print(
