@@ -79,9 +79,31 @@ async def _ingest_events_async(ctx, db_path: str, full: bool):
         ).fetchone()[0]
 
         # Incremental mode: first run fetches all, re-runs fetch only active
+        # Fetch markets from Gamma API with page progress
+        def on_page(page: int, total: int) -> None:
+            console.print(
+                f"  Fetching... page {page} ({total} markets so far)", end="\r"
+            )
+
         if full or existing_count == 0:
             click.echo(f"Full fetch mode: fetching all markets for tag_id: {tag_id}")
-            markets_to_fetch_closed = None  # Fetch all
+            # Gamma API defaults to active-only when closed is omitted,
+            # so full mode must fetch active + closed separately.
+            active_markets = await client.fetch_markets(
+                tag_id, closed=False, on_page=on_page
+            )
+            console.print()
+            click.echo(f"  Active: {len(active_markets):,} markets. Fetching closed...")
+            closed_markets = await client.fetch_markets(
+                tag_id, closed=True, on_page=on_page
+            )
+            console.print()
+            click.echo(f"  Closed: {len(closed_markets):,} markets.")
+            # Merge, dedup by conditionId (active wins if both)
+            seen = {m["conditionId"] for m in active_markets}
+            markets = active_markets + [
+                m for m in closed_markets if m["conditionId"] not in seen
+            ]
         else:
             click.echo(
                 f"Incremental mode: fetching active markets for tag_id: {tag_id}"
@@ -89,18 +111,10 @@ async def _ingest_events_async(ctx, db_path: str, full: bool):
             click.echo(
                 f"  (existing markets: {existing_count}, use --full to force full fetch)"
             )
-            markets_to_fetch_closed = False  # Fetch only active
-
-        # Fetch markets from Gamma API with page progress
-        def on_page(page: int, total: int) -> None:
-            console.print(
-                f"  Fetching... page {page} ({total} markets so far)", end="\r"
+            markets = await client.fetch_markets(
+                tag_id, closed=False, on_page=on_page
             )
-
-        markets = await client.fetch_markets(
-            tag_id, closed=markets_to_fetch_closed, on_page=on_page
-        )
-        console.print()  # newline after \r progress
+            console.print()
 
         # Assert data fetched (RESL-02)
         if not markets:
