@@ -20,6 +20,8 @@ def create_core_tables(db):
             "last_seen": str,  # ISO timestamp
             "backfill_complete": bool,  # Whether historical backfill is done
             "created_at": str,  # ISO timestamp
+            "last_backfilled_at": str,  # ISO timestamp of last backfill
+            "last_trade_seen_at": str,  # ISO timestamp of most recent trade
         },
         pk="address",
         if_not_exists=True,
@@ -39,6 +41,8 @@ def create_core_tables(db):
             "active": bool,  # Whether market is currently active
             "tokens": str,  # JSON blob of token IDs
             "event_slug": str,  # Parent event slug from events[0].slug - links child markets to parent
+            "event_title": str,  # Parent event title
+            "clob_token_ids": str,  # JSON array of CLOB token IDs
         },
         pk="condition_id",
         if_not_exists=True,
@@ -125,7 +129,10 @@ def create_core_tables(db):
             trade_count INTEGER,
             resolved INTEGER,
             outcome TEXT,
-            pnl NUMERIC(20,6)
+            pnl NUMERIC(20,6),
+            avg_exit_price NUMERIC(10,6),
+            data_incomplete INTEGER DEFAULT 0,
+            graph_retry_count INTEGER DEFAULT 0
         )
     """)
 
@@ -163,7 +170,14 @@ def create_core_tables(db):
             avg_score NUMERIC(10,6),
             first_seen TEXT,
             last_updated TEXT,
-            alerted INTEGER
+            alerted INTEGER,
+            clv_dominant_count INTEGER,
+            avg_entry_price NUMERIC(10,6),
+            min_entry_price NUMERIC(10,6),
+            tier TEXT,
+            event_slug TEXT,
+            net_q5_count INTEGER,
+            event_group_size INTEGER DEFAULT 1
         )
     """)
 
@@ -322,6 +336,12 @@ def run_migrations(db):
             db.execute("ALTER TABLE signals ADD COLUMN min_entry_price NUMERIC(10,6)")
         if "tier" not in signals_cols:
             db.execute("ALTER TABLE signals ADD COLUMN tier TEXT")
+        if "event_slug" not in signals_cols:
+            db.execute("ALTER TABLE signals ADD COLUMN event_slug TEXT")
+        if "net_q5_count" not in signals_cols:
+            db.execute("ALTER TABLE signals ADD COLUMN net_q5_count INTEGER")
+        if "event_group_size" not in signals_cols:
+            db.execute("ALTER TABLE signals ADD COLUMN event_group_size INTEGER DEFAULT 1")
 
     if "traders" in db.table_names():
         traders_cols = {col.name for col in db["traders"].columns}
