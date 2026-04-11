@@ -3,7 +3,7 @@
 from datetime import datetime, timedelta, timezone
 
 
-def test_backfill_selects_new_traders(test_db, tmp_path):
+def test_backfill_selects_new_traders(tmp_path):
     """Backfill selects traders with NULL timestamps (never backfilled)."""
     from polymarket_analytics.db.schema import init_database
 
@@ -42,7 +42,7 @@ def test_backfill_selects_new_traders(test_db, tmp_path):
     assert len(traders) == 1
 
 
-def test_backfill_skips_recently_refreshed_trader(test_db, tmp_path):
+def test_backfill_skips_recently_refreshed_trader(tmp_path):
     """Backfill skips traders refreshed within last 6 hours."""
     from polymarket_analytics.db.schema import init_database
 
@@ -84,7 +84,7 @@ def test_backfill_skips_recently_refreshed_trader(test_db, tmp_path):
     assert len(traders) == 0
 
 
-def test_backfill_selects_trader_with_recent_activity(test_db, tmp_path):
+def test_backfill_selects_trader_with_recent_activity(tmp_path):
     """Backfill selects traders with recent trade activity even if backfilled long ago."""
     from polymarket_analytics.db.schema import init_database
 
@@ -128,7 +128,7 @@ def test_backfill_selects_trader_with_recent_activity(test_db, tmp_path):
     assert len(traders) == 1
 
 
-def test_backfill_skips_stale_trader(test_db, tmp_path):
+def test_backfill_skips_stale_trader(tmp_path):
     """Backfill skips traders with no activity in 40+ days."""
     from polymarket_analytics.db.schema import init_database
 
@@ -193,7 +193,7 @@ def test_backfill_timestamp_format_conversion():
     assert iso >= cutoff or iso < cutoff  # Just verify no TypeError
 
 
-def test_backfill_update_stores_iso_timestamp(test_db, tmp_path):
+def test_backfill_update_stores_iso_timestamp(tmp_path):
     """Backfill update stores ISO timestamp, not Unix timestamp."""
     from polymarket_analytics.db.schema import init_database
     from datetime import datetime, timezone
