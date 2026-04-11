@@ -18,6 +18,16 @@ venv/
 
 # Data directory (generated)
 data/*.db
+data/**/*.db
+data/**/*.db-shm
+data/**/*.db-wal
+data/paper_trader/
+
+# Logs
+*.log
+
+# Stray SQLite databases
+esports
 
 
 # Internal docs
