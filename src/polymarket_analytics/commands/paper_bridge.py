@@ -79,13 +79,66 @@ def _compute_size(signal: dict, account_cash: float) -> float:
 
 
 def _map_outcome(direction: str) -> str:
-    """Map our LONG/SHORT to paper trader outcome.
-
-    LONG = YES side (outcomes[0]), SHORT = NO side (outcomes[1]).
-    The paper trader validates against the market's actual outcomes,
-    so we pass 'yes'/'no' and let it normalize.
-    """
+    """Map our LONG/SHORT to paper trader outcome for binary YES/NO markets."""
     return "yes" if direction == "LONG" else "no"
+
+
+def _resolve_token_and_outcome(
+    db: sqlite_utils.Database,
+    signal: dict,
+    market: "Market",
+    outcome: str,
+) -> tuple[str, str]:
+    """Resolve the token_id and outcome name for a signal.
+
+    For binary YES/NO markets, uses the standard "yes"/"no" mapping.
+    For head-to-head markets (team names as outcomes), falls back to looking
+    up which token Q5 traders actually traded for this signal's market+direction.
+
+    Returns (token_id, outcome_name) ready to pass to engine.buy().
+    Raises ValueError if resolution fails.
+    """
+    # Standard path: works for binary YES/NO markets
+    try:
+        token_id = market.get_token_id(outcome)
+        return token_id, outcome
+    except ValueError:
+        pass
+
+    # Fallback: head-to-head or non-standard outcome names.
+    # Find which token Q5 traders bought (LONG) or sold (SHORT) for this market.
+    trade_side = "BUY" if signal["direction"] == "LONG" else "SELL"
+    rows = db.execute(
+        """
+        SELECT t.token_id, COUNT(*) as n
+        FROM trades t
+        JOIN lift_scores ls ON ls.trader_address = t.trader_address
+        WHERE t.market_id = ?
+          AND t.side = ?
+          AND ls.quintile = 5
+        GROUP BY t.token_id
+        ORDER BY n DESC
+        LIMIT 1
+        """,
+        [signal["market_id"], trade_side],
+    ).fetchall()
+
+    if not rows:
+        raise ValueError(
+            f"No Q5 {trade_side} trades found for market {signal['market_id']}"
+        )
+
+    token_id = rows[0][0]
+
+    # Map token_id back to an outcome name the paper trader recognises
+    for token in market.tokens:
+        if token["token_id"] == token_id:
+            return token_id, token["outcome"]
+
+    raise ValueError(
+        f"Token {token_id} found in trades but not in market.tokens "
+        f"for {signal['market_id']}"
+    )
 
 
 def _log_decision(
@@ -223,7 +276,9 @@ def _run_bridge(db_path: str, dry_run: bool, paper_data_dir: str) -> None:
         # Fetch live price via paper trader API
         try:
             market = engine.api.get_market(signal["market_id"])
-            token_id = market.get_token_id(outcome)
+            token_id, resolved_outcome = _resolve_token_and_outcome(
+                analytics_db, signal, market, outcome
+            )
             live_price = engine.api.get_midpoint(token_id)
         except Exception as e:
             _log_decision(analytics_db, signal, "SKIP_API", reason=str(e))
@@ -289,7 +344,7 @@ def _run_bridge(db_path: str, dry_run: bool, paper_data_dir: str) -> None:
 
         # Execute paper trade
         try:
-            result = engine.buy(signal["market_id"], outcome, size_usd)
+            result = engine.buy(signal["market_id"], resolved_outcome, size_usd)
             _log_decision(analytics_db, signal, "BUY",
                           live_price, spread, size_usd)
             results.add_row(

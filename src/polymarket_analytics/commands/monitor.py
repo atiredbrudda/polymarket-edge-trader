@@ -304,14 +304,14 @@ async def _monitor_pass(
     semaphore = asyncio.Semaphore(CONCURRENT_LIMIT)
     fetch_completed = 0
 
-    async def _fetch_one(trader: dict) -> tuple[str, list]:
+    async def _fetch_one(trader: dict) -> tuple[str, list, int]:
         nonlocal fetch_completed
+        since_ts = _get_since_ts(trader, since_hours)
         if shutdown.shutdown_requested:
-            return trader["address"], []
+            return trader["address"], [], since_ts
         async with semaphore:
             if shutdown.shutdown_requested:
-                return trader["address"], []
-            since_ts = _get_since_ts(trader, since_hours)
+                return trader["address"], [], since_ts
             try:
                 trades = await fetch_trades_with_retry(
                     data_client, trader["address"], since_unix_ts=since_ts
@@ -324,7 +324,7 @@ async def _monitor_pass(
                     f"    [{fetch_completed}/{len(traders)}] traders fetched",
                     highlight=False,
                 )
-            return trader["address"], trades
+            return trader["address"], trades, since_ts
 
     results = await asyncio.gather(*[_fetch_one(t) for t in traders])
     stats["traders_polled"] = len(results)
@@ -342,12 +342,15 @@ async def _monitor_pass(
     ).fetchall():
         known_markets[row[0]] = row[1] or ""
 
+    # Build since_ts map so Phase 5 can pass it to backfill_trader
+    since_ts_map: dict[str, int] = {addr: ts for addr, _, ts in results}
+
     # Group trades by trader, filter by niche
     trader_niche_trades: dict[str, list] = {}
     all_unknown_cids: set[str] = set()
     total_raw = 0
 
-    for address, trades in results:
+    for address, trades, _since_ts in results:
         if not trades:
             continue
         total_raw += len(trades)
@@ -376,7 +379,7 @@ async def _monitor_pass(
 
         # Update known_markets and re-filter trades that were in unknown_cids
         known_markets.update(discovered)
-        for address, trades in results:
+        for address, trades, _since_ts in results:
             if not trades:
                 continue
             # Re-check trades on newly-discovered markets
@@ -396,7 +399,9 @@ async def _monitor_pass(
         await _cleanup(data_client, gamma_client)
         return stats
 
-    # Phase 5: Delegate to backfill_trader for trade normalization + upsert
+    # Phase 5: Delegate to backfill_trader for trade normalization + upsert.
+    # Pass since_unix_ts so backfill_trader treats this as incremental and skips
+    # the 40-day Graph coverage check (historical trades are already in the DB).
     if trader_niche_trades:
         console.print(
             f"  Upserting trades for {len(trader_niche_trades)} traders..."
@@ -419,6 +424,7 @@ async def _monitor_pass(
                     address,
                     data_client,
                     graph_client,
+                    since_unix_ts=since_ts_map.get(address),
                     prefetched_trades=trades,
                     global_catalog=global_catalog,
                 )
@@ -436,7 +442,7 @@ async def _monitor_pass(
     with db.conn:
         db.conn.executemany(
             "UPDATE traders SET last_monitored_at = ? WHERE address = ?",
-            [(now_iso, addr) for addr, _ in results],
+            [(now_iso, addr) for addr, _, _ts in results],
         )
 
     _print_summary(stats, trader_niche_trades, db)
