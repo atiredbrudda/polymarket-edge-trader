@@ -163,9 +163,8 @@ async def _discover_markets(
         if not market:
             continue
 
-        # Extract event_slug
-        events = market.get("events", [])
-        event_slug = events[0].get("slug", "") if events else ""
+        # Extract event_slug — CLOB API returns market_slug directly (no events nesting)
+        event_slug = market.get("market_slug", "")
         prefix = event_slug.split("-")[0] if event_slug else ""
 
         if allowed_prefixes and prefix not in allowed_prefixes:
@@ -173,7 +172,7 @@ async def _discover_markets(
 
         passed_filter += 1
 
-        # Upsert market
+        # Upsert market — CLOB uses end_date_iso instead of endDate
         db.execute(
             """
             INSERT INTO markets (condition_id, question, outcome, resolved, niche_slug,
@@ -194,36 +193,25 @@ async def _discover_markets(
                 "resolved": False,
                 "niche_slug": niche,
                 "created_at": now_iso,
-                "end_date": market.get("endDate"),
+                "end_date": market.get("end_date_iso"),
                 "category": niche,
-                "active": True,
+                "active": not market.get("closed", False),
                 "tokens": json.dumps(market.get("tokens", [])),
                 "event_slug": event_slug,
             },
         )
 
-        # Upsert token_catalog from clobTokenIds
-        clob_token_ids_raw = market.get("clobTokenIds")
-        if clob_token_ids_raw:
-            try:
-                if isinstance(clob_token_ids_raw, str):
-                    clob_token_ids = json.loads(clob_token_ids_raw)
-                else:
-                    clob_token_ids = clob_token_ids_raw
-            except (json.JSONDecodeError, ValueError):
-                clob_token_ids = []
-        else:
-            clob_token_ids = []
-
-        if clob_token_ids:
+        # Upsert token_catalog — CLOB tokens array has token_id and outcome per entry
+        clob_tokens = market.get("tokens", [])
+        if clob_tokens:
             question = market.get("question", "")
-            outcomes = market.get("outcomes", "YES,NO")
-            if isinstance(outcomes, list):
-                outcomes = ",".join(outcomes)
-            outcome_list = outcomes.split(",") if outcomes else []
-            market_type = "binary" if outcome_list == ["YES", "NO"] else "categorical"
+            outcomes = [t.get("outcome", "") for t in clob_tokens]
+            market_type = "binary" if outcomes == ["YES", "NO"] else "categorical"
 
-            for token_id in clob_token_ids[:2]:
+            for token in clob_tokens[:2]:
+                token_id = token.get("token_id")
+                if not token_id:
+                    continue
                 db.execute(
                     """
                     INSERT INTO token_catalog (token_id, condition_id, question, niche_slug, node_path, market_type, created_at)

@@ -10,6 +10,7 @@ import httpx
 from aiolimiter import AsyncLimiter
 
 GAMMA_BASE_URL = "https://gamma-api.polymarket.com"
+CLOB_BASE_URL = "https://clob.polymarket.com"
 
 
 class GammaAPIClient:
@@ -116,16 +117,22 @@ class GammaAPIClient:
 
 
     async def fetch_market_by_condition(self, condition_id: str) -> Optional[dict]:
-        """Fetch a single market by condition_id from Gamma API."""
+        """Fetch a single market by condition_id from CLOB API.
+
+        Uses CLOB endpoint which correctly filters by condition_id.
+        Gamma API /markets ignores the condition_id param and returns a default page.
+        """
         client = await self._get_client()
         async with self.limiter:
             response = await client.get(
-                f"{GAMMA_BASE_URL}/markets",
-                params={"condition_id": condition_id},
+                f"{CLOB_BASE_URL}/markets/{condition_id}",
             )
+            if response.status_code == 404:
+                return None
             response.raise_for_status()
-            markets = response.json()
-            return markets[0] if markets else None
+            data = response.json()
+            # CLOB returns a single dict, not a list
+            return data if isinstance(data, dict) and data.get("condition_id") else None
 
 
 async def fetch_tag_id(slug: str) -> int:
