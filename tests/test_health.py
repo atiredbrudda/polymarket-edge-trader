@@ -697,3 +697,130 @@ def test_data_completeness():
     assert result["status"] == "pass"
     assert "3/100" in result["value"]
     assert "3.0" in result["value"]
+
+
+# ---------------------------------------------------------------------------
+# Plan 09-03 Task 2: daily/weekly CLI tier integration tests
+# ---------------------------------------------------------------------------
+
+
+def _make_cli_db():
+    """In-memory DB with health_log, signals, traders, positions, lift_scores, markets tables."""
+    db = _make_test_db()
+    return db
+
+
+def test_daily_tier_sends_alert():
+    """health-check --tier daily calls send_alert with 'Daily Summary' in title."""
+    from click.testing import CliRunner
+    from unittest.mock import patch, MagicMock
+
+    daily_data = {
+        "new_signals": 3,
+        "updated_signals": 5,
+        "traders_discovered": 1,
+        "traders_backfilled": 2,
+        "errored_stages": [],
+    }
+
+    with patch("polymarket_analytics.commands.health_check.daily_summary", return_value=daily_data) as mock_daily, \
+         patch("polymarket_analytics.commands.health_check.send_alert") as mock_alert, \
+         patch("polymarket_analytics.commands.health_check.write_health_log"), \
+         patch("polymarket_analytics.commands.health_check.init_database") as mock_db:
+        mock_db.return_value = _make_cli_db()
+
+        from polymarket_analytics.cli import cli
+        runner = CliRunner()
+        result = runner.invoke(cli, ["--niche", "esports", "health-check", "--tier", "daily"])
+
+    assert result.exit_code == 0, f"Output: {result.output}\nException: {result.exception}"
+    assert mock_alert.called
+    alert_title = mock_alert.call_args[0][0]
+    assert "Daily Summary" in alert_title
+
+
+def test_weekly_tier_sends_alert():
+    """health-check --tier weekly calls send_alert with 'Weekly Health' in title."""
+    from click.testing import CliRunner
+    from unittest.mock import patch, MagicMock
+
+    q5_diff_data = {
+        "entered": [],
+        "exited": [],
+        "current_snapshot": [],
+        "message": "First weekly run — no previous snapshot to diff",
+    }
+    drift_data = {
+        "name": "scoring_drift",
+        "status": "pass",
+        "value": "no Q5 traders",
+        "threshold": "20% change",
+        "message": "No Q5 traders — cannot compute drift",
+    }
+    completeness_data = {
+        "name": "data_completeness",
+        "status": "pass",
+        "value": "0/0 (0%)",
+        "threshold": "informational",
+        "message": "Data completeness: 0/0 positions incomplete (0%)",
+    }
+    canary_data = {
+        "name": "quiet_canary",
+        "status": "pass",
+        "value": "0 new signals, 0 active markets",
+        "threshold": ">0 signals per 7 days with active markets",
+        "message": "0 new signals in last 7 days, 0 active markets",
+    }
+
+    with patch("polymarket_analytics.commands.health_check.compute_q5_diff", return_value=q5_diff_data), \
+         patch("polymarket_analytics.commands.health_check.check_scoring_drift", return_value=drift_data), \
+         patch("polymarket_analytics.commands.health_check.check_data_completeness", return_value=completeness_data), \
+         patch("polymarket_analytics.commands.health_check.check_quiet_canary", return_value=canary_data), \
+         patch("polymarket_analytics.commands.health_check.send_alert") as mock_alert, \
+         patch("polymarket_analytics.commands.health_check.write_health_log"), \
+         patch("polymarket_analytics.commands.health_check.init_database") as mock_db:
+        mock_db.return_value = _make_cli_db()
+
+        from polymarket_analytics.cli import cli
+        runner = CliRunner()
+        result = runner.invoke(cli, ["--niche", "esports", "health-check", "--tier", "weekly"])
+
+    assert result.exit_code == 0, f"Output: {result.output}\nException: {result.exception}"
+    assert mock_alert.called
+    alert_title = mock_alert.call_args[0][0]
+    assert "Weekly Health" in alert_title
+
+
+def test_weekly_stores_q5_snapshot():
+    """health-check --tier weekly persists q5_snapshot in health_log row."""
+    import json
+    from datetime import datetime, timezone
+    from click.testing import CliRunner
+    from unittest.mock import patch
+
+    db = _make_cli_db()
+    now = datetime.now(timezone.utc)
+
+    # Insert a Q5 trader
+    db.execute(
+        "INSERT INTO lift_scores VALUES (?, ?, ?, ?, ?)",
+        ["0xtrader1", "esports", 3.5, 5, now.isoformat()],
+    )
+    db.conn.commit()
+
+    with patch("polymarket_analytics.commands.health_check.send_alert"), \
+         patch("polymarket_analytics.commands.health_check.init_database", return_value=db):
+
+        from polymarket_analytics.cli import cli
+        runner = CliRunner()
+        result = runner.invoke(cli, ["--niche", "esports", "health-check", "--tier", "weekly"])
+
+    assert result.exit_code == 0, f"Output: {result.output}\nException: {result.exception}"
+
+    # Verify health_log row has q5_snapshot
+    rows = db.execute(
+        "SELECT checks FROM health_log WHERE tier='weekly'"
+    ).fetchall()
+    assert len(rows) == 1
+    checks = json.loads(rows[0][0])
+    assert "q5_snapshot" in checks
