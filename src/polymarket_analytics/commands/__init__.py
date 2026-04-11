@@ -1,6 +1,7 @@
 """CLI commands module - imports register commands with cli group."""
 
 from polymarket_analytics.commands.backfill import backfill
+import polymarket_analytics.commands.health_check  # noqa: F401
 from polymarket_analytics.commands.build_positions import build_positions
 from polymarket_analytics.commands.classify_tokens import classify_tokens
 from polymarket_analytics.commands.detect import detect
@@ -17,6 +18,7 @@ from polymarket_analytics.commands.show_traders import show_traders
 
 __all__ = [
     "backfill",
+    "health_check",
     "build_positions",
     "classify_tokens",
     "detect",

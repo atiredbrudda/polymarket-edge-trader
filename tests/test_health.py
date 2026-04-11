@@ -310,10 +310,10 @@ def test_preflight_fail_sends_alert():
         "message": "lift_scores are 1.0h old (threshold: 5h)",
     }
 
-    with patch("polymarket_analytics.health.checks.preflight_checks", return_value=fail_result), \
-         patch("polymarket_analytics.health.checks.check_lift_scores_freshness", return_value=pass_freshness), \
-         patch("polymarket_analytics.health.notify.send_alert") as mock_alert, \
-         patch("polymarket_analytics.db.schema.init_database") as mock_db:
+    with patch("polymarket_analytics.commands.health_check.preflight_checks", return_value=fail_result), \
+         patch("polymarket_analytics.commands.health_check.check_lift_scores_freshness", return_value=pass_freshness), \
+         patch("polymarket_analytics.commands.health_check.send_alert") as mock_alert, \
+         patch("polymarket_analytics.commands.health_check.init_database") as mock_db:
         mock_db.return_value = sqlite_utils.Database(memory=True)
         # Ensure health_log table exists
         db = mock_db.return_value
@@ -370,10 +370,10 @@ def test_cron_check_all_pass():
         "message": "lift_scores are 1.0h old (threshold: 5h)",
     }
 
-    with patch("polymarket_analytics.health.checks.preflight_checks", return_value=pass_preflight), \
-         patch("polymarket_analytics.health.checks.check_lift_scores_freshness", return_value=pass_freshness), \
-         patch("polymarket_analytics.health.notify.send_alert") as mock_alert, \
-         patch("polymarket_analytics.db.schema.init_database") as mock_db:
+    with patch("polymarket_analytics.commands.health_check.preflight_checks", return_value=pass_preflight), \
+         patch("polymarket_analytics.commands.health_check.check_lift_scores_freshness", return_value=pass_freshness), \
+         patch("polymarket_analytics.commands.health_check.send_alert") as mock_alert, \
+         patch("polymarket_analytics.commands.health_check.init_database") as mock_db:
         db = sqlite_utils.Database(memory=True)
         db.execute("""
             CREATE TABLE IF NOT EXISTS health_log (
