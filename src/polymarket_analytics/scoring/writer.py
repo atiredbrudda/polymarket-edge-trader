@@ -99,4 +99,12 @@ def write_lift_scores(
         db["lift_scores"].upsert(record, pk="id", alter=True)
         upserted += 1
 
+    # Prune stale rows — keep only the current run for this category.
+    # Each score run writes rows with a unique window_end/computed_at; old runs
+    # are already superseded by the q5_traders view but accumulate indefinitely.
+    db.execute(
+        "DELETE FROM lift_scores WHERE category = ? AND computed_at < ?",
+        [niche_slug, computed_at],
+    )
+
     return upserted
