@@ -316,9 +316,9 @@
 **Plans:** 3 plans
 
 Plans:
-- [ ] 09-01-PLAN.md — Health foundation: dual-channel notify, health_log table, psutil, test scaffold
-- [ ] 09-02-PLAN.md — Per-cron pre-flight checks + health-check CLI command
-- [ ] 09-03-PLAN.md — Daily summaries + weekly health reports (Q5 diff, scoring drift, quiet canary)
+- [x] 09-01-PLAN.md — Health foundation: dual-channel notify, health_log table, psutil, test scaffold
+- [x] 09-02-PLAN.md — Per-cron pre-flight checks + health-check CLI command
+- [x] 09-03-PLAN.md — Daily summaries + weekly health reports (Q5 diff, scoring drift, quiet canary)
 
 **Requirements:**
 - HLTH-01: Per-cron pre-flight checks (memory/disk thresholds, stage exit codes, lift_scores freshness)
