@@ -139,14 +139,27 @@ async def _discover_markets(
     """
     discovered: dict[str, str] = {}
     now_iso = datetime.now(timezone.utc).isoformat()
+    cid_list = list(condition_ids)
+    total = len(cid_list)
+    completed = 0
+    passed_filter = 0
+    semaphore = asyncio.Semaphore(10)
 
-    for cid in condition_ids:
-        try:
-            market = await gamma.fetch_market_by_condition(cid)
-        except Exception as e:
-            console.print(f"  [dim]Gamma lookup failed for {cid[:12]}...: {e}[/dim]")
-            continue
+    async def _fetch_one_market(cid: str) -> tuple[str, Any]:
+        nonlocal completed
+        async with semaphore:
+            try:
+                market = await gamma.fetch_market_by_condition(cid)
+            except Exception:
+                market = None
+            completed += 1
+            end = "\n" if completed == total else "\r"
+            print(f"    [{completed}/{total}] markets fetched   ", end=end, flush=True)
+            return cid, market
 
+    fetch_results = await asyncio.gather(*[_fetch_one_market(cid) for cid in cid_list])
+
+    for cid, market in fetch_results:
         if not market:
             continue
 
@@ -157,6 +170,8 @@ async def _discover_markets(
 
         if allowed_prefixes and prefix not in allowed_prefixes:
             continue
+
+        passed_filter += 1
 
         # Upsert market
         db.execute(
@@ -319,11 +334,8 @@ async def _monitor_pass(
             except Exception:
                 trades = []
             fetch_completed += 1
-            if fetch_completed % 50 == 0 or fetch_completed == len(traders):
-                console.print(
-                    f"    [{fetch_completed}/{len(traders)}] traders fetched",
-                    highlight=False,
-                )
+            end = "\n" if fetch_completed == len(traders) else "\r"
+            print(f"    [{fetch_completed}/{len(traders)}] traders fetched   ", end=end, flush=True)
             return trader["address"], trades, since_ts
 
     results = await asyncio.gather(*[_fetch_one(t) for t in traders])
@@ -415,9 +427,12 @@ async def _monitor_pass(
         }
 
         ingested_total = 0
-        for address, trades in trader_niche_trades.items():
+        upsert_total = len(trader_niche_trades)
+        for i, (address, trades) in enumerate(trader_niche_trades.items(), 1):
             if shutdown.shutdown_requested:
                 break
+            end = "\n" if i == upsert_total else "\r"
+            print(f"    [{i}/{upsert_total}] upserting trader {address[:10]}...   ", end=end, flush=True)
             try:
                 result = await backfill_trader(
                     db,
