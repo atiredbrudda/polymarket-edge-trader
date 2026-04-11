@@ -305,6 +305,39 @@
 
 ---
 
+### Phase 9: Alert System + Pipeline Health
+
+**Goal:** Detected signals delivered to user via alerts, with lifecycle management (acknowledgement, escalation, missed-alert handling) and periodic health checks that verify the pipeline is producing correct results end-to-end.
+
+**Dependencies:** Phase 8 complete (enriched signals with tier/entry price exist)
+
+**Status:** Planned
+
+**Plans:** 3 plans
+
+Plans:
+- [ ] 09-01-PLAN.md — Health foundation: dual-channel notify, health_log table, psutil, test scaffold
+- [ ] 09-02-PLAN.md — Per-cron pre-flight checks + health-check CLI command
+- [ ] 09-03-PLAN.md — Daily summaries + weekly health reports (Q5 diff, scoring drift, quiet canary)
+
+**Requirements:**
+- HLTH-01: Per-cron pre-flight checks (memory/disk thresholds, stage exit codes, lift_scores freshness)
+- HLTH-02: Daily summary (signals count, traders discovered/backfilled, errored stages)
+- HLTH-03: Weekly health report (Q5 diff, scoring drift, data completeness, quiet canary)
+- HLTH-04: Dual-channel alert delivery — Telegram bot + macOS native notifications
+- HLTH-05: Alert + skip cycle on pre-flight failure — never kill external processes
+- HLTH-06: Health check results logged for historical review
+
+**Success Criteria:**
+1. Cron aborts early with alert when memory/disk below threshold
+2. Failed stages trigger Telegram + macOS notification with stage name and error
+3. Daily summary delivered via both channels with signal/trader/error counts
+4. Weekly report shows Q5 list changes, scoring drift, and data completeness
+5. "Suspiciously quiet" canary fires when no new signals for 7 days with active markets
+6. Skipped cron cycles are logged and user is informed via both channels
+
+---
+
 ## Progress
 
 | Phase | Status | Requirements | Success Criteria |
@@ -317,6 +350,7 @@
 | 6 - Signal Detection | ✅ Complete (2026-03-29) | 4 | 5 |
 | 7 - FLAT Position Tracking | ✅ Complete (2026-04-06) | 8 | 7 |
 | 8 - Detect Enrichment | ✅ Complete (2026-04-06) | 9 | 6 |
+| 9 - Alert System + Pipeline Health | Planned | 6 | 6 |
 
 ---
 
@@ -342,10 +376,11 @@
 | RSLV (Resolution) | 4 | Phase 4 |
 | SCOR (Scoring) | 9 | Phase 5 |
 | DETC (Detection) | 4 | Phase 6 |
+| HLTH (Pipeline Health) | 6 | Phase 9 |
 | ALRT (Alerts) | 3 | Phase 7 |
 | UX (User Experience) | 6 | Phase 8 |
 
-**Coverage:** 81/81 requirements mapped ✓
+**Coverage:** 81/81 requirements mapped
 
 ---
 
@@ -370,4 +405,4 @@ Schema   Ingestion  Backfill  Positions  Scoring  Detection  Alerts
 ---
 
 *Roadmap created: 2026-03-29*
-*Last updated: 2026-04-06 — All 8 phases complete*
+*Last updated: 2026-04-11 — Phase 9 planned (3 plans)*
