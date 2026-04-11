@@ -237,3 +237,126 @@ def test_backfill_update_stores_iso_timestamp(test_db, tmp_path):
     # Verify comparison works (no TypeError)
     cutoff = (now - timedelta(days=40)).isoformat()
     assert row["last_trade_seen_at"] >= cutoff or row["last_trade_seen_at"] < cutoff
+
+
+# ---------------------------------------------------------------------------
+# --new-only mode tests
+# ---------------------------------------------------------------------------
+
+
+def test_new_only_selects_never_backfilled(tmp_path):
+    """--new-only mode selects only traders with last_backfilled_at IS NULL."""
+    from polymarket_analytics.db.schema import init_database
+
+    db = init_database(tmp_path / "test.db")
+    now = datetime.now(timezone.utc)
+
+    # Trader A: never backfilled (should be selected)
+    db["traders"].insert({
+        "address": "0xAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA",
+        "first_seen": now.isoformat(),
+        "last_seen": now.isoformat(),
+        "backfill_complete": False,
+        "created_at": now.isoformat(),
+    })
+
+    # Trader B: backfilled 10 days ago (should NOT be selected in --new-only)
+    db["traders"].insert({
+        "address": "0xBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBB",
+        "first_seen": now.isoformat(),
+        "last_seen": now.isoformat(),
+        "backfill_complete": True,
+        "last_backfilled_at": (now - timedelta(days=10)).isoformat(),
+        "last_trade_seen_at": (now - timedelta(days=5)).isoformat(),
+        "created_at": now.isoformat(),
+    })
+
+    # Trader C: also never backfilled (should be selected)
+    db["traders"].insert({
+        "address": "0xCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCC",
+        "first_seen": now.isoformat(),
+        "last_seen": now.isoformat(),
+        "backfill_complete": False,
+        "created_at": now.isoformat(),
+    })
+
+    # --new-only query
+    traders = db.execute(
+        "SELECT address FROM traders WHERE last_backfilled_at IS NULL"
+    ).fetchall()
+
+    assert len(traders) == 2
+    addresses = {t[0] for t in traders}
+    assert "0xAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA" in addresses
+    assert "0xCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCC" in addresses
+    assert "0xBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBB" not in addresses
+
+
+def test_new_only_excludes_all_when_fully_backfilled(tmp_path):
+    """--new-only returns empty set when all traders have been backfilled."""
+    from polymarket_analytics.db.schema import init_database
+
+    db = init_database(tmp_path / "test.db")
+    now = datetime.now(timezone.utc)
+
+    for addr_char in ["A", "B", "C"]:
+        addr = f"0x{addr_char * 40}"
+        db["traders"].insert({
+            "address": addr,
+            "first_seen": now.isoformat(),
+            "last_seen": now.isoformat(),
+            "backfill_complete": True,
+            "last_backfilled_at": (now - timedelta(days=1)).isoformat(),
+            "last_trade_seen_at": now.isoformat(),
+            "created_at": now.isoformat(),
+        })
+
+    traders = db.execute(
+        "SELECT address FROM traders WHERE last_backfilled_at IS NULL"
+    ).fetchall()
+
+    assert len(traders) == 0
+
+
+def test_full_mode_still_selects_stale_traders(tmp_path):
+    """Full mode (no --new-only) selects traders due for refresh, not just new ones."""
+    from polymarket_analytics.db.schema import init_database
+
+    db = init_database(tmp_path / "test.db")
+    now = datetime.now(timezone.utc)
+
+    # Trader backfilled 10 days ago with recent activity
+    db["traders"].insert({
+        "address": "0xAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA",
+        "first_seen": now.isoformat(),
+        "last_seen": now.isoformat(),
+        "backfill_complete": True,
+        "last_backfilled_at": (now - timedelta(days=10)).isoformat(),
+        "last_trade_seen_at": (now - timedelta(days=2)).isoformat(),
+        "created_at": now.isoformat(),
+    })
+
+    COVERAGE_DAYS = 40
+    REFRESH_HOURS = 6
+    cutoff = (now - timedelta(days=COVERAGE_DAYS)).isoformat()
+    threshold = (now - timedelta(hours=REFRESH_HOURS)).isoformat()
+
+    # Full mode query
+    full_traders = db.execute(
+        """
+        SELECT address FROM traders
+        WHERE
+            (last_trade_seen_at IS NULL OR last_trade_seen_at >= :cutoff)
+            AND (last_backfilled_at IS NULL OR last_backfilled_at < :threshold)
+    """,
+        {"cutoff": cutoff, "threshold": threshold},
+    ).fetchall()
+
+    # --new-only query
+    new_only_traders = db.execute(
+        "SELECT address FROM traders WHERE last_backfilled_at IS NULL"
+    ).fetchall()
+
+    # Full mode includes this trader, --new-only does not
+    assert len(full_traders) == 1
+    assert len(new_only_traders) == 0

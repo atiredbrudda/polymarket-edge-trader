@@ -35,6 +35,8 @@ from polymarket_analytics.commands.backfill import (
     backfill_trader,
     fetch_trades_with_retry,
 )
+from polymarket_analytics.health.checks import check_lift_scores_freshness
+from polymarket_analytics.health.lock import check_lock, pipeline_lock
 from polymarket_analytics.db.schema import init_database
 from polymarket_analytics.extraction.patterns import EntityPatternMatcher
 from polymarket_analytics.extraction.slug_parser import parse_event_slug
@@ -399,50 +401,50 @@ async def _monitor_pass(
         await _cleanup(data_client, gamma_client)
         return stats
 
-    # Phase 5: Delegate to backfill_trader for trade normalization + upsert.
-    # Pass since_unix_ts so backfill_trader treats this as incremental and skips
-    # the 40-day Graph coverage check (historical trades are already in the DB).
-    if trader_niche_trades:
-        console.print(
-            f"  Upserting trades for {len(trader_niche_trades)} traders..."
-        )
-        # Load global token catalog for backfill_trader
-        global_catalog = {
-            row[0]: row[1]
-            for row in db.execute(
-                "SELECT token_id, condition_id FROM token_catalog"
-            ).fetchall()
-        }
-
-        ingested_total = 0
-        upsert_total = len(trader_niche_trades)
-        for i, (address, trades) in enumerate(trader_niche_trades.items(), 1):
-            if shutdown.shutdown_requested:
-                break
-            end = "\n" if i == upsert_total else "\r"
-            print(f"    [{i}/{upsert_total}] upserting trader {address[:10]}...   ", end=end, flush=True)
-            try:
-                result = await backfill_trader(
-                    db,
-                    address,
-                    data_client,
-                    graph_client,
-                    since_unix_ts=since_ts_map.get(address),
-                    prefetched_trades=trades,
-                    global_catalog=global_catalog,
-                )
-                ingested_total += result.get("ingested", 0)
-            except Exception as e:
-                console.print(
-                    f"    [yellow]Failed {address[:10]}...: {e}[/yellow]"
-                )
-
-        stats["new_trades"] = ingested_total
-        console.print(f"    {ingested_total} trades ingested")
-
-    # Phase 6: Update last_monitored_at for all polled traders
+    # Phase 5+6: Delegate to backfill_trader for trade normalization + upsert,
+    # then update last_monitored_at. Both wrapped in a single transaction to
+    # reduce SQLite WAL pressure and ensure atomicity.
     now_iso = datetime.now(timezone.utc).isoformat()
     with db.conn:
+        if trader_niche_trades:
+            console.print(
+                f"  Upserting trades for {len(trader_niche_trades)} traders..."
+            )
+            # Load global token catalog for backfill_trader
+            global_catalog = {
+                row[0]: row[1]
+                for row in db.execute(
+                    "SELECT token_id, condition_id FROM token_catalog"
+                ).fetchall()
+            }
+
+            ingested_total = 0
+            upsert_total = len(trader_niche_trades)
+            for i, (address, trades) in enumerate(trader_niche_trades.items(), 1):
+                if shutdown.shutdown_requested:
+                    break
+                end = "\n" if i == upsert_total else "\r"
+                print(f"    [{i}/{upsert_total}] upserting trader {address[:10]}...   ", end=end, flush=True)
+                try:
+                    result = await backfill_trader(
+                        db,
+                        address,
+                        data_client,
+                        graph_client,
+                        since_unix_ts=since_ts_map.get(address),
+                        prefetched_trades=trades,
+                        global_catalog=global_catalog,
+                    )
+                    ingested_total += result.get("ingested", 0)
+                except Exception as e:
+                    console.print(
+                        f"    [yellow]Failed {address[:10]}...: {e}[/yellow]"
+                    )
+
+            stats["new_trades"] = ingested_total
+            console.print(f"    {ingested_total} trades ingested")
+
+        # Phase 6: Update last_monitored_at for all polled traders
         db.conn.executemany(
             "UPDATE traders SET last_monitored_at = ? WHERE address = ?",
             [(now_iso, addr) for addr, _, _ts in results],
@@ -538,9 +540,20 @@ async def _monitor_async(
             "lift_scores table does not exist. Run score first."
         )
 
+    # Staleness guard: warn if lift_scores are older than 5 hours
+    freshness = check_lift_scores_freshness(db, niche)
+    if freshness["status"] == "warn":
+        console.print(
+            f"  [yellow]WARNING: {freshness['message']}. "
+            f"Run cron to refresh Q5 list.[/yellow]"
+        )
+
     shutdown = ShutdownManager()
     loop = asyncio.get_running_loop()
     shutdown.install(loop)
+
+    # Resolve lock file path relative to db_path
+    lock_path = str(Path(db_path).parent / ".pipeline.lock")
 
     try:
         pass_num = 0
@@ -553,24 +566,34 @@ async def _monitor_async(
             else:
                 console.print("\n[bold]=== Q5 Trader Monitor ===[/bold]")
 
-            stats = await _monitor_pass(
-                ctx, db, niche, config, since_hours, dry_run, shutdown
-            )
+            # Check pipeline lock — skip pass if cron is running
+            with pipeline_lock("monitor", lock_path=lock_path) as lock_acquired:
+                if not lock_acquired:
+                    existing = check_lock(lock_path)
+                    holder = existing.get("process_type", "unknown") if existing else "unknown"
+                    console.print(
+                        f"  [yellow]Pipeline locked by {holder} — skipping this pass[/yellow]"
+                    )
+                    stats = {"new_trades": 0}
+                else:
+                    stats = await _monitor_pass(
+                        ctx, db, niche, config, since_hours, dry_run, shutdown
+                    )
 
-            if shutdown.shutdown_requested:
-                shutdown.print_interrupted_summary()
-                break
+                    if shutdown.shutdown_requested:
+                        shutdown.print_interrupted_summary()
+                        break
 
-            # Chain: run build-positions + detect
-            if chain and not dry_run and stats["new_trades"] > 0:
-                console.print("\n[bold]Chaining: build-positions → detect[/bold]")
-                from polymarket_analytics.commands.build_positions import (
-                    _build_positions_async,
-                )
-                from polymarket_analytics.commands.detect import _detect_async
+                    # Chain: run build-positions + detect
+                    if chain and not dry_run and stats["new_trades"] > 0:
+                        console.print("\n[bold]Chaining: build-positions → detect[/bold]")
+                        from polymarket_analytics.commands.build_positions import (
+                            _build_positions_async,
+                        )
+                        from polymarket_analytics.commands.detect import _detect_async
 
-                await _build_positions_async(ctx, db_path)
-                await _detect_async(ctx, db_path)
+                        await _build_positions_async(ctx, db_path)
+                        await _detect_async(ctx, db_path)
 
             if not poll_minutes:
                 break

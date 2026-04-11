@@ -563,7 +563,7 @@ async def backfill_trader(
     return stats
 
 
-async def backfill_async(ctx, db_path: str) -> None:
+async def backfill_async(ctx, db_path: str, new_only: bool = False) -> None:
     """Async backfill implementation."""
     niche = ctx.obj.get("niche", "esports")
     config = ctx.obj.get("config")
@@ -619,11 +619,8 @@ async def backfill_async(ctx, db_path: str) -> None:
         )
 
     # Query traders needing backfill using timestamp-based selection
-    # Selection logic:
-    # - last_trade_seen_at IS NULL → new trader, never backfilled, include
-    # - last_backfilled_at IS NULL → never backfilled (new trader not yet migrated), include
-    # - last_trade_seen_at >= cutoff (40 days ago) → recent activity, include
-    # - last_backfilled_at < threshold (6 hours ago) → not recently refreshed, include
+    # --new-only mode: only traders where last_backfilled_at IS NULL (lean cron, ~100-200 traders)
+    # Full mode: original selection logic with REFRESH_HOURS threshold (~6,000 traders)
     COVERAGE_DAYS = 40
     REFRESH_HOURS = 6
     cutoff = (datetime.now(timezone.utc) - timedelta(days=COVERAGE_DAYS)).isoformat()
@@ -631,17 +628,28 @@ async def backfill_async(ctx, db_path: str) -> None:
         datetime.now(timezone.utc) - timedelta(hours=REFRESH_HOURS)
     ).isoformat()
 
-    traders = list(
-        db.execute(
-            """
-        SELECT address, last_trade_seen_at FROM traders
-        WHERE
-            (last_trade_seen_at IS NULL OR last_trade_seen_at >= :cutoff)
-            AND (last_backfilled_at IS NULL OR last_backfilled_at < :threshold)
-    """,
-            {"cutoff": cutoff, "threshold": threshold},
-        ).fetchall()
-    )
+    if new_only:
+        traders = list(
+            db.execute(
+                """
+            SELECT address, last_trade_seen_at FROM traders
+            WHERE last_backfilled_at IS NULL
+        """
+            ).fetchall()
+        )
+        console.print(f"  [dim]--new-only mode: selecting only never-backfilled traders[/dim]")
+    else:
+        traders = list(
+            db.execute(
+                """
+            SELECT address, last_trade_seen_at FROM traders
+            WHERE
+                (last_trade_seen_at IS NULL OR last_trade_seen_at >= :cutoff)
+                AND (last_backfilled_at IS NULL OR last_backfilled_at < :threshold)
+        """,
+                {"cutoff": cutoff, "threshold": threshold},
+            ).fetchall()
+        )
 
     if not traders:
         console.print(
@@ -1141,8 +1149,14 @@ async def backfill_async(ctx, db_path: str) -> None:
     default="data/analytics.db",
     help="Path to SQLite database (default: data/analytics.db)",
 )
+@click.option(
+    "--new-only",
+    is_flag=True,
+    default=False,
+    help="Only backfill traders never backfilled before (last_backfilled_at IS NULL).",
+)
 @click.pass_context
-def backfill(ctx, db_path: str) -> None:
+def backfill(ctx, db_path: str, new_only: bool) -> None:
     """Backfill historical trades for niche traders.
 
     This command:
@@ -1155,11 +1169,15 @@ def backfill(ctx, db_path: str) -> None:
     5. Inserts trades with INSERT OR IGNORE (idempotent)
     6. Sets backfill_complete=True after successful backfill
 
+    Use --new-only for lean cron runs (Mon-Sat): only backfills traders
+    that discover just added. Full backfill (no flag) on Sundays.
+
     Args:
         ctx: Click context with niche and config
         db_path: Path to SQLite database
+        new_only: If True, only backfill traders where last_backfilled_at IS NULL
     """
-    asyncio.run(backfill_async(ctx, db_path))
+    asyncio.run(backfill_async(ctx, db_path, new_only=new_only))
 
 
 async def retry_incomplete_async(ctx, db_path: str) -> None:

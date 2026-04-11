@@ -1,6 +1,6 @@
 """Per-cron pre-flight health checks (D-08).
 
-Checks memory, disk, and lift_scores freshness. Returns structured results
+Checks memory, disk, lock, and lift_scores freshness. Returns structured results
 that the CLI command uses to decide pass/fail/alert.
 
 Also provides daily_summary (D-09) and weekly report helpers (D-10):
@@ -10,8 +10,11 @@ import json
 import shutil
 import statistics
 from datetime import datetime, timedelta, timezone
+from pathlib import Path
 
 import psutil
+
+from polymarket_analytics.health.lock import check_lock
 
 MEMORY_THRESHOLD_MB = 500    # Per research: macOS needs .available not .free
 DISK_THRESHOLD_GB = 10       # ~10% headroom for 9.1GB DB with WAL
@@ -19,13 +22,57 @@ DISK_THRESHOLD_GB = 10       # ~10% headroom for 9.1GB DB with WAL
 STALENESS_HOURS = 5          # One 4h cron interval + 1h buffer (from wiki)
 
 
+def check_pipeline_lock(db_path: str) -> dict:
+    """Check if another cron process holds the pipeline lock.
+
+    Returns {name, status, value, threshold, message}.
+    Status is "fail" if a cron lock is held, "pass" otherwise.
+    """
+    lock_path = Path(db_path).parent / ".pipeline.lock"
+    lock_info = check_lock(lock_path)
+
+    if lock_info is None:
+        return {
+            "name": "pipeline_lock",
+            "status": "pass",
+            "value": "free",
+            "threshold": "no cron lock",
+            "message": "Pipeline lock is free",
+        }
+
+    holder_type = lock_info.get("process_type", "unknown")
+    holder_pid = lock_info.get("pid", "?")
+    started = lock_info.get("started_at", "?")
+
+    if holder_type == "cron":
+        return {
+            "name": "pipeline_lock",
+            "status": "fail",
+            "value": f"locked by cron (PID {holder_pid})",
+            "threshold": "no cron lock",
+            "message": f"Pipeline locked by cron (PID {holder_pid}, started {started})",
+        }
+
+    # Monitor lock is not a blocker for cron
+    return {
+        "name": "pipeline_lock",
+        "status": "pass",
+        "value": f"locked by {holder_type} (PID {holder_pid})",
+        "threshold": "no cron lock",
+        "message": f"Pipeline lock held by {holder_type} (non-blocking)",
+    }
+
+
 def preflight_checks(db_path: str) -> list[dict]:
-    """Run memory + disk pre-flight checks. Returns list of check result dicts.
+    """Run lock + memory + disk pre-flight checks. Returns list of check result dicts.
 
     Each dict: {name, status, value, threshold, message}
     status is "pass" or "fail".
     """
     results = []
+
+    # Lock check — fail if another cron holds the lock
+    results.append(check_pipeline_lock(db_path))
 
     # Memory check — use .available (free + reclaimable cache), NOT .free
     mem = psutil.virtual_memory()
