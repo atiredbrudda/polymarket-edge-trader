@@ -466,22 +466,22 @@ def data_completeness(db) -> dict:
 
 ---
 
-## Open Questions
+## Open Questions (RESOLVED)
 
 1. **What constitutes "significant" scoring drift for the weekly report?**
    - What we know: composite_score is z_clv + z_roi + z_sharpe. Current Q5 has 530 traders.
    - What's unclear: What % change in stddev or mean composite_score should trigger a warning vs informational message?
-   - Recommendation: Start with >20% week-over-week change in median composite_score as "notable drift." Report the actual numbers always; only warn if threshold crossed.
+   - RESOLVED: >20% week-over-week change in median composite_score triggers a warning. Actual numbers always reported; warning only when threshold crossed. Implemented in Plan 09-03 `check_scoring_drift()`.
 
 2. **"Suspiciously quiet" canary threshold**
    - What we know: 469 signals currently exist. Pipeline has been running ~2 weeks.
    - What's unclear: How many active markets justify expecting at least 1 new signal per 7 days?
-   - Recommendation: Canary fires if `COUNT(*) WHERE first_seen >= 7 days ago = 0` AND `COUNT(*) active markets > 5`. This avoids false positives during genuine quiet periods.
+   - RESOLVED: Canary fires if `COUNT(*) WHERE first_seen >= 7 days ago = 0` AND `COUNT(*) active markets > 5`. Avoids false positives during genuine quiet periods. Implemented in Plan 09-03 `check_quiet_canary()`.
 
 3. **Stage exit code tracking — cron vs Python command**
    - What we know: Cron script chains stages with `&&`. A failed stage stops the chain. The health-check sees the aftermath, not the individual stage that failed.
    - What's unclear: Should stage exit codes be captured per-stage in the cron script and passed to health-check, or should health-check infer failure from DB state?
-   - Recommendation: Cron script captures exit codes per stage and passes them as a summary to `polymarket health-check --tier daily --stages-failed "backfill,score"`. Simpler than DB-based inference.
+   - RESOLVED: Cron script captures exit codes per stage and passes them as `polymarket health-check --tier daily --stages-failed "backfill,score"`. Simpler than DB-based inference. Implemented in Plan 09-02 Task 2 (`--stages-failed` CLI option).
 
 ---
 
