@@ -79,9 +79,31 @@ async def _ingest_events_async(ctx, db_path: str, full: bool):
         ).fetchone()[0]
 
         # Incremental mode: first run fetches all, re-runs fetch only active
+        # Fetch markets from Gamma API with page progress
+        def on_page(page: int, total: int) -> None:
+            console.print(
+                f"  Fetching... page {page} ({total} markets so far)", end="\r"
+            )
+
         if full or existing_count == 0:
             click.echo(f"Full fetch mode: fetching all markets for tag_id: {tag_id}")
-            markets_to_fetch_closed = None  # Fetch all
+            # Gamma API defaults to active-only when closed is omitted,
+            # so full mode must fetch active + closed separately.
+            active_markets = await client.fetch_markets(
+                tag_id, closed=False, on_page=on_page
+            )
+            console.print()
+            click.echo(f"  Active: {len(active_markets):,} markets. Fetching closed...")
+            closed_markets = await client.fetch_markets(
+                tag_id, closed=True, on_page=on_page
+            )
+            console.print()
+            click.echo(f"  Closed: {len(closed_markets):,} markets.")
+            # Merge, dedup by conditionId (active wins if both)
+            seen = {m["conditionId"] for m in active_markets}
+            markets = active_markets + [
+                m for m in closed_markets if m["conditionId"] not in seen
+            ]
         else:
             click.echo(
                 f"Incremental mode: fetching active markets for tag_id: {tag_id}"
@@ -89,18 +111,10 @@ async def _ingest_events_async(ctx, db_path: str, full: bool):
             click.echo(
                 f"  (existing markets: {existing_count}, use --full to force full fetch)"
             )
-            markets_to_fetch_closed = False  # Fetch only active
-
-        # Fetch markets from Gamma API with page progress
-        def on_page(page: int, total: int) -> None:
-            console.print(
-                f"  Fetching... page {page} ({total} markets so far)", end="\r"
+            markets = await client.fetch_markets(
+                tag_id, closed=False, on_page=on_page
             )
-
-        markets = await client.fetch_markets(
-            tag_id, closed=markets_to_fetch_closed, on_page=on_page
-        )
-        console.print()  # newline after \r progress
+            console.print()
 
         # Assert data fetched (RESL-02)
         if not markets:
@@ -110,6 +124,30 @@ async def _ingest_events_async(ctx, db_path: str, full: bool):
             )
 
         click.echo(f"Fetched {len(markets)} markets from Gamma API")
+
+        # Prefix allowlist filter — reject markets whose event_slug prefix
+        # is not in the config's event_slug_prefixes list.
+        allowed_prefixes = set(getattr(config, "event_slug_prefixes", []) or [])
+        if allowed_prefixes:
+            accepted = []
+            rejected_prefixes: dict[str, int] = {}
+            for m in markets:
+                events = m.get("events", [])
+                slug = events[0].get("slug", "") if events else ""
+                prefix = slug.split("-")[0] if slug else ""
+                if prefix in allowed_prefixes:
+                    accepted.append(m)
+                else:
+                    rejected_prefixes[prefix] = rejected_prefixes.get(prefix, 0) + 1
+            rejected_count = len(markets) - len(accepted)
+            markets = accepted
+            if rejected_count:
+                top = sorted(rejected_prefixes.items(), key=lambda x: -x[1])
+                summary = ", ".join(f"{p} ({n})" for p, n in top[:10])
+                click.echo(
+                    f"  Skipped {rejected_count} market(s) with "
+                    f"unknown prefix: {summary}"
+                )
 
         # Prepare records for gamma_events
         gamma_events_records = []
@@ -126,34 +164,43 @@ async def _ingest_events_async(ctx, db_path: str, full: bool):
             category = market.get("category", niche_slug)
 
             # Determine outcome for resolved markets.
-            # Gamma API encodes resolution in outcomePrices: ["1","0"] = first outcome won.
-            # Falls back to result/winner fields if present.
+            # Normalize to YES/NO: index 0 in outcomes/outcomePrices = YES,
+            # index 1 = NO.  Gamma API encodes resolution in outcomePrices:
+            # ["1","0"] = first outcome won = YES.
             outcome = None
             if closed or not active:
+                # Parse the outcomes array once (needed by all paths).
+                if isinstance(outcomes, str) and outcomes.startswith("["):
+                    outcome_list = json.loads(outcomes)
+                elif isinstance(outcomes, str):
+                    outcome_list = [o.strip() for o in outcomes.split(",")]
+                else:
+                    outcome_list = list(outcomes) if outcomes else []
+                outcome_list_upper = [o.strip().upper() for o in outcome_list]
+
                 result = market.get("result")
                 winner = market.get("winner")
                 outcome_prices_raw = market.get("outcomePrices")
 
-                if result and isinstance(result, str):
-                    outcome = result.upper()
-                elif winner and isinstance(winner, str):
-                    outcome = winner.upper()
-                elif outcome_prices_raw:
+                # Path 1: result/winner field — map name to index then YES/NO
+                raw_winner = (result or winner or "").strip().upper()
+                if raw_winner and raw_winner in outcome_list_upper:
+                    idx = outcome_list_upper.index(raw_winner)
+                    outcome = "YES" if idx == 0 else "NO"
+                elif raw_winner in ("YES", "NO"):
+                    outcome = raw_winner
+
+                # Path 2: outcomePrices — price >= 0.99 means that side won
+                if outcome is None and outcome_prices_raw:
                     try:
                         prices = (
                             json.loads(outcome_prices_raw)
                             if isinstance(outcome_prices_raw, str)
                             else outcome_prices_raw
                         )
-                        if isinstance(outcomes, str) and outcomes.startswith("["):
-                            outcome_list = json.loads(outcomes)
-                        elif isinstance(outcomes, str):
-                            outcome_list = [o.strip() for o in outcomes.split(",")]
-                        else:
-                            outcome_list = outcomes
                         for i, price in enumerate(prices):
-                            if float(price) >= 0.99 and i < len(outcome_list):
-                                outcome = outcome_list[i].strip().upper()
+                            if float(price) >= 0.99:
+                                outcome = "YES" if i == 0 else "NO"
                                 break
                     except (ValueError, TypeError, json.JSONDecodeError):
                         pass

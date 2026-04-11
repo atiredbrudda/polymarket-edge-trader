@@ -24,17 +24,6 @@ GAME_PATTERNS: Dict[str, List[str]] = {
     "Rocket League": [r"\bRocket League\b"],
     "NBA 2K": [r"\bNBA 2K\b"],
     "Madden NFL": [r"\bMadden NFL\b"],
-    "Tennis": [
-        r"\bTennis\b",
-        r"\bWimbledon\b",
-        r"\bUS Open\b",
-        r"\bFrench Open\b",
-        r"\bAustralian Open\b",
-    ],
-    "Boxing": [r"\bBoxing\b"],
-    "MMA": [r"\bMMA\b", r"\bUFC\b"],
-    "Politics": [r"\bPolitics\b", r"\bElection\b", r"\bSenate\b", r"\bGovernor\b"],
-    "Crypto": [r"\bCrypto\b", r"\bBitcoin\b", r"\bEthereum\b", r"\bBTC\b", r"\bETH\b"],
 }
 
 TEAM_PATTERNS: Dict[str, List[str]] = {

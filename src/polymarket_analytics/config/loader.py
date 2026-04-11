@@ -30,6 +30,10 @@ class NicheConfig(BaseModel):
         default_factory=list,
         description="Entity types to extract (game, team, player, etc.)",
     )
+    event_slug_prefixes: List[str] = Field(
+        default_factory=list,
+        description="Allowed event_slug prefixes; empty list disables filtering",
+    )
 
 
 def load_niche_config(config_path: Path) -> NicheConfig:

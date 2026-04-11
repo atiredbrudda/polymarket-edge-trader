@@ -264,37 +264,39 @@ def _get_data(db, niche_slug: str) -> dict:
         """
     ))
 
+    # Batch-fetch all contributors in one query (avoids N+1 per-signal queries)
+    contributors_by_key: dict = {}  # (market_id, direction) -> list of contributor dicts
+    if signals_raw and cutoff:
+        signal_market_ids = list({row[0] for row in signals_raw})
+        placeholders = ",".join("?" * len(signal_market_ids))
+        all_contribs = list(db.execute(
+            f"""
+            SELECT p.market_id, p.direction,
+                   p.trader_address, ls.composite_score, p.size, p.avg_entry_price
+            FROM positions p
+            JOIN lift_scores ls ON ls.trader_address = p.trader_address
+            WHERE p.market_id IN ({placeholders})
+              AND p.resolved = 0
+              AND COALESCE(p.data_incomplete, 0) = 0
+              AND p.size > 0
+              AND ls.quintile = 5
+              AND ls.category = ?
+              AND ls.computed_at = ?
+            ORDER BY ls.composite_score DESC
+            """,
+            signal_market_ids + [niche_slug, cutoff],
+        ))
+        for mid, direction, trader_addr, score, size, entry_price in all_contribs:
+            key = (mid, direction)
+            contributors_by_key.setdefault(key, []).append({
+                "trader_address": trader_addr,
+                "composite_score": score,
+                "size": size,
+                "avg_entry_price": entry_price,
+            })
+
     signals = []
     for market_id, direction, q5_count, avg_score, question, event_title, status, clv_dominant_count, avg_entry_price, min_entry_price, tier in signals_raw:
-        contributors = [
-            {
-                "trader_address": r[0],
-                "composite_score": r[1],
-                "size": r[2],
-                "avg_entry_price": r[3],
-            }
-            for r in db.execute(
-                """
-                SELECT p.trader_address, ls.composite_score, p.size, p.avg_entry_price
-                FROM positions p
-                JOIN lift_scores ls ON ls.trader_address = p.trader_address
-                WHERE p.market_id = :market_id
-                  AND p.direction = :direction
-                  AND p.resolved = 0
-                  AND p.size > 0
-                  AND ls.quintile = 5
-                  AND ls.category = :niche_slug
-                  AND ls.computed_at = :cutoff
-                ORDER BY ls.composite_score DESC
-                """,
-                {"market_id": market_id, "direction": direction,
-                 "niche_slug": niche_slug, "cutoff": cutoff},
-            )
-        ]
-        # Show event_title as prefix when it differs from question
-        display_title = question
-        if event_title and event_title != question:
-            display_title = question  # question shown in card body
         signals.append({
             "market_id": market_id,
             "direction": direction,
@@ -303,7 +305,7 @@ def _get_data(db, niche_slug: str) -> dict:
             "question": question,
             "event_title": event_title if event_title and event_title != question else None,
             "status": status,
-            "contributors": contributors,
+            "contributors": contributors_by_key.get((market_id, direction), []),
             "clv_dominant_count": clv_dominant_count,
             "avg_entry_price": avg_entry_price,
             "min_entry_price": min_entry_price,

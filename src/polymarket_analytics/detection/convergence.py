@@ -61,22 +61,19 @@ def detect_convergence(db: sqlite_utils.Database, niche_slug: str) -> pd.DataFra
         SELECT
             p.market_id,
             p.direction,
+            m.event_slug,
             COUNT(DISTINCT p.trader_address) as q5_count,
             AVG(ls.composite_score) as avg_score,
             MIN(p.entry_timestamp) as first_position_time,
             MAX(p.last_trade_timestamp) as last_position_time,
             COUNT(CASE WHEN ls.clv_zscore > 0 THEN 1 END) as clv_dominant_count,
             AVG(p.avg_entry_price) as avg_entry_price,
-            MIN(p.avg_entry_price) as min_entry_price,
-            CASE
-                WHEN COUNT(DISTINCT p.trader_address) >= 3 THEN 'ACT'
-                WHEN COUNT(DISTINCT p.trader_address) = 2 THEN 'CONSIDER'
-                ELSE 'WATCH'
-            END as tier
+            MIN(p.avg_entry_price) as min_entry_price
         FROM positions p
         JOIN lift_scores ls ON ls.trader_address = p.trader_address
         JOIN markets m ON m.condition_id = p.market_id
         WHERE p.resolved = 0
+          AND COALESCE(p.data_incomplete, 0) = 0
           AND ls.quintile = 5
           AND ls.category = :niche_slug
           AND ls.computed_at = (
@@ -90,7 +87,73 @@ def detect_convergence(db: sqlite_utils.Database, niche_slug: str) -> pd.DataFra
 
     # Execute query and return DataFrame
     # Empty DataFrame returned if no convergence found (no crash)
-    return pd.read_sql_query(query, db.conn, params={"niche_slug": niche_slug})
+    df = pd.read_sql_query(query, db.conn, params={"niche_slug": niche_slug})
+
+    if df.empty:
+        return df
+
+    # Post-processing: correlated signal detection (Fix 3)
+    df = _apply_opposing_direction_cancellation(df)
+    df = _apply_event_grouping(df)
+
+    return df
+
+
+def _apply_opposing_direction_cancellation(df: pd.DataFrame) -> pd.DataFrame:
+    """Layer 1: Cancel opposing Q5 traders on the same market.
+
+    When Q5 traders are on both LONG and SHORT sides of the same market,
+    compute net_q5_count = |LONG_count - SHORT_count|. Re-tier based on net.
+    """
+    # Build a map of market_id -> {direction: q5_count}
+    market_directions = df.groupby("market_id")["direction"].nunique()
+    contested_markets = set(market_directions[market_directions > 1].index)
+
+    net_counts = []
+    for _, row in df.iterrows():
+        if row["market_id"] in contested_markets:
+            # Get the opposing side's count
+            same_market = df[df["market_id"] == row["market_id"]]
+            opposing = same_market[same_market["direction"] != row["direction"]]
+            opposing_count = int(opposing["q5_count"].iloc[0]) if len(opposing) > 0 else 0
+            net = abs(int(row["q5_count"]) - opposing_count)
+            net_counts.append(net)
+        else:
+            # No opposition — net equals raw count
+            net_counts.append(int(row["q5_count"]))
+
+    df["net_q5_count"] = net_counts
+
+    # Re-tier based on net_q5_count instead of raw q5_count
+    df["tier"] = df["net_q5_count"].apply(_compute_tier)
+
+    return df
+
+
+def _apply_event_grouping(df: pd.DataFrame) -> pd.DataFrame:
+    """Layer 2: Flag correlated signals sharing the same event_slug.
+
+    Counts how many signals share each event_slug so the bridge script
+    can treat them as one bet for sizing purposes.
+    """
+    # Count signals per event_slug (only where event_slug is not null)
+    has_event = df["event_slug"].notna()
+    df["event_group_size"] = 1
+    if has_event.any():
+        event_counts = df.loc[has_event].groupby("event_slug")["market_id"].transform("count")
+        df.loc[has_event, "event_group_size"] = event_counts.astype(int)
+
+    return df
+
+
+def _compute_tier(net_q5_count: int) -> str:
+    """Compute signal tier from net Q5 count."""
+    if net_q5_count >= 3:
+        return "ACT"
+    elif net_q5_count >= 2:
+        return "CONSIDER"
+    else:
+        return "WATCH"
 
 
 def _assert_dependencies(db: sqlite_utils.Database, niche_slug: str) -> None:

@@ -47,8 +47,16 @@ def calculate_clv(positions_df: pd.DataFrame) -> pd.DataFrame:
     # Drop rows where resolution_price is still NaN (edge case guard)
     df = df.dropna(subset=["resolution_price"])
 
-    # CLV per position: (resolution_price - avg_entry_price) / avg_entry_price
+    # CLV per position: direction-aware formula
+    # LONG: (resolution_price - entry) / entry  — profit when resolution > entry
+    # SHORT: (entry - resolution_price) / entry — profit when resolution < entry
     df["clv"] = (df["resolution_price"] - df["avg_entry_price"]) / df["avg_entry_price"]
+    if "direction" in df.columns:
+        short_mask = df["direction"] == "SHORT"
+        if short_mask.any():
+            df.loc[short_mask, "clv"] = (
+                df.loc[short_mask, "avg_entry_price"] - df.loc[short_mask, "resolution_price"]
+            ) / df.loc[short_mask, "avg_entry_price"]
 
     # Aggregate: mean CLV per trader
     trader_clv = df.groupby("trader_address")["clv"].mean().reset_index()
@@ -94,13 +102,10 @@ def calculate_roi(positions_df: pd.DataFrame) -> pd.DataFrame:
         .reset_index()
     )
 
-    # ROI calculation with division guard
-    def safe_roi(row: pd.Series) -> float:
-        if row["total_capital_deployed"] > 0:
-            return row["total_pnl"] / row["total_capital_deployed"]
-        return 0.0
-
-    trader_roi["roi_raw"] = trader_roi.apply(safe_roi, axis=1)
+    # ROI calculation (vectorized with division guard)
+    trader_roi["roi_raw"] = trader_roi["total_pnl"].div(
+        trader_roi["total_capital_deployed"].replace(0, float("nan"))
+    ).fillna(0.0)
 
     return trader_roi[["trader_address", "roi_raw", "total_pnl"]]
 
@@ -137,13 +142,10 @@ def calculate_sharpe(positions_df: pd.DataFrame) -> pd.DataFrame:
     # Capital deployed per position
     df["capital_deployed"] = df["size"] * df["avg_entry_price"]
 
-    # Trade return per position with division guard
-    def safe_return(row: pd.Series) -> float:
-        if row["capital_deployed"] > 0:
-            return row["pnl"] / row["capital_deployed"]
-        return 0.0
-
-    df["trade_return"] = df.apply(safe_return, axis=1)
+    # Trade return per position (vectorized with division guard)
+    df["trade_return"] = df["pnl"].div(
+        df["capital_deployed"].replace(0, float("nan"))
+    ).fillna(0.0)
 
     # Sharpe ratio calculation per trader
     def sharpe_ratio(returns: pd.Series) -> float:

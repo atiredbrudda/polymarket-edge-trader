@@ -31,6 +31,9 @@ def upsert_signal(
     avg_entry_price: float = None,
     min_entry_price: float = None,
     tier: str = None,
+    event_slug: str = None,
+    net_q5_count: int = None,
+    event_group_size: int = 1,
 ) -> str:
     """Upsert a signal record to the signals table.
 
@@ -79,6 +82,9 @@ def upsert_signal(
                 avg_entry_price = :avg_entry_price,
                 min_entry_price = :min_entry_price,
                 tier = :tier,
+                event_slug = :event_slug,
+                net_q5_count = :net_q5_count,
+                event_group_size = :event_group_size,
                 last_updated = :last_updated,
                 alerted = 0
             WHERE id = :id
@@ -91,6 +97,9 @@ def upsert_signal(
                 "avg_entry_price": avg_entry_price,
                 "min_entry_price": min_entry_price,
                 "tier": tier,
+                "event_slug": event_slug,
+                "net_q5_count": net_q5_count,
+                "event_group_size": event_group_size,
                 "last_updated": last_updated,
             },
         )
@@ -105,9 +114,11 @@ def upsert_signal(
             """
             INSERT INTO signals (id, market_id, direction, q5_count, avg_score,
                 clv_dominant_count, avg_entry_price, min_entry_price, tier,
+                event_slug, net_q5_count, event_group_size,
                 first_seen, last_updated, alerted)
             VALUES (:id, :market_id, :direction, :q5_count, :avg_score,
                 :clv_dominant_count, :avg_entry_price, :min_entry_price, :tier,
+                :event_slug, :net_q5_count, :event_group_size,
                 :first_seen, :last_updated, 0)
             """,
             {
@@ -120,6 +131,9 @@ def upsert_signal(
                 "avg_entry_price": avg_entry_price,
                 "min_entry_price": min_entry_price,
                 "tier": tier,
+                "event_slug": event_slug,
+                "net_q5_count": net_q5_count,
+                "event_group_size": event_group_size,
                 "first_seen": first_seen,
                 "last_updated": last_updated,
                 "alerted": 0,
@@ -208,6 +222,16 @@ def upsert_signals_batch(
                 tier=str(row["tier"])
                 if "tier" in row and not pd.isna(row["tier"])
                 else None,
+                event_slug=str(row["event_slug"])
+                if "event_slug" in row and not pd.isna(row["event_slug"])
+                else None,
+                net_q5_count=int(row["net_q5_count"])
+                if "net_q5_count" in row and not pd.isna(row["net_q5_count"])
+                else None,
+                event_group_size=int(row["event_group_size"])
+                if "event_group_size" in row
+                and not pd.isna(row["event_group_size"])
+                else 1,
             )
             upserted += 1
 

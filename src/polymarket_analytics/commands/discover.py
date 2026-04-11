@@ -17,6 +17,7 @@ Usage:
 import asyncio
 import hashlib
 import json
+import signal
 import time
 from datetime import datetime, timedelta, timezone
 from decimal import Decimal, InvalidOperation
@@ -41,6 +42,7 @@ from polymarket_analytics.cli import cli
 from polymarket_analytics.db.schema import init_database
 from polymarket_analytics.extraction.llm import LLMFallback
 from polymarket_analytics.extraction.patterns import EntityPatternMatcher
+from polymarket_analytics.extraction.slug_parser import parse_event_slug
 
 console = Console()
 
@@ -143,10 +145,12 @@ def discover(ctx, db_path: str, closing_within: Optional[int], use_llm: bool) ->
 
     # Apply --closing-within filter
     now_utc = datetime.now(timezone.utc)
-    refresh_cutoff = now_utc + timedelta(minutes=30)
 
     if closing_within is not None:
         cutoff = now_utc + timedelta(hours=closing_within)
+        # Cache refresh window matches the filter — re-fetch trades for any
+        # cached market that falls inside --closing-within, not just 30 min.
+        refresh_cutoff = cutoff
         before = len(gamma_markets)
         gamma_markets = [
             m
@@ -164,6 +168,35 @@ def discover(ctx, db_path: str, closing_within: Optional[int], use_llm: bool) ->
         if not gamma_markets:
             console.print("[yellow]No markets match the filter. Exiting.[/yellow]")
             return
+    else:
+        # Default: only refresh cached markets closing within 30 minutes
+        refresh_cutoff = now_utc + timedelta(minutes=30)
+
+    # -------------------------------------------------------------------------
+    # Prefix allowlist filter — reject markets whose event_slug prefix is
+    # not in the config's event_slug_prefixes list.
+    # -------------------------------------------------------------------------
+    allowed_prefixes = set(getattr(config, "event_slug_prefixes", []) or [])
+    if allowed_prefixes:
+        accepted = []
+        rejected_prefixes: Dict[str, int] = {}
+        for m in gamma_markets:
+            events = m.get("events", [])
+            slug = events[0].get("slug", "") if events else ""
+            prefix = slug.split("-")[0] if slug else ""
+            if prefix in allowed_prefixes:
+                accepted.append(m)
+            else:
+                rejected_prefixes[prefix] = rejected_prefixes.get(prefix, 0) + 1
+        rejected_count = len(gamma_markets) - len(accepted)
+        gamma_markets = accepted
+        if rejected_count:
+            top = sorted(rejected_prefixes.items(), key=lambda x: -x[1])
+            summary = ", ".join(f"{p} ({n})" for p, n in top[:10])
+            console.print(
+                f"  [yellow]⚠ Skipped {rejected_count:,} market(s) with "
+                f"unknown prefix: {summary}[/yellow]"
+            )
 
     # -------------------------------------------------------------------------
     # Step 2: Upsert live markets into DB
@@ -298,12 +331,31 @@ def discover(ctx, db_path: str, closing_within: Optional[int], use_llm: bool) ->
     # -------------------------------------------------------------------------
     console.print(f"[bold]Step 4/4[/bold] Processing {to_process:,} new markets...")
 
+    # Graceful shutdown: on first Ctrl+C, break the loop and flush accumulated data.
+    _discover_shutdown = False
+    _original_sigint = signal.getsignal(signal.SIGINT)
+
+    def _handle_sigint(sig, frame):
+        nonlocal _discover_shutdown
+        if not _discover_shutdown:
+            _discover_shutdown = True
+            console.print(
+                "\n[bold yellow]⚠ Graceful shutdown — finishing current market, "
+                "then flushing accumulated data...[/bold yellow]"
+            )
+        else:
+            console.print("\n[bold red]Force shutdown.[/bold red]")
+            raise SystemExit(1)
+
+    signal.signal(signal.SIGINT, _handle_sigint)
+
     traders: Dict[str, Dict[str, Any]] = {}
     trade_records: List[Dict[str, Any]] = []
     entity_records: List[Dict[str, Any]] = []
     llm_count = 0
     pattern_count = 0
     event_slug_count = 0
+    slug_parse_count = 0
     new_markets_count = 0
     skipped_count = 0
     error_count = 0
@@ -331,6 +383,9 @@ def discover(ctx, db_path: str, closing_within: Optional[int], use_llm: bool) ->
         task = progress.add_task(_desc(), total=len(gamma_markets))
 
         for m in gamma_markets:
+            if _discover_shutdown:
+                break
+
             cid = m.get("conditionId", "")
             question = m.get("question", "")
             end_date_str = m.get("endDate")
@@ -405,7 +460,9 @@ def discover(ctx, db_path: str, closing_within: Optional[int], use_llm: bool) ->
                 # Build trade record (same format as backfill)
                 raw_token_id = trade.get("asset") or trade.get("asset_id")
                 tx_hash = trade.get("transactionHash", "")
-                trade_id = tx_hash or f"{address}_{trade.get('timestamp', '')}_{cid}"
+                trade_id = tx_hash or hashlib.sha256(
+                    f"{address}:{raw_token_id}:{trade.get('side', '')}:{trade.get('price', '')}:{trade.get('size', '')}:{raw_ts}".encode()
+                ).hexdigest()[:32]
 
                 # Resolve market_id via token catalog; fall back to conditionId
                 if raw_token_id and raw_token_id in catalog_by_token:
@@ -459,7 +516,19 @@ def discover(ctx, db_path: str, closing_within: Optional[int], use_llm: bool) ->
                         event_slug_count += 1
                         pattern_incomplete = False
 
-                # LLM fallback: only if pattern and event_slug both failed
+                # slug parse fallback: extract game+teams from slug structure
+                if pattern_incomplete:
+                    slug = cid_to_event_slug.get(cid)
+                    if slug:
+                        parsed = parse_event_slug(slug)
+                        if parsed.get("game"):
+                            entities = parsed
+                            slug_parse_count += 1
+                            pattern_incomplete = False
+                            if slug not in event_slug_entities:
+                                event_slug_entities[slug] = entities
+
+                # LLM fallback: only if pattern, event_slug, and slug parse all failed
                 if (
                     pattern_incomplete
                     and use_llm
@@ -500,9 +569,17 @@ def discover(ctx, db_path: str, closing_within: Optional[int], use_llm: bool) ->
             progress.update(task, description=_desc())
             progress.advance(task)
 
+    # Restore original signal handler
+    signal.signal(signal.SIGINT, _original_sigint)
+
     # -------------------------------------------------------------------------
-    # Step 5: Batch write to DB
+    # Step 5: Batch write to DB (runs even on interrupt — flush accumulated data)
     # -------------------------------------------------------------------------
+    if _discover_shutdown:
+        console.print(
+            "\n[bold yellow]Flushing accumulated data before exit...[/bold yellow]"
+        )
+
     if trade_records:
         with console.status(
             f"[bold green]Writing {len(trade_records):,} trades to DB...",
@@ -559,14 +636,19 @@ def discover(ctx, db_path: str, closing_within: Optional[int], use_llm: bool) ->
         console.print(f"  [green]✓[/green] {len(entity_records):,} entities written")
 
     elapsed = time.time() - start_time
+    status_label = (
+        "[bold yellow]Discover interrupted[/bold yellow]"
+        if _discover_shutdown
+        else "[bold green]Discover complete[/bold green]"
+    )
     console.print(
-        f"\n[bold green]Discover complete[/bold green] ({elapsed:.1f}s)\n"
+        f"\n{status_label} ({elapsed:.1f}s)\n"
         f"  Live markets fetched:  {len(gamma_markets):,}\n"
         f"  New markets processed: {new_markets_count:,}\n"
         f"  Cached (skipped):      {skipped_count:,}\n"
         f"  Errors:                {error_count:,}\n"
         f"  Trades stored:         {len(trade_records):,}\n"
         f"  Entities extracted:    {len(entity_records):,} "
-        f"(pattern: {pattern_count - event_slug_count:,}, event_slug: {event_slug_count:,}, LLM: {llm_count:,})\n"
+        f"(pattern: {pattern_count - event_slug_count - slug_parse_count:,}, event_slug: {event_slug_count:,}, slug_parse: {slug_parse_count:,}, LLM: {llm_count:,})\n"
         f"  Traders discovered:    {len(traders):,}"
     )

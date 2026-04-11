@@ -1,4 +1,4 @@
-"""Entity extraction module with pattern matcher and LLM fallback."""
+"""Entity extraction module with pattern matcher, slug parser, and LLM fallback."""
 
 from polymarket_analytics.extraction.llm import LLMFallback, EXTRACTION_PROMPT
 from polymarket_analytics.extraction.patterns import (
@@ -7,6 +7,7 @@ from polymarket_analytics.extraction.patterns import (
     TEAM_PATTERNS,
     TOURNAMENT_PATTERNS,
 )
+from polymarket_analytics.extraction.slug_parser import parse_event_slug
 
 __all__ = [
     "EntityPatternMatcher",
@@ -15,4 +16,5 @@ __all__ = [
     "TOURNAMENT_PATTERNS",
     "LLMFallback",
     "EXTRACTION_PROMPT",
+    "parse_event_slug",
 ]

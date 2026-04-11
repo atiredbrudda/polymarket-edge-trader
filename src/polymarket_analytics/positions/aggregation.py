@@ -86,6 +86,7 @@ def build_positions_from_trades(db: Any, niche_slug: str) -> int:
         JOIN market_entities me ON me.condition_id = t.market_id
         WHERE me.game IS NOT NULL
         GROUP BY trader_address, market_id
+        HAVING SUM(CASE WHEN side = 'BUY' THEN 1 ELSE 0 END) > 0
     """
 
     # Process each (trader, market) pair
@@ -134,11 +135,12 @@ def build_positions_from_trades(db: Any, niche_slug: str) -> int:
                 "resolved": 0,
                 "outcome": None,
                 "pnl": None,
+                "data_incomplete": 0,
             }
         )
 
-    # Upsert positions (idempotent)
-    for position in positions:
-        db["positions"].upsert(position, pk="id")
+    # Upsert positions (idempotent, batched in single transaction)
+    if positions:
+        db["positions"].upsert_all(positions, pk="id")
 
     return len(positions)
