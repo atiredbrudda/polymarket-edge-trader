@@ -374,6 +374,10 @@ def run_migrations(db):
         if "clob_token_ids" not in markets_cols:
             db["markets"].add_column("clob_token_ids", str)
 
+    # health_log table for pipeline health monitoring (Phase 9)
+    from polymarket_analytics.health.log import create_health_log_table
+    create_health_log_table(db)
+
 
 def init_database(db_path: Path):
     """Initialize database with all tables and indexes.

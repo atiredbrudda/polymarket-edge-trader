@@ -11,6 +11,7 @@ dependencies = [
     "httpx>=0.28.1",
     "pandas>=3.0.1",
     "polymarket-paper-trader @ git+https://github.com/atiredbrudda/polymarket-paper-trader.git",
+    "psutil>=7.2.2",
     "pydantic>=2.12.5",
     "pytest>=9.0.2",
     "python-dotenv>=1.2.2",
