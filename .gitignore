@@ -36,6 +36,13 @@ AGENTS.md
 CLAUDE.md
 DETECT_ENRICHMENT_SPEC.md
 
+# Planning directory (GSD workflow artifacts)
+.planning/
+
+# Pipeline runtime files
+data/.pipeline.lock
+data/.last_full_backfill
+
 # macOS
 .DS_Store
 

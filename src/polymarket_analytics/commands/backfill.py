@@ -298,12 +298,16 @@ async def backfill_trader(
             if tid and str(tid) not in cache:
                 new_ids.add(str(tid))
         if new_ids:
-            placeholders = ",".join("?" * len(new_ids))
-            for row in db.execute(
-                f"SELECT token_id, condition_id FROM token_catalog WHERE token_id IN ({placeholders})",
-                list(new_ids),
-            ).fetchall():
-                cache[row[0]] = row[1]
+            # SQLite limit: 999 variables per query — chunk large sets
+            id_list = list(new_ids)
+            for i in range(0, len(id_list), 900):
+                chunk = id_list[i : i + 900]
+                placeholders = ",".join("?" * len(chunk))
+                for row in db.execute(
+                    f"SELECT token_id, condition_id FROM token_catalog WHERE token_id IN ({placeholders})",
+                    chunk,
+                ).fetchall():
+                    cache[row[0]] = row[1]
         return cache
 
     def _db_covers_market(market_id: str) -> bool:
@@ -343,21 +347,27 @@ async def backfill_trader(
         if api_markets:
             # Scope to current-batch markets when we have API trades
             # Skip positions that have exhausted Graph retry attempts
+            # SQLite limit: 999 variables per query — chunk large market lists
             market_list = list(api_markets)
-            placeholders = ",".join("?" * len(market_list))
-            sell_only_markets = db.execute(
-                f"""
-                SELECT DISTINCT t.market_id FROM trades t
-                LEFT JOIN positions p ON p.trader_address = t.trader_address
-                    AND p.market_id = t.market_id
-                WHERE t.trader_address = ? AND t.market_id IN ({placeholders})
-                  AND COALESCE(p.graph_retry_count, 0) < ?
-                GROUP BY t.trader_address, t.market_id
-                HAVING SUM(CASE WHEN t.side = 'BUY' THEN 1 ELSE 0 END) = 0
-                   AND SUM(CASE WHEN t.side = 'SELL' THEN 1 ELSE 0 END) > 0
-                """,
-                [trader_address] + market_list + [GRAPH_RETRY_LIMIT],
-            ).fetchall()
+            sell_only_markets = []
+            for i in range(0, len(market_list), 900):
+                chunk = market_list[i : i + 900]
+                placeholders = ",".join("?" * len(chunk))
+                sell_only_markets.extend(
+                    db.execute(
+                        f"""
+                        SELECT DISTINCT t.market_id FROM trades t
+                        LEFT JOIN positions p ON p.trader_address = t.trader_address
+                            AND p.market_id = t.market_id
+                        WHERE t.trader_address = ? AND t.market_id IN ({placeholders})
+                          AND COALESCE(p.graph_retry_count, 0) < ?
+                        GROUP BY t.trader_address, t.market_id
+                        HAVING SUM(CASE WHEN t.side = 'BUY' THEN 1 ELSE 0 END) = 0
+                           AND SUM(CASE WHEN t.side = 'SELL' THEN 1 ELSE 0 END) > 0
+                        """,
+                        [trader_address] + chunk + [GRAPH_RETRY_LIMIT],
+                    ).fetchall()
+                )
         else:
             # No API trades in this batch — check DB for any sell-only positions
             # on unresolved markets. Runs in both full and incremental mode:

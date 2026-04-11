@@ -39,6 +39,14 @@ Deep review of the Polymarket analytics pipeline. All critical and most high/med
 | M-06 | Resolution UPDATE ordering dependency (FLAT before market-outcome) | **Acceptable** — ordering is correct and both UPDATEs run in same transaction. Fragile but functional. |
 | L-02 | `extraction.py` swallows all exceptions | **Acceptable** — defensive fallback to empty DataFrame. Low-risk since extraction failures are visible downstream (no scores generated). |
 
+## Remaining Open
+
+### H-06: Paper trading results monitor/dashboard
+
+**Impact:** High. Paper-bridge executes trades every cron cycle but there's no way to see portfolio performance, P&L, win rate, or position status at a glance. Need a command or dashboard to review what paper trading is doing — open positions, historical returns, decision log summary.
+
+---
+
 ## Remaining Open (Low Impact)
 
 ### H-04: `discover` uses synchronous HTTP for trade fetching
@@ -70,6 +78,15 @@ Deep review of the Polymarket analytics pipeline. All critical and most high/med
 
 **File:** `src/polymarket_analytics/extraction/llm.py`
 **Impact:** Blocks event loop when called from async context. Only affects LLM fallback retries (rare path).
+
+### M-07: No alert on Anthropic API insufficient funds
+
+**File:** `src/polymarket_analytics/extraction/llm.py`
+**Impact:** When the Anthropic API returns an "insufficient funds" / billing error, the pipeline silently falls back to empty extraction. Should trigger a Telegram alert via `health/notify.py` so the user knows to top up the account before LLM-dependent features degrade.
+
+### L-06: Add structured error context to pipeline stages
+
+**Impact:** When errors occur in long-running processes (backfill, cron), debugging requires reading source code to triangulate. Adding stage-tagged logging, error aggregation with categories, and context managers would make failures self-diagnosing. Not urgent — current `✗ addr: error` output works, just lacks stage/category tagging for fast triage.
 
 ---
 
