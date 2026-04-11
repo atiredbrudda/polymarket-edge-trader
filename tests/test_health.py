@@ -154,28 +154,249 @@ def test_health_log_query_by_tier():
 
 
 # ---------------------------------------------------------------------------
-# Plan 09-02 stubs (preflight checks)
+# Plan 09-02: preflight checks (checks.py)
 # ---------------------------------------------------------------------------
 
 
-@pytest.mark.skip(reason="Implemented in plan 09-02")
 def test_preflight_memory_fail():
-    pass
+    """preflight_checks returns a fail result when available RAM < 500 MB."""
+    import psutil
+    from unittest.mock import patch
+
+    mock_mem = MagicMock()
+    mock_mem.available = 200 * 1024 * 1024  # 200 MB
+
+    with patch("psutil.virtual_memory", return_value=mock_mem):
+        from polymarket_analytics.health.checks import preflight_checks
+        results = preflight_checks(db_path="/tmp")
+
+    memory_check = next(r for r in results if r["name"] == "memory")
+    assert memory_check["status"] == "fail"
 
 
-@pytest.mark.skip(reason="Implemented in plan 09-02")
+def test_preflight_memory_pass():
+    """preflight_checks returns pass when available RAM >= 500 MB."""
+    import psutil
+    from unittest.mock import patch
+
+    mock_mem = MagicMock()
+    mock_mem.available = 2 * 1024 ** 3  # 2 GB
+
+    with patch("psutil.virtual_memory", return_value=mock_mem):
+        from polymarket_analytics.health.checks import preflight_checks
+        results = preflight_checks(db_path="/tmp")
+
+    memory_check = next(r for r in results if r["name"] == "memory")
+    assert memory_check["status"] == "pass"
+
+
 def test_preflight_disk_fail():
-    pass
+    """preflight_checks returns a fail result when free disk < 10 GB."""
+    from unittest.mock import patch
+    import shutil
+
+    mock_disk = MagicMock()
+    mock_disk.free = 5 * 1024 ** 3  # 5 GB
+
+    with patch("shutil.disk_usage", return_value=mock_disk):
+        from polymarket_analytics.health.checks import preflight_checks
+        results = preflight_checks(db_path="/tmp")
+
+    disk_check = next(r for r in results if r["name"] == "disk")
+    assert disk_check["status"] == "fail"
 
 
-@pytest.mark.skip(reason="Implemented in plan 09-02")
+def test_preflight_disk_pass():
+    """preflight_checks returns pass when free disk >= 10 GB."""
+    from unittest.mock import patch
+    import shutil
+
+    mock_disk = MagicMock()
+    mock_disk.free = 50 * 1024 ** 3  # 50 GB
+
+    with patch("shutil.disk_usage", return_value=mock_disk):
+        from polymarket_analytics.health.checks import preflight_checks
+        results = preflight_checks(db_path="/tmp")
+
+    disk_check = next(r for r in results if r["name"] == "disk")
+    assert disk_check["status"] == "pass"
+
+
 def test_staleness_warn():
-    pass
+    """check_lift_scores_freshness returns warn when scores are >5h old."""
+    from datetime import datetime, timezone, timedelta
+
+    db = sqlite_utils.Database(memory=True)
+    db.execute("""
+        CREATE TABLE lift_scores (
+            trader_address TEXT,
+            category TEXT,
+            composite_score REAL,
+            quintile INTEGER,
+            computed_at TEXT
+        )
+    """)
+    old_ts = (datetime.now(timezone.utc) - timedelta(hours=6)).isoformat()
+    db.execute("INSERT INTO lift_scores (trader_address, category, computed_at) VALUES (?, ?, ?)",
+               ["0xabc", "esports", old_ts])
+    db.conn.commit()
+
+    from polymarket_analytics.health.checks import check_lift_scores_freshness
+    result = check_lift_scores_freshness(db, "esports")
+    assert result["status"] == "warn"
 
 
-@pytest.mark.skip(reason="Implemented in plan 09-02")
+def test_staleness_pass():
+    """check_lift_scores_freshness returns pass when scores are fresh (<5h)."""
+    from datetime import datetime, timezone, timedelta
+
+    db = sqlite_utils.Database(memory=True)
+    db.execute("""
+        CREATE TABLE lift_scores (
+            trader_address TEXT,
+            category TEXT,
+            composite_score REAL,
+            quintile INTEGER,
+            computed_at TEXT
+        )
+    """)
+    recent_ts = (datetime.now(timezone.utc) - timedelta(hours=1)).isoformat()
+    db.execute("INSERT INTO lift_scores (trader_address, category, computed_at) VALUES (?, ?, ?)",
+               ["0xabc", "esports", recent_ts])
+    db.conn.commit()
+
+    from polymarket_analytics.health.checks import check_lift_scores_freshness
+    result = check_lift_scores_freshness(db, "esports")
+    assert result["status"] == "pass"
+
+
+def test_staleness_never_computed():
+    """check_lift_scores_freshness returns warn with 'never' message when table is empty."""
+    db = sqlite_utils.Database(memory=True)
+    db.execute("""
+        CREATE TABLE lift_scores (
+            trader_address TEXT,
+            category TEXT,
+            computed_at TEXT
+        )
+    """)
+    db.conn.commit()
+
+    from polymarket_analytics.health.checks import check_lift_scores_freshness
+    result = check_lift_scores_freshness(db, "esports")
+    assert result["status"] == "warn"
+    assert "never" in result["message"].lower()
+
+
 def test_preflight_fail_sends_alert():
-    pass
+    """health-check --tier cron exits 1 and sends alert when preflight fails."""
+    from click.testing import CliRunner
+    from unittest.mock import patch, MagicMock
+    import sqlite_utils
+
+    # Mock preflight_checks to return a memory failure
+    fail_result = [{
+        "name": "memory",
+        "status": "fail",
+        "value": "200 MB",
+        "threshold": "500 MB",
+        "message": "Available RAM: 200 MB (threshold: 500 MB)",
+    }]
+    pass_freshness = {
+        "name": "lift_scores_freshness",
+        "status": "pass",
+        "value": "1.0h",
+        "threshold": "5h",
+        "message": "lift_scores are 1.0h old (threshold: 5h)",
+    }
+
+    with patch("polymarket_analytics.health.checks.preflight_checks", return_value=fail_result), \
+         patch("polymarket_analytics.health.checks.check_lift_scores_freshness", return_value=pass_freshness), \
+         patch("polymarket_analytics.health.notify.send_alert") as mock_alert, \
+         patch("polymarket_analytics.db.schema.init_database") as mock_db:
+        mock_db.return_value = sqlite_utils.Database(memory=True)
+        # Ensure health_log table exists
+        db = mock_db.return_value
+        db.execute("""
+            CREATE TABLE IF NOT EXISTS health_log (
+                id TEXT PRIMARY KEY,
+                tier TEXT,
+                timestamp TEXT,
+                status TEXT,
+                checks TEXT,
+                summary TEXT,
+                niche TEXT
+            )
+        """)
+
+        from polymarket_analytics.cli import cli
+        runner = CliRunner()
+        result = runner.invoke(cli, ["--niche", "esports", "health-check", "--tier", "cron"])
+
+    assert result.exit_code == 1
+    assert mock_alert.called
+    alert_title = mock_alert.call_args[0][0]
+    assert "FAILED" in alert_title
+    assert "PRE-FLIGHT FAILED" in result.output
+
+
+def test_cron_check_all_pass():
+    """health-check --tier cron exits 0 when all checks pass."""
+    from click.testing import CliRunner
+    from unittest.mock import patch
+    import sqlite_utils
+
+    pass_preflight = [
+        {
+            "name": "memory",
+            "status": "pass",
+            "value": "2048 MB",
+            "threshold": "500 MB",
+            "message": "Available RAM: 2048 MB (threshold: 500 MB)",
+        },
+        {
+            "name": "disk",
+            "status": "pass",
+            "value": "50.0 GB",
+            "threshold": "10 GB",
+            "message": "Free disk: 50.0 GB (threshold: 10 GB)",
+        },
+    ]
+    pass_freshness = {
+        "name": "lift_scores_freshness",
+        "status": "pass",
+        "value": "1.0h",
+        "threshold": "5h",
+        "message": "lift_scores are 1.0h old (threshold: 5h)",
+    }
+
+    with patch("polymarket_analytics.health.checks.preflight_checks", return_value=pass_preflight), \
+         patch("polymarket_analytics.health.checks.check_lift_scores_freshness", return_value=pass_freshness), \
+         patch("polymarket_analytics.health.notify.send_alert") as mock_alert, \
+         patch("polymarket_analytics.db.schema.init_database") as mock_db:
+        db = sqlite_utils.Database(memory=True)
+        db.execute("""
+            CREATE TABLE IF NOT EXISTS health_log (
+                id TEXT PRIMARY KEY,
+                tier TEXT,
+                timestamp TEXT,
+                status TEXT,
+                checks TEXT,
+                summary TEXT,
+                niche TEXT
+            )
+        """)
+        mock_db.return_value = db
+
+        from polymarket_analytics.cli import cli
+        runner = CliRunner()
+        result = runner.invoke(cli, ["--niche", "esports", "health-check", "--tier", "cron"])
+
+    assert result.exit_code == 0, f"Output: {result.output}"
+    # Check health_log has one row
+    rows = list(db.execute("SELECT status FROM health_log").fetchall())
+    assert len(rows) == 1
+    assert rows[0][0] == "pass"
 
 
 # ---------------------------------------------------------------------------
