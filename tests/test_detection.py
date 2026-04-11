@@ -9,7 +9,6 @@ Verifies:
 - FLAT positions (size=0) excluded from signals
 - Resolved positions excluded from signals
 - Separate signals for LONG vs SHORT on same market
-- Upsert resets alerted flag
 """
 
 import pytest
@@ -398,70 +397,6 @@ class TestConvergenceDetection:
         assert abs(signal["avg_score"] - 1.35) < 0.001, (
             f"avg_score should be updated to 1.35, got {signal['avg_score']}"
         )
-
-    def test_upsert_resets_alerted(
-        self, detection_db, fixture_traders, fixture_markets, future_end_date
-    ):
-        """Test that upsert_signal resets alerted=0 on updates.
-
-        Fixture setup:
-        - Insert signal with alerted=1
-        - Call upsert_signal again with new data
-
-        Expected:
-        - alerted=0 after update (ready for re-alert)
-        """
-        db = detection_db
-
-        # Setup: Create market
-        create_market(db, fixture_markets["market_a"], "esports", None, end_date=future_end_date)
-
-        # Act 1: Insert initial signal with alerted=1
-        first_seen = (
-            (datetime.now(timezone.utc) - timedelta(hours=1))
-            .isoformat()
-            .replace("+00:00", "Z")
-        )
-
-        # Insert with alerted=1 manually
-        db["signals"].insert(
-            {
-                "id": "sig_test_alerted",
-                "market_id": fixture_markets["market_a"],
-                "direction": "LONG",
-                "q5_count": 2,
-                "avg_score": 1.25,
-                "first_seen": first_seen,
-                "last_updated": first_seen,
-                "alerted": 1,  # Manually set to 1
-            }
-        )
-
-        # Act 2: Update signal via upsert_signal
-        last_updated = datetime.now(timezone.utc).isoformat().replace("+00:00", "Z")
-        upsert_signal(
-            db,
-            market_id=fixture_markets["market_a"],
-            direction="LONG",
-            q5_count=2,
-            avg_score=1.25,
-            first_seen=first_seen,
-            last_updated=last_updated,
-        )
-
-        # Assert: Fetch signal from DB
-        rows = list(
-            db.query("SELECT id, alerted FROM signals WHERE id = 'sig_test_alerted'")
-        )
-
-        assert len(rows) == 1, "Expected 1 signal record"
-        signal = rows[0]
-
-        # Assert: alerted reset to 0
-        assert signal["alerted"] == 0, (
-            f"alerted should be reset to 0, got {signal['alerted']}"
-        )
-
 
 class TestEdgeCases:
     """Edge case tests for convergence detection."""

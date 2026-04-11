@@ -1,7 +1,7 @@
 """Signal writer module for persisting detection results.
 
 This module provides functions for upserting detected signals to the signals table
-with proper first_seen timestamp preservation and alerted flag reset.
+with proper first_seen timestamp preservation.
 
 Key behaviors:
 - upsert_signal: Insert new signal or update existing (preserving first_seen)
@@ -38,7 +38,7 @@ def upsert_signal(
     """Upsert a signal record to the signals table.
 
     Uses INSERT OR REPLACE pattern with unique index on (market_id, direction).
-    Preserves first_seen timestamp on updates, resets alerted=0 for re-alerting.
+    Preserves first_seen timestamp on updates.
 
     Args:
         db: sqlite-utils Database instance
@@ -55,7 +55,7 @@ def upsert_signal(
     Notes:
         - Uses raw SQL for NUMERIC(10,6) avg_score column (per GUIDE.md)
         - Signal ID format: sig_{market_id[:8]}_{direction}_{timestamp}
-        - On update: preserves first_seen, resets alerted=0
+        - On update: preserves first_seen
     """
     # Check for existing signal with same (market_id, direction)
     existing_rows = list(
@@ -85,8 +85,7 @@ def upsert_signal(
                 event_slug = :event_slug,
                 net_q5_count = :net_q5_count,
                 event_group_size = :event_group_size,
-                last_updated = :last_updated,
-                alerted = 0
+                last_updated = :last_updated
             WHERE id = :id
             """,
             {
@@ -115,11 +114,11 @@ def upsert_signal(
             INSERT INTO signals (id, market_id, direction, q5_count, avg_score,
                 clv_dominant_count, avg_entry_price, min_entry_price, tier,
                 event_slug, net_q5_count, event_group_size,
-                first_seen, last_updated, alerted)
+                first_seen, last_updated)
             VALUES (:id, :market_id, :direction, :q5_count, :avg_score,
                 :clv_dominant_count, :avg_entry_price, :min_entry_price, :tier,
                 :event_slug, :net_q5_count, :event_group_size,
-                :first_seen, :last_updated, 0)
+                :first_seen, :last_updated)
             """,
             {
                 "id": signal_id,
@@ -136,7 +135,6 @@ def upsert_signal(
                 "event_group_size": event_group_size,
                 "first_seen": first_seen,
                 "last_updated": last_updated,
-                "alerted": 0,
             },
         )
 

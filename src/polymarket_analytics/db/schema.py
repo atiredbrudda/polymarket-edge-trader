@@ -170,7 +170,6 @@ def create_core_tables(db):
             avg_score NUMERIC(10,6),
             first_seen TEXT,
             last_updated TEXT,
-            alerted INTEGER,
             clv_dominant_count INTEGER,
             avg_entry_price NUMERIC(10,6),
             min_entry_price NUMERIC(10,6),
