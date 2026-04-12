@@ -6,8 +6,8 @@
 |-------|-------------|
 | `pm-log` | Live tail of cron log |
 | `pm-log-last` | Last 100 lines of cron log |
-| `pm-cron-stop` | Remove the crontab (stops all scheduled runs) |
-| `pm-cron-status` | Show current crontab entry |
+| `pm-cron-stop` | Unload the launchd job (stops all scheduled runs) |
+| `pm-cron-status` | Show launchd job status |
 
 Run `source ~/.zshrc` to load these in your current shell.
 
@@ -101,8 +101,8 @@ bash scripts/cron_pipeline.sh
 
 | Problem | Fix |
 |---------|-----|
-| No logs appearing | `pm-cron-status` to check crontab exists. Check if Mac went to sleep during scheduled time. |
+| No logs appearing | `pm-cron-status` to check launchd job is loaded. Check if Mac went to sleep during scheduled time. |
 | "database is locked" | Kill any stale polymarket processes: `ps aux \| grep polymarket` |
 | Pipeline takes too long | Check if it auto-upgraded to full backfill (missed-Sunday). Normal full run is ~3h. |
 | Telegram alerts stopped | Check `.env` has `TELEGRAM_BOT_TOKEN` and `TELEGRAM_CHAT_ID`. Test with: `.venv/bin/python -c "from polymarket_analytics.health.notify import send_alert; send_alert('test', 'test')"` |
-| Cron not running after reboot | macOS may require Terminal to have Full Disk Access in System Settings > Privacy. |
+| Not running after reboot | launchd auto-loads on boot. If not, check the plist is in `~/Library/LaunchAgents/` and run `launchctl load` on it. The executable needs Full Disk Access in System Settings > Privacy. |
