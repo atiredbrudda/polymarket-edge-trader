@@ -66,16 +66,12 @@ ls -lh data/analytics.db
 
 ### Temporarily (skip next run)
 ```bash
-pm-cron-stop
+launchctl unload ~/Library/LaunchAgents/com.polymarket.cron-pipeline.plist
 ```
 
-### Permanently
+### Restart after stopping
 ```bash
-pm-cron-stop
-```
-Same command — there's no separate "pause" state. Reinstall with:
-```bash
-echo '0 */4 * * * /Users/macbookair/Documents/project/test/rerun7/polymarketv2/scripts/cron_pipeline.sh >> /tmp/polymarket-cron.log 2>&1' | crontab -
+launchctl load ~/Library/LaunchAgents/com.polymarket.cron-pipeline.plist
 ```
 
 ### Kill a running pipeline mid-execution
@@ -87,18 +83,11 @@ ps aux | grep polymarket | grep -v grep
 kill <PID>
 ```
 
-## How to restart after stopping
-
-```bash
-echo '0 */4 * * * /Users/macbookair/Documents/project/test/rerun7/polymarketv2/scripts/cron_pipeline.sh >> /tmp/polymarket-cron.log 2>&1' | crontab -
-pm-cron-status  # verify
-```
-
 ## Manual run
 
 To trigger a run outside the schedule:
 ```bash
-cd /Users/macbookair/Documents/project/test/rerun7/polymarketv2
+cd /Users/macbookair/polymarketv2
 bash scripts/cron_pipeline.sh
 ```
 

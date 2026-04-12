@@ -2,7 +2,7 @@
 # Polymarket Analytics — 4-hour cron pipeline
 #
 # Schedule: every 4 hours (crontab -e):
-#   0 */4 * * * /Users/macbookair/Documents/project/test/rerun7/polymarketv2/scripts/cron_pipeline.sh >> /tmp/polymarket-cron.log 2>&1
+#   Scheduled via launchd: ~/Library/LaunchAgents/com.polymarket.cron-pipeline.plist
 #
 # Two backfill modes:
 #   - Lean (--new-only): Mon-Sat, only never-backfilled traders (~20 min)

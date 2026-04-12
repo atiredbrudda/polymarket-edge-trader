@@ -46,18 +46,18 @@ Runs every 4 hours via `scripts/cron_pipeline.sh`. Two backfill modes:
 - **Full (Sunday):** `backfill` -- all ~6,000 active traders (~3h)
 - **Missed-Sunday fallback:** auto-upgrades to full if >8 days since last full
 
-### Install cron
+### Install (launchd)
 
 ```bash
-crontab -e
-# Add:
-0 */4 * * * /Users/macbookair/Documents/project/test/rerun7/polymarketv2/scripts/cron_pipeline.sh >> /tmp/polymarket-cron.log 2>&1
+launchctl load ~/Library/LaunchAgents/com.polymarket.cron-pipeline.plist
+# Verify:
+launchctl list | grep polymarket
 ```
 
 ### Manual run
 
 ```bash
-cd /Users/macbookair/Documents/project/test/rerun7/polymarketv2
+cd /Users/macbookair/polymarketv2
 source .venv/bin/activate
 ./scripts/cron_pipeline.sh
 ```
@@ -77,7 +77,7 @@ source .venv/bin/activate
 Run in a dedicated terminal or as a background service. Leave it running permanently.
 
 ```bash
-cd /Users/macbookair/Documents/project/test/rerun7/polymarketv2
+cd /Users/macbookair/polymarketv2
 source .venv/bin/activate
 polymarket --niche esports monitor --poll 60 --chain
 ```

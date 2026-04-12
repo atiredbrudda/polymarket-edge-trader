@@ -43,7 +43,7 @@ Deep review of the Polymarket analytics pipeline. All critical and most high/med
 
 ### H-06: Paper trading results monitor/dashboard
 
-**Impact:** High. Paper-bridge executes trades every cron cycle but there's no way to see portfolio performance, P&L, win rate, or position status at a glance. Need a command or dashboard to review what paper trading is doing — open positions, historical returns, decision log summary.
+**Impact:** High. Paper-bridge executes trades every cron cycle but there's no way to see portfolio performance, P&L, win rate, or position status at a glance. Need a command or dashboard to review what paper trading is doing — open positions, historical returns, decision log summary. Should also include account reset (refresh bankroll after stale-data runs).
 
 ---
 
