@@ -19,5 +19,6 @@ def get_db(db_path: Path) -> sqlite_utils.Database:
     """
     db = sqlite_utils.Database(db_path)
     db.enable_wal()  # Enable WAL mode for read concurrency (SCHM-02)
+    db.execute("PRAGMA busy_timeout = 5000")  # Wait up to 5s on lock contention
     db.execute("PRAGMA foreign_keys = ON")  # Enforce foreign key constraints
     return db

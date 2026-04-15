@@ -38,6 +38,30 @@ Monitor catches entries between cron runs -- that's where live alpha is.
 
 ---
 
+## Day-to-Day Startup
+
+The cron runs automatically — you don't touch it. The only thing you need to start manually is the monitor.
+
+**Step 1 — Verify cron is loaded** (once after reboot or plist change):
+```bash
+launchctl list | grep polymarket
+# Should show: -  0  com.polymarket.cron-pipeline
+# If missing, reload it:
+launchctl unload ~/Library/LaunchAgents/com.polymarket.cron-pipeline.plist
+launchctl load  ~/Library/LaunchAgents/com.polymarket.cron-pipeline.plist
+```
+
+**Step 2 — Start the monitor** (in a terminal you leave open):
+```bash
+cd /Users/macbookair/polymarketv2
+source .venv/bin/activate
+polymarket --niche esports monitor --poll 60 --chain
+```
+
+That's it. Cron refreshes data every 4h. Monitor reacts to new signals within ~60s.
+
+---
+
 ## 4-Hour Cron Pipeline
 
 Runs every 4 hours via `scripts/cron_pipeline.sh`. Two backfill modes:

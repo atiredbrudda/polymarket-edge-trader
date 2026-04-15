@@ -584,16 +584,38 @@ async def _monitor_async(
                         shutdown.print_interrupted_summary()
                         break
 
-                    # Chain: run build-positions + detect
+                    # Chain: run build-positions + detect using the
+                    # monitor's existing db connection to avoid
+                    # "database is locked" from a second connection.
                     if chain and not dry_run and stats["new_trades"] > 0:
                         console.print("\n[bold]Chaining: build-positions → detect[/bold]")
-                        from polymarket_analytics.commands.build_positions import (
-                            _build_positions_async,
+                        from polymarket_analytics.positions.aggregation import (
+                            build_positions_from_trades,
                         )
-                        from polymarket_analytics.commands.detect import _detect_async
+                        from polymarket_analytics.detection.convergence import (
+                            detect_convergence,
+                        )
+                        from polymarket_analytics.detection.writer import (
+                            upsert_signals_batch,
+                        )
 
-                        await _build_positions_async(ctx, db_path)
-                        await _detect_async(ctx, db_path)
+                        pos_count = build_positions_from_trades(db, niche)
+                        console.print(
+                            f"  Positions built: {pos_count:,}"
+                        )
+
+                        convergence_df = detect_convergence(db, niche)
+                        if not convergence_df.empty:
+                            upserted = upsert_signals_batch(
+                                db, convergence_df, niche
+                            )
+                            console.print(
+                                f"  Signals detected: {upserted}"
+                            )
+                        else:
+                            console.print(
+                                "  No consensus signals found."
+                            )
 
             if not poll_minutes:
                 break

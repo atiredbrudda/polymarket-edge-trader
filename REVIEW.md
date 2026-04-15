@@ -41,9 +41,9 @@ Deep review of the Polymarket analytics pipeline. All critical and most high/med
 
 ## Remaining Open
 
-### H-06: Paper trading results monitor/dashboard
+### H-06: Paper trading results monitor/dashboard — **FIXED 2026-04-15**
 
-**Impact:** High. Paper-bridge executes trades every cron cycle but there's no way to see portfolio performance, P&L, win rate, or position status at a glance. Need a command or dashboard to review what paper trading is doing — open positions, historical returns, decision log summary. Should also include account reset (refresh bankroll after stale-data runs).
+`polymarket --niche esports paper-dashboard` added. Shows: account summary (cash, deployed, realized P&L), top open positions, bridge decision stats (last N days), recent trades. Includes `--reset` (account wipe + reinit), `--resolve` (settle closed markets), and a low-cash alert that fires when cash < $500 (preventing silent SKIP_SIZE rundown).
 
 ---
 
@@ -83,6 +83,14 @@ Deep review of the Polymarket analytics pipeline. All critical and most high/med
 
 **File:** `src/polymarket_analytics/extraction/llm.py`
 **Impact:** When the Anthropic API returns an "insufficient funds" / billing error, the pipeline silently falls back to empty extraction. Should trigger a Telegram alert via `health/notify.py` so the user knows to top up the account before LLM-dependent features degrade.
+
+### M-08: paper-bridge shows ERR for current price on some markets, silently skips
+
+**Observed:** 2026-04-13, multiple cron runs. Several signals show `ERR` in the current price column and get skipped at trade time. Affects markets where live price fetch fails (API unavailable, token not found, etc.).
+**Impact:** Silent missed trades — the signal is valid but never executed. No alert is raised, no count of ERR-skipped trades appears in the daily summary.
+**Fix direction:** Count ERR skips separately from intentional SKIP_API/SKIP_CONF skips in the paper-bridge summary. Optionally alert if ERR rate exceeds a threshold.
+
+---
 
 ### L-06: Add structured error context to pipeline stages
 
