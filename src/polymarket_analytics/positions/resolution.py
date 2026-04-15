@@ -93,44 +93,26 @@ def resolve_position_pnl(db: Any, niche_slug: str) -> int:
             "No unresolved positions found. All positions already resolved."
         )
 
-    # 2. Assert markets table has outcomes set (relaxed for FLAT positions)
-    markets_with_outcomes = db.execute(
+    # VOID pass: close positions on markets that are resolved but have no outcome
+    # (cancelled/postponed games — neither Gamma nor CLOB will ever supply an outcome).
+    # pnl=0 (stake returned), excluded from scoring via m.outcome IS NOT NULL guard.
+    void_result = db.execute(
         """
-        SELECT COUNT(*) as cnt
-        FROM markets
-        WHERE outcome IS NOT NULL
+        UPDATE positions
+        SET resolved = 1, outcome = 'VOID', pnl = 0
+        WHERE resolved = 0
+          AND EXISTS (
+              SELECT 1 FROM markets m
+              WHERE m.condition_id = positions.market_id
+                AND (m.resolved = 1 OR m.active = 0)
+                AND m.outcome IS NULL
+          )
         """
-    ).fetchone()[0]
+    )
+    void_count = void_result.rowcount
 
-    flat_resolvable = db.execute(
-        "SELECT COUNT(*) as cnt FROM positions WHERE direction = 'FLAT' AND avg_exit_price IS NOT NULL AND resolved = 0"
-    ).fetchone()[0]
-
-    if markets_with_outcomes == 0 and flat_resolvable == 0:
-        raise click.ClickException(
-            "No market outcomes found and no FLAT positions with exit price. "
-            "Run resolve-outcomes command first."
-        )
-
-    # 3. Assert at least one position can be resolved (JOIN produces results)
-    resolvable_via_outcome = db.execute(
-        """
-        SELECT COUNT(*) as cnt
-        FROM positions p
-        JOIN markets m ON m.condition_id = p.market_id
-        WHERE m.outcome IS NOT NULL AND p.resolved = 0
-        """
-    ).fetchone()[0]
-
-    resolvable_via_flat = flat_resolvable
-
-    if resolvable_via_outcome == 0 and resolvable_via_flat == 0:
-        raise click.ClickException(
-            "No positions have resolvable markets. Either all resolved or markets lack outcomes."
-        )
-
-    # Execute FLAT-first UPDATE pass (resolve FLAT positions via exit price)
-    db.execute(
+    # FLAT pass: resolve positions that were fully exited (avg_exit_price set)
+    flat_result = db.execute(
         """
         UPDATE positions
         SET
@@ -147,9 +129,8 @@ def resolve_position_pnl(db: Any, niche_slug: str) -> int:
         """
     )
 
-    # Execute SQL UPDATE with CASE expression for market-outcome resolution
-    # Updates resolved, outcome, and pnl in a single query
-    db.execute(
+    # Outcome pass: resolve positions where the market has a YES/NO outcome
+    outcome_result = db.execute(
         """
         UPDATE positions
         SET
@@ -192,5 +173,4 @@ def resolve_position_pnl(db: Any, niche_slug: str) -> int:
     # Commit the transaction to persist changes
     db.conn.commit()
 
-    # Return count of positions resolved
-    return resolvable_via_outcome + resolvable_via_flat
+    return void_count + flat_result.rowcount + outcome_result.rowcount

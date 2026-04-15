@@ -240,32 +240,59 @@ def _do_reset(paper_data_dir: str) -> None:
 
 
 def _do_resolve(paper_data_dir: str) -> None:
-    """Resolve all closed market positions."""
+    """Resolve all closed market positions.
+
+    Uses a per-market loop instead of engine.resolve_all() so that a single
+    MarketNotFoundError or AmbiguousResolutionError doesn't abort the whole run.
+    """
     from pm_trader.engine import Engine
+    from pm_trader.models import SimError
+
     engine = Engine(Path(paper_data_dir))
     try:
-        account = engine.get_account()
+        engine.get_account()
     except Exception:
         console.print("[red]No paper account. Run paper-bridge first.[/red]")
         engine.close()
         return
 
     console.print("[bold]Resolving closed market positions...[/bold]")
-    results = engine.resolve_all()
+
+    # Collect unique market slugs from open positions
+    open_positions = engine.db.get_open_positions()
+    seen: set[str] = set()
+    slugs = []
+    for pos in open_positions:
+        if pos.market_slug not in seen:
+            seen.add(pos.market_slug)
+            slugs.append(pos.market_slug)
+
+    all_results = []
+    skipped = 0
+    for slug in slugs:
+        try:
+            results = engine.resolve_market(slug)
+            all_results.extend(results)
+        except SimError:
+            # Market not found, not yet closed, ambiguous outcome, etc. — skip silently.
+            skipped += 1
+        except Exception:
+            skipped += 1
+
     engine.close()
 
-    if not results:
+    if not all_results and skipped == len(slugs):
         console.print("[dim]No closed markets to resolve.[/dim]")
         return
 
-    for r in results:
+    for r in all_results:
         pos = r.position
         pnl_color = "green" if r.payout > 0 else "red"
         console.print(
             f"  [{pnl_color}]{pos.market_question[:50]}[/{pnl_color}] "
             f"({pos.outcome}) → payout ${r.payout:.2f}"
         )
-    console.print(f"[green]{len(results)} positions resolved.[/green]")
+    console.print(f"[green]{len(all_results)} positions resolved.[/green]")
 
 
 # ─── HTML generation ─────────────────────────────────────────────────────────
