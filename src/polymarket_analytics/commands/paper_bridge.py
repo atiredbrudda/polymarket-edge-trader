@@ -8,6 +8,7 @@ Usage:
     polymarket --niche esports paper-bridge [--db-path PATH] [--dry-run]
 """
 
+import sqlite3
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
@@ -225,6 +226,65 @@ def _check_event_exposure(
     return None
 
 
+def _load_open_positions(paper_dir: Path) -> tuple[set, dict]:
+    """Return existing open positions from paper.db.
+
+    Returns:
+        held:    set of (market_condition_id, outcome) currently holding
+        entries: dict of (market_condition_id, outcome) -> avg_entry_price
+    """
+    db_path = paper_dir / "paper.db"
+    if not db_path.exists():
+        return set(), {}
+    conn = sqlite3.connect(str(db_path))
+    rows = conn.execute(
+        "SELECT market_condition_id, outcome, avg_entry_price "
+        "FROM positions WHERE is_resolved=0 AND shares>0"
+    ).fetchall()
+    conn.close()
+    held = {(r[0], r[1]) for r in rows}
+    entries = {(r[0], r[1]): r[2] for r in rows}
+    return held, entries
+
+
+def _record_snapshot(
+    paper_dir: Path,
+    market_condition_id: str,
+    outcome: str,
+    live_price: float,
+    entry_price: float | None,
+) -> None:
+    """Append a price snapshot for an open position to paper.db.
+
+    Called every time the bridge fetches a live price for a market where
+    we already hold a position. Builds the time series needed for
+    hold-vs-resolution analysis (pct_from_entry over time).
+    """
+    db_path = paper_dir / "paper.db"
+    conn = sqlite3.connect(str(db_path))
+    conn.execute("""
+        CREATE TABLE IF NOT EXISTS position_snapshots (
+            id                   INTEGER PRIMARY KEY AUTOINCREMENT,
+            market_condition_id  TEXT    NOT NULL,
+            outcome              TEXT    NOT NULL,
+            live_price           REAL    NOT NULL,
+            entry_price          REAL,
+            pct_from_entry       REAL,
+            recorded_at          TEXT    NOT NULL
+        )
+    """)
+    pct = (live_price - entry_price) / entry_price if entry_price else None
+    conn.execute(
+        "INSERT INTO position_snapshots "
+        "(market_condition_id, outcome, live_price, entry_price, pct_from_entry, recorded_at) "
+        "VALUES (?, ?, ?, ?, ?, ?)",
+        (market_condition_id, outcome, live_price, entry_price, pct,
+         datetime.now(timezone.utc).isoformat()),
+    )
+    conn.commit()
+    conn.close()
+
+
 def _run_bridge(db_path: str, dry_run: bool, paper_data_dir: str) -> None:
     """Core bridge logic."""
     from pm_trader.engine import Engine
@@ -245,6 +305,9 @@ def _run_bridge(db_path: str, dry_run: bool, paper_data_dir: str) -> None:
         account = engine.init_account(BANKROLL)
         console.print(f"[green]Initialized paper account with ${BANKROLL:,.0f}[/green]")
 
+    # Load existing positions — used for idempotency guard and price snapshots
+    held, entry_prices = _load_open_positions(paper_dir)
+
     signals = _get_actionable_signals(analytics_db)
     if not signals:
         console.print("[yellow]No actionable signals found.[/yellow]")
@@ -253,7 +316,7 @@ def _run_bridge(db_path: str, dry_run: bool, paper_data_dir: str) -> None:
 
     console.print(f"\n[bold]=== Paper Trading Bridge ===[/bold]")
     console.print(f"Account cash: ${account.cash:,.2f}")
-    console.print(f"Signals to evaluate: {len(signals)}\n")
+    console.print(f"Signals to evaluate: {len(signals)}  |  Open positions: {len(held)}\n")
 
     results = Table(title="Signal Evaluations")
     results.add_column("Market", max_width=40)
@@ -288,6 +351,26 @@ def _run_bridge(db_path: str, dry_run: bool, paper_data_dir: str) -> None:
                 f"{signal['q5_count']}/{signal['net_q5_count']}",
                 f"{signal['avg_entry_price']:.3f}" if signal["avg_entry_price"] else "?",
                 "ERR", "", "SKIP_API", ""
+            )
+            skips += 1
+            continue
+
+        # Idempotency: skip if already holding this position.
+        # Also record a price snapshot so we can later compare hold-vs-exit.
+        if (signal["market_id"], resolved_outcome) in held:
+            entry = entry_prices.get((signal["market_id"], resolved_outcome))
+            _record_snapshot(paper_dir, signal["market_id"], resolved_outcome,
+                             live_price, entry)
+            _log_decision(analytics_db, signal, "SKIP_HELD",
+                          live_price, live_price - (entry or live_price),
+                          reason="already holding position")
+            results.add_row(
+                signal.get("question", "")[:40],
+                signal["direction"], signal["tier"],
+                f"{signal['q5_count']}/{signal['net_q5_count']}",
+                f"{entry:.3f}" if entry else "?",
+                f"{live_price:.3f}", "",
+                "[dim]SKIP_HELD[/dim]", "",
             )
             skips += 1
             continue
@@ -376,6 +459,27 @@ def _run_bridge(db_path: str, dry_run: bool, paper_data_dir: str) -> None:
     if not dry_run:
         account = engine.get_account()
         console.print(f"Remaining cash: ${account.cash:,.2f}")
+
+    # Sweep any open positions whose signals are no longer ACT/CONSIDER.
+    # These were skipped by the main loop, so they have no snapshot yet
+    # for this run. Extra API calls only for the stale-signal subset.
+    visited = {signal["market_id"] for signal in signals}
+    stale = {(mid, out) for mid, out in held if mid not in visited}
+    swept = 0
+    for market_condition_id, outcome in stale:
+        try:
+            market = engine.api.get_market(market_condition_id)
+            token_id = market.get_token_id(outcome)
+            live_price = engine.api.get_midpoint(token_id)
+            entry = entry_prices.get((market_condition_id, outcome))
+            _record_snapshot(paper_dir, market_condition_id, outcome,
+                             live_price, entry)
+            swept += 1
+        except Exception:
+            pass  # market closed or token gone — skip silently
+
+    if swept:
+        console.print(f"[dim]Snapshotted {swept} stale-signal position(s).[/dim]")
 
     engine.close()
 

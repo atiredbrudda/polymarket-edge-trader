@@ -18,6 +18,7 @@ from datetime import datetime
 from http.server import BaseHTTPRequestHandler, HTTPServer
 from pathlib import Path
 from typing import Any
+from urllib.parse import parse_qs, quote, unquote_plus, urlparse
 
 import click
 from rich.console import Console
@@ -329,6 +330,22 @@ tr:hover td { background: #1c2128; }
 }
 .resolved-bar { margin-top: 10px; color: #8b949e; font-size: 12px; }
 .bar { letter-spacing: -1px; }
+.actions { display: flex; gap: 8px; margin-top: 14px; }
+button {
+    font-family: inherit;
+    font-size: 12px;
+    padding: 5px 14px;
+    border-radius: 4px;
+    border: 1px solid;
+    cursor: pointer;
+    font-weight: bold;
+}
+.btn-resolve { background: #0d2b1a; color: #3fb950; border-color: #3fb950; }
+.btn-resolve:hover { background: #163d26; }
+.btn-reset   { background: #2d1010; color: #f85149; border-color: #f85149; }
+.btn-reset:hover { background: #3d1515; }
+.flash { background: #162a1e; border: 1px solid #3fb950; border-radius: 4px;
+         padding: 8px 12px; color: #3fb950; margin-bottom: 14px; }
 """
 
 _JS = """
@@ -342,7 +359,8 @@ setInterval(() => {
 """
 
 
-def _html_page(body: str, now: str = "") -> str:
+def _html_page(body: str, now: str = "", msg: str = "") -> str:
+    flash = f'<div class="flash">{_html_module.escape(msg)}</div>' if msg else ""
     return f"""<!DOCTYPE html>
 <html lang="en">
 <head>
@@ -353,7 +371,7 @@ def _html_page(body: str, now: str = "") -> str:
 <body>
 <h1>Paper Trading Dashboard</h1>
 <p class="meta">Updated {now} &nbsp;&middot;&nbsp; Refreshing in <span id="cd">30s</span></p>
-{body}
+{flash}{body}
 <script>{_JS}</script>
 </body>
 </html>"""
@@ -417,6 +435,15 @@ def _html_account_summary(conn: sqlite3.Connection) -> str:
     </tr>
   </table>
   {warn}
+  <div class="actions">
+    <form method="POST" action="/resolve">
+      <button type="submit" class="btn-resolve">Resolve Closed Markets</button>
+    </form>
+    <form method="POST" action="/reset"
+          onsubmit="return confirm('Reset paper account to $10,000? This clears ALL positions and trade history.')">
+      <button type="submit" class="btn-reset">Reset Account</button>
+    </form>
+  </div>
 </div>"""
 
 
@@ -498,12 +525,13 @@ def _html_decision_stats(analytics_db_path: str, days: int = 7) -> str:
             return ""
 
         total = sum(r["n"] for r in rows)
+        BLOCK = "\u2588"
         rows_html = "".join(f"""
     <tr>
       <td class="{COLORS.get(r['decision'], '')}">{_html_module.escape(r['decision'])}</td>
       <td class="r">{r['n']}</td>
       <td>
-        <span class="bar {COLORS.get(r['decision'], '')}">{'\u2588' * int(r['n'] / total * 100 / 3)}</span>
+        <span class="bar {COLORS.get(r['decision'], '')}">{BLOCK * int(r['n'] / total * 100 / 3)}</span>
         <span class="dim"> {r['n'] / total * 100:.0f}%</span>
       </td>
     </tr>""" for r in rows)
@@ -560,6 +588,7 @@ def _generate_html(
     limit: int,
     trade_limit: int,
     days: int,
+    msg: str = "",
 ) -> str:
     paper_db_path = Path(paper_data_dir) / "paper.db"
     if not paper_db_path.exists():
@@ -579,7 +608,7 @@ def _generate_html(
     finally:
         conn.close()
 
-    return _html_page(body, now=now)
+    return _html_page(body, now=now, msg=msg)
 
 
 # ─── HTTP server ─────────────────────────────────────────────────────────────
@@ -606,17 +635,45 @@ def _serve_dashboard(
                 self.send_response(204)
                 self.end_headers()
                 return
-            if self.path != "/":
+            parsed = urlparse(self.path)
+            if parsed.path != "/":
                 self.send_response(404)
                 self.end_headers()
                 return
-            page = _generate_html(**cfg)
+            msg = unquote_plus(parse_qs(parsed.query).get("msg", [""])[0])
+            page = _generate_html(**cfg, msg=msg)
             data = page.encode("utf-8")
             self.send_response(200)
             self.send_header("Content-Type", "text/html; charset=utf-8")
             self.send_header("Content-Length", str(len(data)))
             self.end_headers()
             self.wfile.write(data)
+
+        def do_POST(self) -> None:
+            action = self.path
+            msg = ""
+            if action == "/resolve":
+                try:
+                    from pm_trader.engine import Engine
+                    engine = Engine(Path(cfg["paper_data_dir"]))
+                    results = engine.resolve_all()
+                    engine.close()
+                    msg = f"Resolved+{len(results)}+position(s)"
+                except Exception as e:
+                    msg = f"Error:+{quote(str(e))}"
+            elif action == "/reset":
+                try:
+                    from pm_trader.engine import Engine
+                    engine = Engine(Path(cfg["paper_data_dir"]))
+                    engine.reset()
+                    engine.init_account(BANKROLL)
+                    engine.close()
+                    msg = f"Account+reset+to+%2410%2C000"
+                except Exception as e:
+                    msg = f"Error:+{quote(str(e))}"
+            self.send_response(303)
+            self.send_header("Location", f"/?msg={msg}" if msg else "/")
+            self.end_headers()
 
         def log_message(self, fmt: str, *args: Any) -> None:
             pass  # suppress per-request logs
