@@ -1,10 +1,10 @@
 # Code Review: Polymarket Analytics Pipeline
 
 **Reviewed:** 2026-04-09
-**Updated:** 2026-04-11 (session 2)
+**Updated:** 2026-04-15 (session 3)
 **Depth:** deep (cross-file analysis)
 **Files Reviewed:** 20
-**Status:** mostly_resolved (13 fixed, 3 acceptable, 3 minor open)
+**Status:** mostly_resolved (14 fixed, 3 acceptable, open: paper resolution)
 
 ## Summary
 
@@ -98,7 +98,38 @@ Deep review of the Polymarket analytics pipeline. All critical and most high/med
 
 ---
 
+---
+
+## Session 3 handoff — 2026-04-15
+
+### Done this session (commit 956f297)
+
+**analytics.db — 16,013 voided positions resolved**
+- Root cause: 1,547 markets are genuinely voided/cancelled (games that never happened). Both Gamma and CLOB return `closed=True` but no outcome data — confirmed by sampling 20 across dates back to July 2025.
+- Impact: `detect_convergence` queries `WHERE resolved=0`, so all void positions were generating false paper trading signals.
+- Fix: `resolution.py` VOID pass — marks positions where `(m.resolved=1 OR m.active=0) AND m.outcome IS NULL` as `resolved=1, outcome='VOID', pnl=0`. Runs before the outcome/FLAT passes.
+- Fix: `extraction.py` adds `AND m.outcome IS NOT NULL` to exclude VOID positions from CLV/ROI/Sharpe scoring.
+- State: 16,013 VOID, 109,369 genuinely open.
+
+**paper_dashboard.py — --resolve crash bug fixed**
+- Root cause: `engine.resolve_all()` called `api.get_market(slug)` in a loop. First `MarketNotFoundError` (delisted slug) aborted the entire loop — not in the caught `(ApiError, ConnectionError, TimeoutError, OSError)` list.
+- Fix: replaced with a per-market loop catching `SimError` (base class of all pm_trader errors) so one bad slug doesn't abort the rest.
+
+### Still broken — paper positions not resolving (next session)
+
+After fixing the crash, `--resolve` says "No closed markets to resolve" for all 195 positions. Root cause: `engine.resolve_market()` depends on the **live Gamma API** to determine `market.closed` and `outcomePrices >= 0.99`. The Gamma API is unreliable for this — returns `closed=False` or `active=True` for many resolved markets, 404 for delisted slugs.
+
+**The fix:** bypass `engine.resolve_market()` entirely. Resolve paper positions from analytics.db directly:
+
+1. Read `paper_bridge.py` first — understand what `outcome` string is stored when a paper buy is placed (team name like "invictus gaming" vs YES/NO). This determines how to map to analytics.db `markets.outcome`.
+2. In `_do_resolve()`, cross-reference `paper.db positions.market_condition_id` → `analytics.db markets` where `resolved=1 AND outcome IS NOT NULL`.
+3. Determine payout: if position outcome maps to winning side → `shares * 1.0`, else `0.0`.
+4. Write directly to paper.db: `UPDATE positions SET is_resolved=1, realized_pnl=payout, resolved_at=...` + update account cash.
+5. Add this step to the launchd cron (after `paper-bridge`) so it runs every 4h automatically.
+
+**Key state:** Paper account has $49.19 cash (LOW CASH), 195 open positions, 0 resolved, 655 total trades. All 195 stuck because the crash has been silently failing since 2026-04-11.
+
 _Reviewed: 2026-04-09_
-_Updated: 2026-04-11_
+_Updated: 2026-04-15_
 _Reviewer: Claude (gsd-code-reviewer)_
 _Depth: deep_
