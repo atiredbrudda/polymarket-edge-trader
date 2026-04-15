@@ -14,7 +14,7 @@ Usage:
 import html as _html_module
 import sqlite3
 import webbrowser
-from datetime import datetime
+from datetime import datetime, timezone
 from http.server import BaseHTTPRequestHandler, HTTPServer
 from pathlib import Path
 from typing import Any
@@ -239,60 +239,162 @@ def _do_reset(paper_data_dir: str) -> None:
     console.print(f"[green]Account reset to ${BANKROLL:,.0f}. All positions and trades cleared.[/green]")
 
 
-def _do_resolve(paper_data_dir: str) -> None:
-    """Resolve all closed market positions.
+def _determine_winner(paper_outcome: str, analytics_outcome: str, outcomes_list: list[str]) -> bool | None:
+    """Return True if paper position won, False if lost, None if unresolvable.
 
-    Uses a per-market loop instead of engine.resolve_all() so that a single
-    MarketNotFoundError or AmbiguousResolutionError doesn't abort the whole run.
+    analytics_outcome is always "YES" or "NO" (normalised by ingest-events).
+    YES means outcomes_list[0] won; NO means outcomes_list[1] won.
+
+    Mapping rules:
+      - "yes" / "over"  → always YES token (index 0)
+      - "no"  / "under" → always NO  token (index 1)
+      - team name       → find case-insensitive match in outcomes_list
     """
-    from pm_trader.engine import Engine
-    from pm_trader.models import SimError
+    p = paper_outcome.lower()
 
-    engine = Engine(Path(paper_data_dir))
+    if p in ("yes", "over"):
+        return analytics_outcome == "YES"
+    if p in ("no", "under"):
+        return analytics_outcome == "NO"
+
+    # Team name — look up position in outcomes_list
+    for i, name in enumerate(outcomes_list):
+        if name.lower() == p:
+            if i == 0:
+                return analytics_outcome == "YES"
+            else:
+                return analytics_outcome == "NO"
+
+    return None  # outcomes_list empty or name not matched
+
+
+def _do_resolve(paper_data_dir: str, analytics_db_path: str) -> None:
+    """Resolve closed market positions by cross-referencing analytics.db.
+
+    Bypasses engine.resolve_market() (which requires market.closed==True from
+    the Gamma API) and instead reads resolution state directly from analytics.db,
+    which captures markets as soon as active=0 — the same condition used by
+    resolve-positions for analytics positions.
+
+    Token→outcome mapping uses the market_cache in paper.db (populated when
+    paper-bridge ran) so no live API calls are needed.
+    """
+    import json
+
+    paper_db_path = Path(paper_data_dir) / "paper.db"
+    if not paper_db_path.exists():
+        console.print("[red]No paper.db found. Run paper-bridge first.[/red]")
+        return
+
+    paper_conn = sqlite3.connect(str(paper_db_path))
+    paper_conn.row_factory = sqlite3.Row
+    analytics_conn = sqlite3.connect(analytics_db_path)
+    analytics_conn.row_factory = sqlite3.Row
+
     try:
-        engine.get_account()
-    except Exception:
-        console.print("[red]No paper account. Run paper-bridge first.[/red]")
-        engine.close()
+        if paper_conn.execute("SELECT id FROM account WHERE id=1").fetchone() is None:
+            console.print("[red]No paper account. Run paper-bridge first.[/red]")
+            return
+
+        open_positions = paper_conn.execute(
+            "SELECT market_condition_id, market_question, outcome, shares, total_cost "
+            "FROM positions WHERE is_resolved=0 AND shares>0"
+        ).fetchall()
+
+        if not open_positions:
+            console.print("[dim]No open positions to resolve.[/dim]")
+            return
+
+        console.print(f"[bold]Checking {len(open_positions)} open positions...[/bold]")
+
+        resolved_count = 0
+        void_count = 0
+        unresolvable = 0
+        cash_returned = 0.0
+
+        for pos in open_positions:
+            cid = pos["market_condition_id"]
+            paper_outcome = pos["outcome"]
+            shares = pos["shares"]
+            total_cost = pos["total_cost"]
+
+            # Look up market in analytics.db
+            mkt = analytics_conn.execute(
+                "SELECT outcome, active, resolved FROM markets WHERE condition_id=?",
+                (cid,),
+            ).fetchone()
+
+            if mkt is None or (mkt["active"] == 1 and mkt["resolved"] == 0):
+                continue  # still open
+
+            analytics_outcome = mkt["outcome"]
+
+            if analytics_outcome is None:
+                # VOID: cancelled/postponed — refund stake, zero P&L
+                payout = total_cost
+                pnl = 0.0
+                label = "VOID"
+                void_count += 1
+            else:
+                # Get outcomes ordering from market_cache to map team names → YES/NO
+                cached = paper_conn.execute(
+                    "SELECT data FROM market_cache WHERE cache_key=?",
+                    (f"market:{cid}",),
+                ).fetchone()
+
+                outcomes_list: list[str] = []
+                if cached:
+                    try:
+                        mdata = json.loads(cached["data"])
+                        raw = mdata.get("outcomes", "[]")
+                        outcomes_list = json.loads(raw) if isinstance(raw, str) else raw
+                    except (json.JSONDecodeError, ValueError):
+                        pass
+
+                won = _determine_winner(paper_outcome, analytics_outcome, outcomes_list)
+                if won is None:
+                    unresolvable += 1
+                    continue
+
+                payout = shares if won else 0.0
+                pnl = payout - total_cost
+                label = "WIN" if won else "LOSS"
+
+            now = datetime.now(timezone.utc).isoformat()
+            paper_conn.execute(
+                "UPDATE positions SET is_resolved=1, realized_pnl=?, resolved_at=? "
+                "WHERE market_condition_id=? AND outcome=?",
+                (pnl, now, cid, paper_outcome),
+            )
+            paper_conn.execute(
+                "UPDATE account SET cash=cash+? WHERE id=1", (payout,)
+            )
+            cash_returned += payout
+            resolved_count += 1
+
+            pnl_color = "green" if pnl >= 0 else "red"
+            console.print(
+                f"  [{pnl_color}]{pos['market_question'][:50]}[/{pnl_color}] "
+                f"({paper_outcome}) → {label}  pnl ${pnl:+.2f}"
+            )
+
+        paper_conn.commit()
+
+    finally:
+        paper_conn.close()
+        analytics_conn.close()
+
+    total = resolved_count + void_count
+    if total == 0 and unresolvable == 0:
+        console.print("[dim]No closed markets to resolve yet.[/dim]")
         return
 
-    console.print("[bold]Resolving closed market positions...[/bold]")
-
-    # Collect unique market slugs from open positions
-    open_positions = engine.db.get_open_positions()
-    seen: set[str] = set()
-    slugs = []
-    for pos in open_positions:
-        if pos.market_slug not in seen:
-            seen.add(pos.market_slug)
-            slugs.append(pos.market_slug)
-
-    all_results = []
-    skipped = 0
-    for slug in slugs:
-        try:
-            results = engine.resolve_market(slug)
-            all_results.extend(results)
-        except SimError:
-            # Market not found, not yet closed, ambiguous outcome, etc. — skip silently.
-            skipped += 1
-        except Exception:
-            skipped += 1
-
-    engine.close()
-
-    if not all_results and skipped == len(slugs):
-        console.print("[dim]No closed markets to resolve.[/dim]")
-        return
-
-    for r in all_results:
-        pos = r.position
-        pnl_color = "green" if r.payout > 0 else "red"
-        console.print(
-            f"  [{pnl_color}]{pos.market_question[:50]}[/{pnl_color}] "
-            f"({pos.outcome}) → payout ${r.payout:.2f}"
-        )
-    console.print(f"[green]{len(all_results)} positions resolved.[/green]")
+    console.print(
+        f"\n[green]{resolved_count} resolved[/green]"
+        + (f"  {void_count} voided" if void_count else "")
+        + (f"  [dim]{unresolvable} unresolvable (no outcome mapping)[/dim]" if unresolvable else "")
+        + f"  |  cash returned: ${cash_returned:,.2f}"
+    )
 
 
 # ─── HTML generation ─────────────────────────────────────────────────────────
@@ -681,11 +783,8 @@ def _serve_dashboard(
             msg = ""
             if action == "/resolve":
                 try:
-                    from pm_trader.engine import Engine
-                    engine = Engine(Path(cfg["paper_data_dir"]))
-                    results = engine.resolve_all()
-                    engine.close()
-                    msg = f"Resolved+{len(results)}+position(s)"
+                    _do_resolve(cfg["paper_data_dir"], cfg["analytics_db_path"])
+                    msg = "Resolve+complete"
                 except Exception as e:
                     msg = f"Error:+{quote(str(e))}"
             elif action == "/reset":
@@ -800,7 +899,7 @@ def paper_dashboard(
         console.print()
 
     if resolve:
-        _do_resolve(paper_data_dir)
+        _do_resolve(paper_data_dir, db_path)
         console.print()
 
     if serve:
