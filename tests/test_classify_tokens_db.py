@@ -67,12 +67,10 @@ def test_classify_tokens_reads_from_db_not_api(tmp_path):
 
 def test_classify_tokens_fails_without_markets(tmp_path):
     """CTDB-02: classify_tokens fails with helpful error if markets table is empty."""
-    from polymarket_analytics.db.schema import init_database
     from polymarket_analytics.commands.classify_tokens import _classify_tokens_from_db
     import click
 
     db_path = tmp_path / "test.db"
-    _ = init_database(db_path)
 
     # Mock config
     class MockConfig:

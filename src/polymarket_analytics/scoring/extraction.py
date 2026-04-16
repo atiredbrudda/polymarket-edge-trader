@@ -56,7 +56,7 @@ def extract_resolved_positions(
         JOIN markets m ON m.condition_id = p.market_id
         WHERE p.resolved = 1
           AND m.niche_slug = :niche_slug
-          AND m.outcome IS NOT NULL
+          AND (m.outcome IS NOT NULL OR (p.direction = 'FLAT' AND p.avg_exit_price IS NOT NULL))
           AND p.last_trade_timestamp >= datetime('now', '-' || :window_days || ' days')
         ORDER BY p.trader_address, m.end_date
     """

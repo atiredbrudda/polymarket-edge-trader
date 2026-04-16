@@ -27,8 +27,7 @@ def test_db(tmp_path):
         sqlite_utils.Database instance with schema initialized
     """
     db_path = tmp_path / "test.db"
-    db = sqlite_utils.Database(db_path)
-    init_database(db_path)
+    db = init_database(db_path)
     return db
 
 
@@ -92,6 +91,12 @@ def positions_db(test_db):
                 "tokens": "[]",
             },
         ]
+    )
+
+    # Insert traders required by FK constraint on positions.trader_address
+    test_db["traders"].insert_all(
+        [{"address": f"trader{i}"} for i in range(1, 5)],
+        replace=True,
     )
 
     # Insert positions with different timestamps and resolved status

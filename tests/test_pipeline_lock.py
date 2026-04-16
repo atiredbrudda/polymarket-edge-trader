@@ -65,16 +65,16 @@ def test_monitor_does_not_block_cron(tmp_path):
         assert acquired["process_type"] == "cron"
 
 
-def test_monitor_does_not_block_monitor(tmp_path):
-    """A monitor lock does NOT block another monitor."""
+def test_monitor_blocks_monitor(tmp_path):
+    """A monitor lock blocks another monitor (prevents duplicate passes/race writes)."""
     lock_file = tmp_path / ".pipeline.lock"
 
     # Simulate an existing monitor lock
     _write_lock(lock_file, "monitor")
 
-    # Try to acquire as monitor — should succeed
+    # Try to acquire as monitor — should be blocked
     with pipeline_lock("monitor", lock_path=lock_file) as acquired:
-        assert acquired is not None
+        assert acquired is None
 
 
 def test_stale_lock_cleaned_up(tmp_path):

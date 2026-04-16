@@ -60,11 +60,17 @@ def test_first_run_fetches_all_markets(tmp_path):
             mock_fetch.return_value = mock_markets
             await _ingest_events_async(MockContext(), str(db_path), full=False)
 
-            # Assert fetch_markets was called with closed=None (fetch all)
-            mock_fetch.assert_called_once()
-            call_kwargs = mock_fetch.call_args.kwargs
-            assert call_kwargs.get("closed") is None, (
-                f"First run should fetch all (closed=None), got closed={call_kwargs.get('closed')}"
+            # First run fetches active + closed separately (two calls)
+            assert mock_fetch.call_count == 2, (
+                f"First run should make 2 fetch calls (active + closed), got {mock_fetch.call_count}"
+            )
+            first_kwargs = mock_fetch.call_args_list[0].kwargs
+            second_kwargs = mock_fetch.call_args_list[1].kwargs
+            assert first_kwargs.get("closed") is False, (
+                f"First call should fetch active (closed=False), got {first_kwargs.get('closed')}"
+            )
+            assert second_kwargs.get("closed") is True, (
+                f"Second call should fetch closed (closed=True), got {second_kwargs.get('closed')}"
             )
 
     import asyncio
@@ -225,11 +231,17 @@ def test_full_flag_forces_full_fetch(tmp_path):
             # Pass full=True to force full fetch
             await _ingest_events_async(MockContext(), str(db_path), full=True)
 
-            # Assert fetch_markets was called with closed=None (fetch all)
-            mock_fetch.assert_called_once()
-            call_kwargs = mock_fetch.call_args.kwargs
-            assert call_kwargs.get("closed") is None, (
-                f"--full should fetch all (closed=None), got closed={call_kwargs.get('closed')}"
+            # --full fetches active + closed separately (two calls)
+            assert mock_fetch.call_count == 2, (
+                f"--full should make 2 fetch calls (active + closed), got {mock_fetch.call_count}"
+            )
+            first_kwargs = mock_fetch.call_args_list[0].kwargs
+            second_kwargs = mock_fetch.call_args_list[1].kwargs
+            assert first_kwargs.get("closed") is False, (
+                f"First call should fetch active (closed=False), got {first_kwargs.get('closed')}"
+            )
+            assert second_kwargs.get("closed") is True, (
+                f"Second call should fetch closed (closed=True), got {second_kwargs.get('closed')}"
             )
 
     import asyncio

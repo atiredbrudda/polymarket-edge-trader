@@ -27,8 +27,7 @@ def test_db(tmp_path):
         sqlite_utils.Database instance with schema initialized
     """
     db_path = tmp_path / "test.db"
-    db = sqlite_utils.Database(db_path)
-    init_database(db_path)
+    db = init_database(db_path)
     return db
 
 
@@ -86,6 +85,12 @@ def resolved_positions_db(test_db):
                 "tokens": "[]",
             },
         ]
+    )
+
+    # Insert traders required by FK constraint on positions.trader_address
+    test_db["traders"].insert_all(
+        [{"address": f"trader{i}"} for i in range(1, 7)],
+        replace=True,
     )
 
     # Insert unresolved positions with various directions
@@ -356,6 +361,9 @@ def test_resolve_fails_without_outcomes(test_db):
         }
     )
 
+    # Insert trader required by FK
+    test_db["traders"].insert({"address": "trader1"}, replace=True)
+
     # Insert a position
     import hashlib
 
@@ -394,6 +402,9 @@ def test_resolve_flat_with_exit_price(test_db):
     """
     from polymarket_analytics.positions.resolution import resolve_position_pnl
     import hashlib
+
+    # Insert trader required by FK
+    test_db["traders"].insert({"address": "flattrader"}, replace=True)
 
     # Insert a FLAT position with avg_exit_price
     position_id = hashlib.sha256(b"flattradermarket1").hexdigest()[:16]
@@ -490,6 +501,12 @@ def test_resolve_flat_loss(test_db):
         }
     )
 
+    # Insert traders required by FK
+    test_db["traders"].insert_all(
+        [{"address": "trader-long-decoy"}, {"address": "trader-loss"}],
+        replace=True,
+    )
+
     # Insert a LONG position on the market with outcome to satisfy the dependency
     long_position_id = hashlib.sha256(b"trader-long-decoymarket-yes-decoy").hexdigest()[
         :16
@@ -569,6 +586,8 @@ def test_resolve_flat_no_exit_price_stays_zero(test_db):
             "tokens": "[]",
         }
     )
+    test_db["traders"].insert({"address": "trader-noexit"}, replace=True)
+
     test_db["positions"].insert(
         {
             "trader_address": "trader-noexit",

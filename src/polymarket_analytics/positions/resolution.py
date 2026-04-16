@@ -93,6 +93,20 @@ def resolve_position_pnl(db: Any, niche_slug: str) -> int:
             "No unresolved positions found. All positions already resolved."
         )
 
+    # 2. Assert markets have outcomes (resolve-outcomes must be run first)
+    outcomes_count = db.execute(
+        "SELECT COUNT(*) FROM markets WHERE outcome IS NOT NULL"
+    ).fetchone()[0]
+    flat_resolvable = db.execute(
+        "SELECT COUNT(*) FROM positions"
+        " WHERE direction = 'FLAT' AND avg_exit_price IS NOT NULL AND resolved = 0"
+    ).fetchone()[0]
+    if outcomes_count == 0 and flat_resolvable == 0:
+        raise click.ClickException(
+            "No market outcomes found. "
+            "Run resolve-outcomes command first, then re-run resolve-positions."
+        )
+
     # VOID pass: close positions on markets that are resolved but have no outcome
     # (cancelled/postponed games — neither Gamma nor CLOB will ever supply an outcome).
     # pnl=0 (stake returned), excluded from scoring via m.outcome IS NOT NULL guard.
@@ -173,4 +187,11 @@ def resolve_position_pnl(db: Any, niche_slug: str) -> int:
     # Commit the transaction to persist changes
     db.conn.commit()
 
-    return void_count + flat_result.rowcount + outcome_result.rowcount
+    total_resolved = void_count + flat_result.rowcount + outcome_result.rowcount
+    if total_resolved == 0:
+        raise click.ClickException(
+            "No positions have resolvable markets. "
+            "Remaining unresolved positions may need market outcomes — "
+            "run resolve-outcomes to update market outcomes first."
+        )
+    return total_resolved

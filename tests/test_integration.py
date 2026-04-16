@@ -207,7 +207,7 @@ def test_schema_matches_guide(test_db: sqlite_utils.Database):
     assert "data" not in gamma_cols, "gamma_events should not have 'data' JSON blob"
 
 
-def test_classify_tokens_uses_clob_token_ids(test_db: sqlite_utils.Database, tmp_path):
+def test_classify_tokens_uses_clob_token_ids(tmp_path):
     """TCAT-04: classify_tokens reads clobTokenIds from database (not API).
 
     This test verifies that classify_tokens correctly reads clob_token_ids

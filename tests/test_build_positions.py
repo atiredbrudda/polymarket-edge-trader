@@ -157,7 +157,7 @@ def test_build_positions_aggregates_trades(test_db: sqlite_utils.Database):
         {
             "trade_id": "trade-001",
             "token_id": "token-1",
-            "timestamp": "2025-01-10T10:00:00Z",
+            "timestamp": "2026-04-01T10:00:00Z",
             "side": "BUY",
             "price": Decimal("0.50"),
             "size": Decimal("100.0"),
@@ -169,7 +169,7 @@ def test_build_positions_aggregates_trades(test_db: sqlite_utils.Database):
         {
             "trade_id": "trade-002",
             "token_id": "token-2",
-            "timestamp": "2025-01-10T11:00:00Z",
+            "timestamp": "2026-04-01T11:00:00Z",
             "side": "SELL",
             "price": Decimal("0.60"),
             "size": Decimal("50.0"),
@@ -182,7 +182,7 @@ def test_build_positions_aggregates_trades(test_db: sqlite_utils.Database):
         {
             "trade_id": "trade-003",
             "token_id": "token-3",
-            "timestamp": "2025-01-11T10:00:00Z",
+            "timestamp": "2026-04-02T10:00:00Z",
             "side": "SELL",
             "price": Decimal("0.45"),
             "size": Decimal("200.0"),
@@ -196,7 +196,7 @@ def test_build_positions_aggregates_trades(test_db: sqlite_utils.Database):
         {
             "trade_id": "trade-004",
             "token_id": "token-1",
-            "timestamp": "2025-01-10T12:00:00Z",
+            "timestamp": "2026-04-01T12:00:00Z",
             "side": "BUY",
             "price": Decimal("0.55"),
             "size": Decimal("150.0"),
@@ -210,7 +210,7 @@ def test_build_positions_aggregates_trades(test_db: sqlite_utils.Database):
         {
             "trade_id": "trade-005",
             "token_id": "token-1",
-            "timestamp": "2025-01-10T13:00:00Z",
+            "timestamp": "2026-04-01T13:00:00Z",
             "side": "BUY",
             "price": Decimal("0.52"),
             "size": Decimal("80.0"),
@@ -222,7 +222,7 @@ def test_build_positions_aggregates_trades(test_db: sqlite_utils.Database):
         {
             "trade_id": "trade-006",
             "token_id": "token-1",
-            "timestamp": "2025-01-10T14:00:00Z",
+            "timestamp": "2026-04-01T14:00:00Z",
             "side": "SELL",
             "price": Decimal("0.58"),
             "size": Decimal("80.0"),
@@ -234,7 +234,7 @@ def test_build_positions_aggregates_trades(test_db: sqlite_utils.Database):
         {
             "trade_id": "trade-007",
             "token_id": "token-3",
-            "timestamp": "2025-01-11T11:00:00Z",
+            "timestamp": "2026-04-02T11:00:00Z",
             "side": "BUY",
             "price": Decimal("0.40"),
             "size": Decimal("100.0"),
@@ -332,7 +332,7 @@ def test_build_positions_direction_calculation(test_db: sqlite_utils.Database):
         {
             "trade_id": "trade-long-1",
             "token_id": "token-1",
-            "timestamp": "2025-01-10T10:00:00Z",
+            "timestamp": "2026-04-01T10:00:00Z",
             "side": "BUY",
             "price": Decimal("0.50"),
             "size": Decimal("100.0"),
@@ -344,7 +344,7 @@ def test_build_positions_direction_calculation(test_db: sqlite_utils.Database):
         {
             "trade_id": "trade-long-2",
             "token_id": "token-1",
-            "timestamp": "2025-01-10T11:00:00Z",
+            "timestamp": "2026-04-01T11:00:00Z",
             "side": "SELL",
             "price": Decimal("0.60"),
             "size": Decimal("30.0"),
@@ -358,7 +358,7 @@ def test_build_positions_direction_calculation(test_db: sqlite_utils.Database):
         {
             "trade_id": "trade-short-1",
             "token_id": "token-1",
-            "timestamp": "2025-01-10T12:00:00Z",
+            "timestamp": "2026-04-01T12:00:00Z",
             "side": "SELL",
             "price": Decimal("0.55"),
             "size": Decimal("200.0"),
@@ -370,7 +370,7 @@ def test_build_positions_direction_calculation(test_db: sqlite_utils.Database):
         {
             "trade_id": "trade-short-2",
             "token_id": "token-1",
-            "timestamp": "2025-01-10T13:00:00Z",
+            "timestamp": "2026-04-01T13:00:00Z",
             "side": "BUY",
             "price": Decimal("0.45"),
             "size": Decimal("50.0"),
@@ -384,7 +384,7 @@ def test_build_positions_direction_calculation(test_db: sqlite_utils.Database):
         {
             "trade_id": "trade-flat-1",
             "token_id": "token-1",
-            "timestamp": "2025-01-10T14:00:00Z",
+            "timestamp": "2026-04-01T14:00:00Z",
             "side": "BUY",
             "price": Decimal("0.52"),
             "size": Decimal("100.0"),
@@ -396,7 +396,7 @@ def test_build_positions_direction_calculation(test_db: sqlite_utils.Database):
         {
             "trade_id": "trade-flat-2",
             "token_id": "token-1",
-            "timestamp": "2025-01-10T15:00:00Z",
+            "timestamp": "2026-04-01T15:00:00Z",
             "side": "SELL",
             "price": Decimal("0.58"),
             "size": Decimal("100.0"),
@@ -463,7 +463,7 @@ def test_build_positions_volume_weighted_avg(test_db: sqlite_utils.Database):
         {
             "trade_id": "trade-1",
             "token_id": "token-1",
-            "timestamp": "2025-01-10T10:00:00Z",
+            "timestamp": "2026-04-01T10:00:00Z",
             "side": "BUY",
             "price": Decimal("0.50"),
             "size": Decimal("100.0"),
@@ -475,7 +475,7 @@ def test_build_positions_volume_weighted_avg(test_db: sqlite_utils.Database):
         {
             "trade_id": "trade-2",
             "token_id": "token-1",
-            "timestamp": "2025-01-10T11:00:00Z",
+            "timestamp": "2026-04-01T11:00:00Z",
             "side": "BUY",
             "price": Decimal("0.90"),
             "size": Decimal("10.0"),
@@ -593,7 +593,7 @@ def test_build_positions_idempotent(test_db: sqlite_utils.Database):
         {
             "trade_id": "trade-1",
             "token_id": "token-1",
-            "timestamp": "2025-01-10T10:00:00Z",
+            "timestamp": "2026-04-01T10:00:00Z",
             "side": "BUY",
             "price": Decimal("0.50"),
             "size": Decimal("100.0"),
@@ -613,7 +613,7 @@ def test_build_positions_idempotent(test_db: sqlite_utils.Database):
         {
             "trade_id": "trade-2",
             "token_id": "token-1",
-            "timestamp": "2025-01-10T11:00:00Z",
+            "timestamp": "2026-04-01T11:00:00Z",
             "side": "BUY",
             "price": Decimal("0.55"),
             "size": Decimal("50.0"),
@@ -679,7 +679,7 @@ def test_build_positions_buy_only_entry_and_exit_price(test_db: sqlite_utils.Dat
         {
             "trade_id": "trade-buy-1",
             "token_id": "token-1",
-            "timestamp": "2025-01-10T10:00:00Z",
+            "timestamp": "2026-04-01T10:00:00Z",
             "side": "BUY",
             "price": Decimal("0.40"),
             "size": Decimal("100.0"),
@@ -691,7 +691,7 @@ def test_build_positions_buy_only_entry_and_exit_price(test_db: sqlite_utils.Dat
         {
             "trade_id": "trade-sell-1",
             "token_id": "token-1",
-            "timestamp": "2025-01-10T11:00:00Z",
+            "timestamp": "2026-04-01T11:00:00Z",
             "side": "SELL",
             "price": Decimal("0.70"),
             "size": Decimal("100.0"),
@@ -754,7 +754,7 @@ def test_build_positions_long_entry_price_ignores_sells(test_db: sqlite_utils.Da
         {
             "trade_id": "trade-long-buy",
             "token_id": "token-1",
-            "timestamp": "2025-01-10T10:00:00Z",
+            "timestamp": "2026-04-01T10:00:00Z",
             "side": "BUY",
             "price": Decimal("0.50"),
             "size": Decimal("100.0"),
@@ -766,7 +766,7 @@ def test_build_positions_long_entry_price_ignores_sells(test_db: sqlite_utils.Da
         {
             "trade_id": "trade-long-sell",
             "token_id": "token-1",
-            "timestamp": "2025-01-10T11:00:00Z",
+            "timestamp": "2026-04-01T11:00:00Z",
             "side": "SELL",
             "price": Decimal("0.80"),
             "size": Decimal("30.0"),

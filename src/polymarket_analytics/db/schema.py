@@ -255,6 +255,12 @@ def create_indexes(db):
         if_not_exists=True,
         index_name="idx_positions_market_direction_resolved",
     )
+    # Index for score.py rolling-window filter (WHERE last_trade_timestamp >= now - N days)
+    db["positions"].create_index(
+        ["last_trade_timestamp"],
+        if_not_exists=True,
+        index_name="idx_positions_last_trade_ts",
+    )
 
     # lift_scores indexes
     db["lift_scores"].create_index(
@@ -377,6 +383,10 @@ def run_migrations(db):
     # health_log table for pipeline health monitoring (Phase 9)
     from polymarket_analytics.health.log import create_health_log_table
     create_health_log_table(db)
+
+    # Commit any pending migration writes so a second connection to the same
+    # file doesn't see a stale write lock from this one.
+    db.conn.commit()
 
 
 def init_database(db_path: Path):
