@@ -8,6 +8,7 @@ from polymarket_analytics.commands.detect import detect
 from polymarket_analytics.commands.discover import discover
 from polymarket_analytics.commands.paper_bridge import paper_bridge
 from polymarket_analytics.commands.paper_dashboard import paper_dashboard
+from polymarket_analytics.commands.paper_take_profit import paper_take_profit
 from polymarket_analytics.commands.monitor import monitor
 from polymarket_analytics.commands.ingest_events import ingest_events
 from polymarket_analytics.commands.resolve_outcomes import resolve_outcomes
@@ -27,6 +28,7 @@ __all__ = [
     "monitor",
     "paper_bridge",
     "paper_dashboard",
+    "paper_take_profit",
     "ingest_events",
     "resolve_outcomes",
     "resolve_positions",

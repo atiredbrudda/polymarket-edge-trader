@@ -84,10 +84,14 @@ Deep review of the Polymarket analytics pipeline. All critical and most high/med
 **File:** `src/polymarket_analytics/extraction/llm.py`
 **Impact:** When the Anthropic API returns an "insufficient funds" / billing error, the pipeline silently falls back to empty extraction. Should trigger a Telegram alert via `health/notify.py` so the user knows to top up the account before LLM-dependent features degrade.
 
-### M-08: Take profit after 50% move in favoured direction
+### M-08: Take profit after 50% move in favoured direction — **FIXED 2026-04-16**
 
-**Motivation:** Open positions that have moved 50%+ toward 1.0 are approaching resolution. Holding to the end exposes capital to late reversal risk. Closing early at e.g. 0.70 after buying at 0.45 locks in most of the CLV edge and frees cash for new signals.
-**Fix direction:** In `paper-bridge` (or a separate `paper-take-profit` step), scan open positions where `current_price >= avg_entry_price * 1.5`. Sell via `engine.sell()`, log as `TAKE_PROFIT` decision. Wire into cron after `paper-bridge`.
+`polymarket --niche esports paper-take-profit` added. Runs in two phases each cron pass:
+
+1. **Check-back** — fills `final_outcome` in `take_profit_log` for previously exited positions whose market has since resolved in analytics.db. Shows counterfactual P&L: `(final_price - exit_price) × shares`. Positive = left gains on table; negative = loss avoided.
+2. **Scan** — exits any open position where `live_price >= avg_entry_price * threshold` (default 1.5×). Sells via `engine.sell()`, logs TAKE_PROFIT to both `bridge_decisions` and a new `take_profit_log` table. Supports `--dry-run` and `--threshold`.
+
+Wired into `cron_pipeline.sh` between `paper-bridge` and `paper-resolve`.
 
 ---
 

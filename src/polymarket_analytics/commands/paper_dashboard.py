@@ -519,7 +519,8 @@ button {
 .btn-reset   { background: #2d1010; color: #f85149; border-color: #f85149; }
 .btn-reset:hover { background: #3d1515; }
 .flash { background: #162a1e; border: 1px solid #3fb950; border-radius: 4px;
-         padding: 8px 12px; color: #3fb950; margin-bottom: 14px; }
+         padding: 8px 12px; color: #3fb950; margin-bottom: 14px;
+         transition: opacity 0.5s ease; }
 """
 
 _JS = """
@@ -530,11 +531,21 @@ setInterval(() => {
     if (secs <= 0) { location.reload(); return; }
     if (el) el.textContent = secs + 's';
 }, 1000);
+
+// Auto-dismiss flash message after 3s and clean the URL
+const flash = document.getElementById('flash');
+if (flash) {
+    setTimeout(() => {
+        flash.style.opacity = '0';
+        setTimeout(() => { flash.style.display = 'none'; }, 500);
+    }, 3000);
+    history.replaceState(null, '', '/');
+}
 """
 
 
 def _html_page(body: str, now: str = "", msg: str = "") -> str:
-    flash = f'<div class="flash">{_html_module.escape(msg)}</div>' if msg else ""
+    flash = f'<div id="flash" class="flash">{_html_module.escape(msg)}</div>' if msg else ""
     return f"""<!DOCTYPE html>
 <html lang="en">
 <head>
@@ -651,10 +662,43 @@ def _html_positions(conn: sqlite3.Connection, limit: int = 20) -> str:
     </tr>""" for r in rows)
 
     total_resolved = won_count + lost_count
-    resolved_bar = ""
+
+    # Resolved positions table
+    resolved_rows = conn.execute("""
+        SELECT market_question, outcome, total_cost, realized_pnl, resolved_at
+        FROM positions
+        WHERE is_resolved = 1
+        ORDER BY resolved_at DESC
+        LIMIT ?
+    """, (limit,)).fetchall()
+
+    resolved_rows_html = ""
+    for r in resolved_rows:
+        pnl = r["realized_pnl"] or 0.0
+        if pnl > 0:
+            result = '<span class="green">WIN</span>'
+            pnl_str = f'<span class="green">+${pnl:.2f}</span>'
+        elif pnl < 0:
+            result = '<span class="red">LOSS</span>'
+            pnl_str = f'<span class="red">-${abs(pnl):.2f}</span>'
+        else:
+            result = '<span class="dim">VOID</span>'
+            pnl_str = '<span class="dim">$0.00</span>'
+        resolved_at = (r["resolved_at"] or "")[:10]
+        resolved_rows_html += f"""
+    <tr>
+      <td>{_html_module.escape((r['market_question'] or '')[:55])}</td>
+      <td>{_html_module.escape((r['outcome'] or '').upper()[:12])}</td>
+      <td class="r">{result}</td>
+      <td class="r">${r['total_cost']:.2f}</td>
+      <td class="r">{pnl_str}</td>
+      <td class="dim">{resolved_at}</td>
+    </tr>"""
+
+    win_rate_str = ""
     if total_resolved > 0:
         win_rate = won_count / total_resolved * 100
-        resolved_bar = (
+        win_rate_str = (
             f'<div class="resolved-bar">'
             f'Resolved: {total_resolved} &nbsp;&middot;&nbsp; '
             f'<span class="green">{won_count} won (+${won_pnl:.2f})</span> &nbsp;&middot;&nbsp; '
@@ -662,6 +706,21 @@ def _html_positions(conn: sqlite3.Connection, limit: int = 20) -> str:
             f'Win rate: {win_rate:.0f}%'
             f'</div>'
         )
+
+    resolved_card = ""
+    if resolved_rows_html:
+        resolved_card = f"""
+<div class="card">
+  <div class="card-title">Resolved Positions (last {len(resolved_rows)} of {total_resolved})</div>
+  <table>
+    <thead><tr>
+      <th>Market</th><th>Outcome</th>
+      <th class="r">Result</th><th class="r">Cost</th><th class="r">P&amp;L</th><th>Resolved</th>
+    </tr></thead>
+    <tbody>{resolved_rows_html}</tbody>
+  </table>
+  {win_rate_str}
+</div>"""
 
     shown = min(limit, total_open)
     return f"""
@@ -674,8 +733,8 @@ def _html_positions(conn: sqlite3.Connection, limit: int = 20) -> str:
     </tr></thead>
     <tbody>{rows_html}</tbody>
   </table>
-  {resolved_bar}
-</div>"""
+</div>
+{resolved_card}"""
 
 
 def _html_decision_stats(analytics_db_path: str, days: int = 7) -> str:

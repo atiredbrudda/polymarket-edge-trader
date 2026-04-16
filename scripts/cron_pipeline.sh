@@ -84,6 +84,7 @@ run_stage "resolve-positions" polymarket --niche esports resolve-positions
 run_stage "score" polymarket --niche esports score
 run_stage "detect" polymarket --niche esports detect
 run_stage "paper-bridge" polymarket --niche esports paper-bridge
+run_stage "paper-take-profit" polymarket --niche esports paper-take-profit
 run_stage "paper-resolve" polymarket --niche esports paper-dashboard --resolve
 
 # --- Update full backfill marker ---

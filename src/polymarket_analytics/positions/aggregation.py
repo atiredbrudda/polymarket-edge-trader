@@ -24,7 +24,7 @@ def _generate_position_id(trader_address: str, market_id: str) -> str:
     return hashlib.sha256(combined.encode()).hexdigest()[:16]
 
 
-def build_positions_from_trades(db: Any, niche_slug: str) -> int:
+def build_positions_from_trades(db: Any, niche_slug: str, window_days: int = 35) -> int:
     """Build positions from trades using SQL GROUP BY aggregation.
 
     Args:
@@ -68,8 +68,13 @@ def build_positions_from_trades(db: Any, niche_slug: str) -> int:
             "from positions (non-esports or unresolvable markets)."
         )
 
-    # Get all trades grouped by (trader, market)
-    trades_query = """
+    # Get trades grouped by (trader, market), limited to the rolling window.
+    # WHERE timestamp limits the index scan to recent trades only.
+    # HAVING MIN(timestamp) ensures we only process positions that started within
+    # the window — this avoids partial positions where the BUY trade predates the
+    # window but a later SELL falls inside it (which would corrupt avg_entry_price).
+    # Older positions already upserted in previous runs are left untouched.
+    trades_query = f"""
         SELECT
             trader_address,
             market_id,
@@ -85,8 +90,10 @@ def build_positions_from_trades(db: Any, niche_slug: str) -> int:
         FROM trades t
         JOIN market_entities me ON me.condition_id = t.market_id
         WHERE me.game IS NOT NULL
+          AND t.timestamp >= datetime('now', '-{window_days} days')
         GROUP BY trader_address, market_id
         HAVING SUM(CASE WHEN side = 'BUY' THEN 1 ELSE 0 END) > 0
+           AND MIN(timestamp) >= datetime('now', '-{window_days} days')
     """
 
     # Process each (trader, market) pair
