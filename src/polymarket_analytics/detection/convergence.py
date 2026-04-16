@@ -147,10 +147,15 @@ def _apply_event_grouping(df: pd.DataFrame) -> pd.DataFrame:
 
 
 def _compute_tier(net_q5_count: int) -> str:
-    """Compute signal tier from net Q5 count."""
-    if net_q5_count >= 3:
+    """Compute signal tier from net Q5 count.
+
+    Thresholds set 2026-04-16 per consensus rebuild (see wiki: Consensus Signal).
+    Per-trade ROI is flat from min=2 through 10 (~65-70%), so the threshold is
+    about filtering noise, not chasing higher edge. Revisit when Q5 panel >= 1000.
+    """
+    if net_q5_count >= 5:
         return "ACT"
-    elif net_q5_count >= 2:
+    elif net_q5_count >= 3:
         return "CONSIDER"
     else:
         return "WATCH"

@@ -368,13 +368,13 @@ class TestEnrichment:
     def test_tier_consider(
         self, enrichment_db, fixture_traders, fixture_markets, future_end_date
     ):
-        """Test 4: tier = CONSIDER when q5_count = 2.
+        """Test 4: tier = WATCH when q5_count = 2 (below CONSIDER threshold of 3).
 
         Fixture setup:
         - 2 Q5 traders LONG on same open market
 
         Expected:
-        - detect_convergence returns tier == 'CONSIDER'
+        - detect_convergence returns tier == 'WATCH'
         """
         db = enrichment_db
 
@@ -428,21 +428,21 @@ class TestEnrichment:
         # Assert: 1 convergence signal found
         assert len(result_df) == 1, f"Expected 1 signal, got {len(result_df)}"
 
-        # Assert: tier == 'CONSIDER'
+        # Assert: tier == 'WATCH' (2 Q5 is below CONSIDER threshold of 3)
         row = result_df.iloc[0]
-        assert row["tier"] == "CONSIDER", f"Expected tier='CONSIDER', got {row['tier']}"
+        assert row["tier"] == "WATCH", f"Expected tier='WATCH', got {row['tier']}"
         assert row["q5_count"] == 2, f"Expected q5_count=2, got {row['q5_count']}"
 
     def test_tier_act(
         self, enrichment_db, fixture_traders, fixture_markets, future_end_date
     ):
-        """Test 5: tier = ACT when q5_count >= 3.
+        """Test 5: tier = CONSIDER when q5_count = 3 (below ACT threshold of 5).
 
         Fixture setup:
         - 3 Q5 traders LONG on same open market
 
         Expected:
-        - detect_convergence returns tier == 'ACT'
+        - detect_convergence returns tier == 'CONSIDER'
         """
         db = enrichment_db
 
@@ -507,9 +507,9 @@ class TestEnrichment:
         # Assert: 1 convergence signal found
         assert len(result_df) == 1, f"Expected 1 signal, got {len(result_df)}"
 
-        # Assert: tier == 'ACT'
+        # Assert: tier == 'CONSIDER' (3 Q5 is below ACT threshold of 5)
         row = result_df.iloc[0]
-        assert row["tier"] == "ACT", f"Expected tier='ACT', got {row['tier']}"
+        assert row["tier"] == "CONSIDER", f"Expected tier='CONSIDER', got {row['tier']}"
         assert row["q5_count"] == 3, f"Expected q5_count=3, got {row['q5_count']}"
 
     def test_entry_prices(
@@ -744,7 +744,7 @@ class TestEnrichment:
         assert len(result_df) == 1, f"Expected 1 signal, got {len(result_df)}"
         row = result_df.iloc[0]
         assert row["q5_count"] == 2
-        assert row["tier"] == "CONSIDER"
+        assert row["tier"] == "WATCH"  # 2 Q5 is below CONSIDER threshold of 3
         assert "clv_dominant_count" in row
         assert "avg_entry_price" in row
         assert "min_entry_price" in row
