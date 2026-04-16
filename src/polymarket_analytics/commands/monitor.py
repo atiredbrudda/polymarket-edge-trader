@@ -31,6 +31,7 @@ from polymarket_analytics.api.gamma import GammaAPIClient
 from polymarket_analytics.api.graph import GraphAPIClient
 from polymarket_analytics.cli import cli
 from polymarket_analytics.commands.backfill import (
+    GRAPH_RETRY_LIMIT,
     ShutdownManager,
     backfill_trader,
     fetch_trades_with_retry,
@@ -90,6 +91,73 @@ def _get_since_ts(trader: dict, default_since_hours: int) -> Optional[int]:
     # Fall back to --since hours
     cutoff = datetime.now(timezone.utc) - timedelta(hours=default_since_hours)
     return int(cutoff.timestamp())
+
+
+def _resolve_trader_markets(
+    trader_niche_trades: dict[str, list],
+    global_catalog: dict[str, str],
+) -> dict[str, set[str]]:
+    """Resolve token_ids → condition_ids for each trader's trades using the catalog."""
+    trader_markets: dict[str, set[str]] = {}
+    for address, trades in trader_niche_trades.items():
+        markets: set[str] = set()
+        for trade in trades:
+            tid = str(
+                trade.get("token_id") or trade.get("asset") or trade.get("asset_id") or ""
+            )
+            cid = global_catalog.get(tid)
+            if cid:
+                markets.add(cid)
+        if markets:
+            trader_markets[address] = markets
+    return trader_markets
+
+
+def _bulk_sell_only_check(
+    db: Any,
+    trader_markets: dict[str, set[str]],
+    retry_limit: int,
+) -> dict[str, list[str]]:
+    """Single bulk query to find sell-only (trader, market) pairs across all traders.
+
+    Replaces N per-trader GROUP BY queries with one chunked query.
+    Returns {trader_address: [sell_only_market_id, ...]}
+    """
+    all_traders = list(trader_markets.keys())
+    all_markets = list({m for ms in trader_markets.values() for m in ms})
+
+    if not all_traders or not all_markets:
+        return {}
+
+    result: dict[str, list[str]] = {}
+    CHUNK = 450  # keeps trader_chunk + market_chunk + 1 well under SQLite's 999-var limit
+
+    for t_start in range(0, len(all_traders), CHUNK):
+        trader_chunk = all_traders[t_start : t_start + CHUNK]
+        for m_start in range(0, len(all_markets), CHUNK):
+            market_chunk = all_markets[m_start : m_start + CHUNK]
+            t_ph = ",".join("?" * len(trader_chunk))
+            m_ph = ",".join("?" * len(market_chunk))
+            rows = db.execute(
+                f"""
+                SELECT t.trader_address, t.market_id
+                FROM trades t
+                LEFT JOIN positions p ON p.trader_address = t.trader_address
+                    AND p.market_id = t.market_id
+                WHERE t.trader_address IN ({t_ph})
+                  AND t.market_id IN ({m_ph})
+                  AND COALESCE(p.graph_retry_count, 0) < ?
+                GROUP BY t.trader_address, t.market_id
+                HAVING SUM(CASE WHEN t.side = 'BUY' THEN 1 ELSE 0 END) = 0
+                   AND SUM(CASE WHEN t.side = 'SELL' THEN 1 ELSE 0 END) > 0
+                """,
+                trader_chunk + market_chunk + [retry_limit],
+            ).fetchall()
+            for addr, market_id in rows:
+                if market_id in trader_markets.get(addr, set()):
+                    result.setdefault(addr, []).append(market_id)
+
+    return result
 
 
 def _filter_by_niche(
@@ -401,31 +469,40 @@ async def _monitor_pass(
         await _cleanup(data_client, gamma_client)
         return stats
 
-    # Phase 5+6: Delegate to backfill_trader for trade normalization + upsert,
-    # then update last_monitored_at. Both wrapped in a single transaction to
-    # reduce SQLite WAL pressure and ensure atomicity.
+    # Phase 5+6: Upsert trades per trader, each in its own transaction so the
+    # write lock is released between traders instead of held for the full batch.
     now_iso = datetime.now(timezone.utc).isoformat()
-    with db.conn:
-        if trader_niche_trades:
-            console.print(
-                f"  Upserting trades for {len(trader_niche_trades)} traders..."
-            )
-            # Load global token catalog for backfill_trader
-            global_catalog = {
-                row[0]: row[1]
-                for row in db.execute(
-                    "SELECT token_id, condition_id FROM token_catalog"
-                ).fetchall()
-            }
+    ingested_total = 0
 
-            ingested_total = 0
-            upsert_total = len(trader_niche_trades)
-            for i, (address, trades) in enumerate(trader_niche_trades.items(), 1):
-                if shutdown.shutdown_requested:
-                    break
-                end = "\n" if i == upsert_total else "\r"
-                print(f"    [{i}/{upsert_total}] upserting trader {address[:10]}...   ", end=end, flush=True)
-                try:
+    if trader_niche_trades:
+        console.print(
+            f"  Upserting trades for {len(trader_niche_trades)} traders..."
+        )
+        # Load global token catalog for backfill_trader
+        global_catalog = {
+            row[0]: row[1]
+            for row in db.execute(
+                "SELECT token_id, condition_id FROM token_catalog"
+            ).fetchall()
+        }
+
+        # Pre-compute sell-only markets for all traders in one bulk query
+        # instead of 471 individual GROUP BY queries inside the write lock.
+        trader_markets = _resolve_trader_markets(trader_niche_trades, global_catalog)
+        sell_only_by_trader = _bulk_sell_only_check(db, trader_markets, GRAPH_RETRY_LIMIT)
+        if sell_only_by_trader:
+            total_so = sum(len(v) for v in sell_only_by_trader.values())
+            console.print(f"  [dim]Sell-only pre-check: {total_so} market(s) need Graph fallback[/dim]")
+
+        upsert_total = len(trader_niche_trades)
+        traders_updated: set[str] = set()
+        for i, (address, trades) in enumerate(trader_niche_trades.items(), 1):
+            if shutdown.shutdown_requested:
+                break
+            end = "\n" if i == upsert_total else "\r"
+            print(f"    [{i}/{upsert_total}] upserting trader {address[:10]}...   ", end=end, flush=True)
+            try:
+                with db.conn:
                     result = await backfill_trader(
                         db,
                         address,
@@ -434,21 +511,32 @@ async def _monitor_pass(
                         since_unix_ts=since_ts_map.get(address),
                         prefetched_trades=trades,
                         global_catalog=global_catalog,
+                        prefetched_sell_only_markets=sell_only_by_trader.get(address, []),
                     )
-                    ingested_total += result.get("ingested", 0)
-                except Exception as e:
-                    console.print(
-                        f"    [yellow]Failed {address[:10]}...: {e}[/yellow]"
+                    db.conn.execute(
+                        "UPDATE traders SET last_monitored_at = ? WHERE address = ?",
+                        (now_iso, address),
                     )
+                    traders_updated.add(address)
+                ingested_total += result.get("ingested", 0)
+            except Exception as e:
+                console.print(
+                    f"    [yellow]Failed {address[:10]}...: {e}[/yellow]"
+                )
 
-            stats["new_trades"] = ingested_total
-            console.print(f"    {ingested_total} trades ingested")
+        stats["new_trades"] = ingested_total
+        console.print(f"    {ingested_total} trades ingested")
+    else:
+        traders_updated = set()
 
-        # Phase 6: Update last_monitored_at for all polled traders
-        db.conn.executemany(
-            "UPDATE traders SET last_monitored_at = ? WHERE address = ?",
-            [(now_iso, addr) for addr, _, _ts in results],
-        )
+    # Phase 6: Update last_monitored_at for traders that had no new trades
+    remaining = [(now_iso, addr) for addr, _, _ts in results if addr not in traders_updated]
+    if remaining:
+        with db.conn:
+            db.conn.executemany(
+                "UPDATE traders SET last_monitored_at = ? WHERE address = ?",
+                remaining,
+            )
 
     _print_summary(stats, trader_niche_trades, db)
     await _cleanup(data_client, gamma_client)

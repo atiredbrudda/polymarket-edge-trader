@@ -229,6 +229,7 @@ async def backfill_trader(
     prefetched_trades: Optional[list] = None,
     prefetched_graph: Optional[list] = None,
     global_catalog: Optional[Dict[str, str]] = None,
+    prefetched_sell_only_markets: Optional[list] = None,
 ) -> Dict[str, int]:
     """Backfill trades for a single trader with 2-tier logic.
 
@@ -344,7 +345,12 @@ async def backfill_trader(
     # In incremental mode (since_unix_ts set), also check: new markets in this batch
     # may have only SELLs because BUYs predate the incremental window.
     if not needs_graph:
-        if api_markets:
+        if prefetched_sell_only_markets is not None:
+            # Monitor mode: sell-only already computed in bulk before the upsert loop.
+            # Skip the per-trader DB queries entirely.
+            if prefetched_sell_only_markets:
+                needs_graph = True
+        elif api_markets:
             # Scope to current-batch markets when we have API trades
             # Skip positions that have exhausted Graph retry attempts
             # SQLite limit: 999 variables per query — chunk large market lists
@@ -368,6 +374,8 @@ async def backfill_trader(
                         [trader_address] + chunk + [GRAPH_RETRY_LIMIT],
                     ).fetchall()
                 )
+            if sell_only_markets:
+                needs_graph = True
         else:
             # No API trades in this batch — check DB for any sell-only positions
             # on unresolved markets. Runs in both full and incremental mode:
@@ -387,9 +395,8 @@ async def backfill_trader(
                 """,
                 [trader_address, GRAPH_RETRY_LIMIT],
             ).fetchall()
-
-        if sell_only_markets:
-            needs_graph = True
+            if sell_only_markets:
+                needs_graph = True
 
     if needs_graph:
         stats["fallback"] = True

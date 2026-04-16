@@ -65,6 +65,23 @@ polymarket --niche esports serve
 polymarket --niche esports show-traders
 ```
 
+### Paper Trading Dashboard
+
+```bash
+# Terminal summary — account balance, open positions, P&L, bridge stats
+polymarket --niche esports paper-dashboard
+
+# Settle closed positions before showing the dashboard
+polymarket --niche esports paper-dashboard --resolve
+
+# Web dashboard at localhost:8080 (auto-refreshes every 30s)
+polymarket --niche esports paper-dashboard --serve
+# Open http://localhost:8080
+
+# Change port
+polymarket --niche esports paper-dashboard --serve --port 9090
+```
+
 ### Copy-Paste One-Liners
 
 ```bash

@@ -115,19 +115,9 @@ Deep review of the Polymarket analytics pipeline. All critical and most high/med
 - Root cause: `engine.resolve_all()` called `api.get_market(slug)` in a loop. First `MarketNotFoundError` (delisted slug) aborted the entire loop — not in the caught `(ApiError, ConnectionError, TimeoutError, OSError)` list.
 - Fix: replaced with a per-market loop catching `SimError` (base class of all pm_trader errors) so one bad slug doesn't abort the rest.
 
-### Still broken — paper positions not resolving (next session)
+### Paper positions not resolving — **FIXED 2026-04-15** (commit 9e913d5)
 
-After fixing the crash, `--resolve` says "No closed markets to resolve" for all 195 positions. Root cause: `engine.resolve_market()` depends on the **live Gamma API** to determine `market.closed` and `outcomePrices >= 0.99`. The Gamma API is unreliable for this — returns `closed=False` or `active=True` for many resolved markets, 404 for delisted slugs.
-
-**The fix:** bypass `engine.resolve_market()` entirely. Resolve paper positions from analytics.db directly:
-
-1. Read `paper_bridge.py` first — understand what `outcome` string is stored when a paper buy is placed (team name like "invictus gaming" vs YES/NO). This determines how to map to analytics.db `markets.outcome`.
-2. In `_do_resolve()`, cross-reference `paper.db positions.market_condition_id` → `analytics.db markets` where `resolved=1 AND outcome IS NOT NULL`.
-3. Determine payout: if position outcome maps to winning side → `shares * 1.0`, else `0.0`.
-4. Write directly to paper.db: `UPDATE positions SET is_resolved=1, realized_pnl=payout, resolved_at=...` + update account cash.
-5. Add this step to the launchd cron (after `paper-bridge`) so it runs every 4h automatically.
-
-**Key state:** Paper account has $49.19 cash (LOW CASH), 195 open positions, 0 resolved, 655 total trades. All 195 stuck because the crash has been silently failing since 2026-04-11.
+Bypassed `engine.resolve_market()` entirely. New `_do_resolve()` cross-references `paper.db positions` by `market_condition_id` against `analytics.db markets WHERE active=0 OR resolved=1` — same condition used by `resolve-positions`. Team-name → YES/NO mapping uses the `outcomes[]` array from `paper.db market_cache` (populated at trade time, no live API calls). VOIDs refund stake at break-even. `paper-resolve` step added to `cron_pipeline.sh` after `paper-bridge`.
 
 _Reviewed: 2026-04-09_
 _Updated: 2026-04-15_
