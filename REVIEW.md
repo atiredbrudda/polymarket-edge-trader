@@ -49,11 +49,18 @@ Deep review of the Polymarket analytics pipeline. All critical and most high/med
 
 ## Remaining Open (Low Impact)
 
-### H-04: `discover` uses synchronous HTTP for trade fetching
+### H-04: `discover` sequential HTTP — 45 min for 283 markets
 
-**File:** `src/polymarket_analytics/commands/discover.py`
-**Impact:** Performance bottleneck when discovering many markets. Not a correctness issue.
-**Note:** Low priority — discover runs infrequently and processes fewer markets than backfill.
+**File:** `src/polymarket_analytics/commands/discover.py:57-69`
+**Impact:** `_fetch_market_trades()` is synchronous httpx, called once per market in a sequential loop. Each call takes ~9s (network round-trip even for empty markets). 283 markets × 9s = 45 minutes. This is the cron bottleneck.
+
+**Root cause of high market count:** Each BO3 match spawns 23-37 Polymarket markets (winner, map winners, game handicaps, first blood, baron nashor, penta kill, total kills O/U, odd/even kills, etc.). Most are prop markets with zero trades — nobody bets on "Any Player Penta Kill?" — but discover fetches trades for all of them.
+
+**Measured 2026-04-16:** 295 markets in `--closing-within 4` window, 12 cached, 283 processed. Of those, 603 had zero trades. Discover spent 45 min fetching nothing for most of them.
+
+**Fix options (pick one or both):**
+1. **Concurrent fetching** — use `asyncio.Semaphore(10)` like monitor does. 283 markets / 10 concurrent = ~4.5 min instead of 45 min. Straightforward refactor of `_fetch_market_trades` → async.
+2. **Skip zero-volume markets** — Gamma API response includes `volumeNum`. Skip markets with `volumeNum == 0` before fetching trades. Eliminates ~60% of fetches (the dead prop markets nobody trades).
 
 ### M-02: Graph side determination wrong for token-for-token swaps
 
@@ -91,18 +98,17 @@ Deep review of the Polymarket analytics pipeline. All critical and most high/med
 1. **Check-back** — fills `final_outcome` in `take_profit_log` for previously exited positions whose market has since resolved in analytics.db. Shows counterfactual P&L: `(final_price - exit_price) × shares`. Positive = left gains on table; negative = loss avoided.
 2. **Scan** — exits any open position where `live_price >= avg_entry_price * threshold` (default 1.5×). Sells via `engine.sell()`, logs TAKE_PROFIT to both `bridge_decisions` and a new `take_profit_log` table. Supports `--dry-run` and `--threshold`.
 
-Wired into `cron_pipeline.sh` between `paper-bridge` and `paper-resolve`.
+Runs in monitor `--chain` (every poll cycle) alongside `paper-bridge`. Removed from cron (session 4).
 
 ---
 
-### P-01: Incremental `build-positions`
+### P-01: Incremental `build-positions` — **FIXED 2026-04-16**
 
-**Impact:** `build-positions` re-aggregates all ~900K positions on every `--chain` monitor pass (~9 min). A typical 30-min pass has hundreds of new trades — only those `(trader, market)` pairs need re-aggregating. Track `last_built_at`, find pairs with trades newer than that, re-aggregate only those. Could reduce from 900K upserts to a few hundred per pass.
+Fixed via dirty_pairs in-memory set (monitor path) and timestamp watermark CTE (cron path). Commit `ff98baf`. Monitor path skips the 7.2M-row dirty scan entirely. Watermark only written on cron path to prevent eclipse (commit `83657fc`).
 
-### P-02: Missing index on `positions.last_trade_timestamp`
+### P-02: Missing index on `positions.last_trade_timestamp` — **FIXED 2026-04-16**
 
-**File:** `src/polymarket_analytics/db/schema.py`
-**Impact:** `score` filters `WHERE p.last_trade_timestamp >= now - 30 days` against 1.4M rows with no index — full table scan every cron run. One-line schema fix.
+Added `idx_positions_last_trade_ts` and `idx_trades_ts_trader_market` covering index. Commit `ff98baf`.
 
 ### P-03: Monitor lock
 
