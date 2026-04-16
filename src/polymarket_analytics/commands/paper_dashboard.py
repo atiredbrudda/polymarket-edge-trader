@@ -60,9 +60,9 @@ def _print_account_summary(conn: sqlite3.Connection) -> float:
     # Cash spent = starting - cash (ground truth, avoids pm_trader total_cost discrepancy)
     deployed = starting - cash
 
-    # Realized P&L from resolved positions
+    # Realized P&L: market-resolved positions (is_resolved=1) OR TP-exited (shares=0)
     realized_row = conn.execute(
-        "SELECT COALESCE(SUM(realized_pnl), 0) FROM positions WHERE is_resolved = 1"
+        "SELECT COALESCE(SUM(realized_pnl), 0) FROM positions WHERE is_resolved = 1 OR shares = 0"
     ).fetchone()
     realized_pnl = realized_row[0]
 
@@ -105,11 +105,12 @@ def _print_positions(conn: sqlite3.Connection, limit: int = 20) -> None:
         "SELECT COUNT(*) FROM positions WHERE is_resolved = 0 AND shares > 0"
     ).fetchone()[0]
 
+    _closed = "(is_resolved = 1 OR shares = 0)"
     resolved_won = conn.execute(
-        "SELECT COUNT(*), COALESCE(SUM(realized_pnl), 0) FROM positions WHERE is_resolved = 1 AND realized_pnl > 0"
+        f"SELECT COUNT(*), COALESCE(SUM(realized_pnl), 0) FROM positions WHERE {_closed} AND realized_pnl > 0"
     ).fetchone()
     resolved_lost = conn.execute(
-        "SELECT COUNT(*), COALESCE(SUM(realized_pnl), 0) FROM positions WHERE is_resolved = 1 AND realized_pnl <= 0"
+        f"SELECT COUNT(*), COALESCE(SUM(realized_pnl), 0) FROM positions WHERE {_closed} AND realized_pnl <= 0"
     ).fetchone()
 
     table = Table(
@@ -133,12 +134,12 @@ def _print_positions(conn: sqlite3.Connection, limit: int = 20) -> None:
 
     console.print(table)
 
-    # Resolved positions table
+    # Closed positions table: market-resolved (is_resolved=1) OR TP-exited (shares=0)
     resolved_rows = conn.execute("""
         SELECT market_question, outcome, shares, total_cost, realized_pnl, resolved_at
         FROM positions
-        WHERE is_resolved = 1
-        ORDER BY resolved_at DESC
+        WHERE is_resolved = 1 OR shares = 0
+        ORDER BY COALESCE(resolved_at, '9999') DESC
         LIMIT ?
     """, (limit,)).fetchall()
 
@@ -148,7 +149,7 @@ def _print_positions(conn: sqlite3.Connection, limit: int = 20) -> None:
 
     if resolved_rows:
         rtable = Table(
-            title=f"Resolved Positions (last {len(resolved_rows)} of {total_resolved})",
+            title=f"Closed Positions (last {len(resolved_rows)} of {total_resolved})",
             show_lines=False,
         )
         rtable.add_column("Market", max_width=42, no_wrap=True)
@@ -156,7 +157,7 @@ def _print_positions(conn: sqlite3.Connection, limit: int = 20) -> None:
         rtable.add_column("Result", justify="center", no_wrap=True)
         rtable.add_column("Cost", justify="right", no_wrap=True)
         rtable.add_column("P&L", justify="right", no_wrap=True)
-        rtable.add_column("Resolved", no_wrap=True)
+        rtable.add_column("Closed", no_wrap=True)
 
         for r in resolved_rows:
             pnl = r["realized_pnl"] or 0.0
@@ -170,14 +171,17 @@ def _print_positions(conn: sqlite3.Connection, limit: int = 20) -> None:
                 result_str = "[dim]VOID[/dim]"
                 pnl_str = "[dim]$0.00[/dim]"
 
-            resolved_at = (r["resolved_at"] or "")[:10]
+            if r["resolved_at"]:
+                closed_str = r["resolved_at"][:10]
+            else:
+                closed_str = "[dim]TP exit[/dim]"
             rtable.add_row(
                 r["market_question"][:42],
                 (r["outcome"] or "").upper()[:12],
                 result_str,
                 f"${r['total_cost']:.2f}",
                 pnl_str,
-                resolved_at,
+                closed_str,
             )
 
         console.print(rtable)
@@ -456,7 +460,7 @@ body {
     margin: 0 auto;
 }
 h1 { color: #58a6ff; font-size: 18px; margin-bottom: 4px; }
-.meta { color: #8b949e; font-size: 11px; margin-bottom: 20px; }
+.meta { color: #8b949e; font-size: 11px; margin-bottom: 16px; }
 .card {
     background: #161b22;
     border: 1px solid #30363d;
@@ -521,9 +525,67 @@ button {
 .flash { background: #162a1e; border: 1px solid #3fb950; border-radius: 4px;
          padding: 8px 12px; color: #3fb950; margin-bottom: 14px;
          transition: opacity 0.5s ease; }
+
+/* Tabs */
+.tabs {
+    display: flex;
+    gap: 0;
+    border-bottom: 1px solid #30363d;
+    margin-bottom: 20px;
+}
+.tab-btn {
+    background: none;
+    border: none;
+    border-bottom: 2px solid transparent;
+    color: #8b949e;
+    cursor: pointer;
+    font-family: inherit;
+    font-size: 12px;
+    font-weight: 500;
+    padding: 8px 16px;
+    letter-spacing: 0.03em;
+    margin-bottom: -1px;
+}
+.tab-btn:hover { color: #e6edf3; }
+.tab-btn.active { color: #58a6ff; border-bottom-color: #58a6ff; }
+.tab-badge {
+    display: inline-block;
+    background: #21262d;
+    border-radius: 10px;
+    font-size: 10px;
+    padding: 1px 6px;
+    margin-left: 5px;
+    color: #8b949e;
+}
+.tab-btn.active .tab-badge { background: #1f3a5f; color: #58a6ff; }
+.tab-panel { display: none; }
+.tab-panel.active { display: block; }
+.btn-show-more {
+    background: none;
+    border: 1px solid #30363d;
+    border-radius: 4px;
+    color: #8b949e;
+    cursor: pointer;
+    font-family: inherit;
+    font-size: 11px;
+    padding: 4px 12px;
+}
+.btn-show-more:hover { color: #e6edf3; border-color: #8b949e; }
 """
 
 _JS = """
+// Tab switching — persists across auto-refresh via localStorage
+function showTab(name) {
+    document.querySelectorAll('.tab-btn').forEach(b =>
+        b.classList.toggle('active', b.dataset.tab === name));
+    document.querySelectorAll('.tab-panel').forEach(p =>
+        p.classList.toggle('active', p.dataset.panel === name));
+    localStorage.setItem('paperTab', name);
+}
+const savedTab = localStorage.getItem('paperTab') || 'overview';
+showTab(savedTab);
+
+// Auto-refresh countdown
 let secs = 30;
 const el = document.getElementById('cd');
 setInterval(() => {
@@ -544,8 +606,24 @@ if (flash) {
 """
 
 
-def _html_page(body: str, now: str = "", msg: str = "") -> str:
+def _html_page(tabs: list, now: str = "", msg: str = "") -> str:
+    """Render the full page with tab navigation.
+
+    tabs: list of (tab_id, label, badge_count_or_None, html_content)
+    """
     flash = f'<div id="flash" class="flash">{_html_module.escape(msg)}</div>' if msg else ""
+
+    nav_html = '<div class="tabs">'
+    panels_html = ""
+    for tab_id, label, badge, content in tabs:
+        badge_html = f'<span class="tab-badge">{badge}</span>' if badge is not None else ""
+        nav_html += (
+            f'<button class="tab-btn" data-tab="{tab_id}"'
+            f' onclick="showTab(\'{tab_id}\')">{_html_module.escape(label)}{badge_html}</button>'
+        )
+        panels_html += f'<div class="tab-panel" data-panel="{tab_id}">{content}</div>'
+    nav_html += "</div>"
+
     return f"""<!DOCTYPE html>
 <html lang="en">
 <head>
@@ -556,7 +634,7 @@ def _html_page(body: str, now: str = "", msg: str = "") -> str:
 <body>
 <h1>Paper Trading Dashboard</h1>
 <p class="meta">Updated {now} &nbsp;&middot;&nbsp; Refreshing in <span id="cd">30s</span></p>
-{flash}{body}
+{flash}{nav_html}{panels_html}
 <script>{_JS}</script>
 </body>
 </html>"""
@@ -572,8 +650,9 @@ def _html_account_summary(conn: sqlite3.Connection) -> str:
     created = row["created_at"]
     deployed = starting - cash
 
+    # Realized P&L: market-resolved positions (is_resolved=1) OR TP-exited (shares=0)
     realized_pnl = conn.execute(
-        "SELECT COALESCE(SUM(realized_pnl), 0) FROM positions WHERE is_resolved = 1"
+        "SELECT COALESCE(SUM(realized_pnl), 0) FROM positions WHERE is_resolved = 1 OR shares = 0"
     ).fetchone()[0]
 
     open_count = conn.execute(
@@ -632,7 +711,7 @@ def _html_account_summary(conn: sqlite3.Connection) -> str:
 </div>"""
 
 
-def _html_positions(conn: sqlite3.Connection, limit: int = 20) -> str:
+def _html_open_positions(conn: sqlite3.Connection, limit: int = 20) -> str:
     rows = conn.execute("""
         SELECT market_question, outcome, shares, avg_entry_price, total_cost
         FROM positions
@@ -645,12 +724,8 @@ def _html_positions(conn: sqlite3.Connection, limit: int = 20) -> str:
         "SELECT COUNT(*) FROM positions WHERE is_resolved = 0 AND shares > 0"
     ).fetchone()[0]
 
-    won_count, won_pnl = conn.execute(
-        "SELECT COUNT(*), COALESCE(SUM(realized_pnl), 0) FROM positions WHERE is_resolved = 1 AND realized_pnl > 0"
-    ).fetchone()
-    lost_count, lost_pnl = conn.execute(
-        "SELECT COUNT(*), COALESCE(SUM(realized_pnl), 0) FROM positions WHERE is_resolved = 1 AND realized_pnl <= 0"
-    ).fetchone()
+    if not rows:
+        return '<div class="card dim">No open positions.</div>'
 
     rows_html = "".join(f"""
     <tr>
@@ -660,67 +735,6 @@ def _html_positions(conn: sqlite3.Connection, limit: int = 20) -> str:
       <td class="r">{r['avg_entry_price']:.3f}</td>
       <td class="r">${r['total_cost']:.2f}</td>
     </tr>""" for r in rows)
-
-    total_resolved = won_count + lost_count
-
-    # Resolved positions table
-    resolved_rows = conn.execute("""
-        SELECT market_question, outcome, total_cost, realized_pnl, resolved_at
-        FROM positions
-        WHERE is_resolved = 1
-        ORDER BY resolved_at DESC
-        LIMIT ?
-    """, (limit,)).fetchall()
-
-    resolved_rows_html = ""
-    for r in resolved_rows:
-        pnl = r["realized_pnl"] or 0.0
-        if pnl > 0:
-            result = '<span class="green">WIN</span>'
-            pnl_str = f'<span class="green">+${pnl:.2f}</span>'
-        elif pnl < 0:
-            result = '<span class="red">LOSS</span>'
-            pnl_str = f'<span class="red">-${abs(pnl):.2f}</span>'
-        else:
-            result = '<span class="dim">VOID</span>'
-            pnl_str = '<span class="dim">$0.00</span>'
-        resolved_at = (r["resolved_at"] or "")[:10]
-        resolved_rows_html += f"""
-    <tr>
-      <td>{_html_module.escape((r['market_question'] or '')[:55])}</td>
-      <td>{_html_module.escape((r['outcome'] or '').upper()[:12])}</td>
-      <td class="r">{result}</td>
-      <td class="r">${r['total_cost']:.2f}</td>
-      <td class="r">{pnl_str}</td>
-      <td class="dim">{resolved_at}</td>
-    </tr>"""
-
-    win_rate_str = ""
-    if total_resolved > 0:
-        win_rate = won_count / total_resolved * 100
-        win_rate_str = (
-            f'<div class="resolved-bar">'
-            f'Resolved: {total_resolved} &nbsp;&middot;&nbsp; '
-            f'<span class="green">{won_count} won (+${won_pnl:.2f})</span> &nbsp;&middot;&nbsp; '
-            f'<span class="red">{lost_count} lost (${lost_pnl:.2f})</span> &nbsp;&middot;&nbsp; '
-            f'Win rate: {win_rate:.0f}%'
-            f'</div>'
-        )
-
-    resolved_card = ""
-    if resolved_rows_html:
-        resolved_card = f"""
-<div class="card">
-  <div class="card-title">Resolved Positions (last {len(resolved_rows)} of {total_resolved})</div>
-  <table>
-    <thead><tr>
-      <th>Market</th><th>Outcome</th>
-      <th class="r">Result</th><th class="r">Cost</th><th class="r">P&amp;L</th><th>Resolved</th>
-    </tr></thead>
-    <tbody>{resolved_rows_html}</tbody>
-  </table>
-  {win_rate_str}
-</div>"""
 
     shown = min(limit, total_open)
     return f"""
@@ -733,8 +747,256 @@ def _html_positions(conn: sqlite3.Connection, limit: int = 20) -> str:
     </tr></thead>
     <tbody>{rows_html}</tbody>
   </table>
-</div>
-{resolved_card}"""
+</div>"""
+
+
+def _html_resolved_positions(conn: sqlite3.Connection, limit: int = 20) -> str:
+    _closed = "(is_resolved = 1 OR shares = 0)"
+    won_count, won_pnl = conn.execute(
+        f"SELECT COUNT(*), COALESCE(SUM(realized_pnl), 0) FROM positions WHERE {_closed} AND realized_pnl > 0"
+    ).fetchone()
+    lost_count, lost_pnl = conn.execute(
+        f"SELECT COUNT(*), COALESCE(SUM(realized_pnl), 0) FROM positions WHERE {_closed} AND realized_pnl <= 0"
+    ).fetchone()
+    total_closed = won_count + lost_count
+
+    rows = conn.execute(f"""
+        SELECT market_question, outcome, total_cost, realized_pnl,
+               resolved_at, is_resolved
+        FROM positions
+        WHERE {_closed}
+        ORDER BY COALESCE(resolved_at, '9999') DESC
+    """).fetchall()
+
+    if not rows:
+        return '<div class="card dim">No closed positions yet.</div>'
+
+    SHOW_FIRST = 10
+    rows_html = ""
+    for i, r in enumerate(rows):
+        pnl = r["realized_pnl"] or 0.0
+        extra_cls = ' class="res-extra" style="display:none"' if i >= SHOW_FIRST else ""
+
+        if r["is_resolved"]:
+            if pnl > 0:
+                result = '<span class="green">WIN</span>'
+                pnl_str = f'<span class="green">+${pnl:.2f}</span>'
+            elif pnl < 0:
+                result = '<span class="red">LOSS</span>'
+                pnl_str = f'<span class="red">-${abs(pnl):.2f}</span>'
+            else:
+                result = '<span class="dim">VOID</span>'
+                pnl_str = '<span class="dim">$0.00</span>'
+            type_str = '<span class="dim">Market</span>'
+            date_str = (r["resolved_at"] or "")[:10]
+        else:
+            # TP exit — shares zeroed by engine.sell(), no resolved_at in paper.db
+            result = f'<span class="blue">TP exit</span>'
+            pnl_str = f'<span class="green">+${pnl:.2f}</span>'
+            type_str = '<span class="blue">TP exit</span>'
+            date_str = '<span class="dim">—</span>'
+
+        rows_html += f"""
+    <tr{extra_cls}>
+      <td>{_html_module.escape((r['market_question'] or '')[:60])}</td>
+      <td>{_html_module.escape((r['outcome'] or '').upper()[:12])}</td>
+      <td class="r">{type_str}</td>
+      <td class="r">{result}</td>
+      <td class="r">${r['total_cost']:.2f}</td>
+      <td class="r">{pnl_str}</td>
+      <td class="dim">{date_str}</td>
+    </tr>"""
+
+    show_more = ""
+    if len(rows) > SHOW_FIRST:
+        hidden = len(rows) - SHOW_FIRST
+        show_more = f"""
+  <div style="margin-top:10px">
+    <button class="btn-show-more" onclick="
+      var els = document.querySelectorAll('.res-extra');
+      var hidden = els[0] && els[0].style.display === 'none';
+      els.forEach(function(el) {{ el.style.display = hidden ? '' : 'none'; }});
+      this.textContent = hidden ? 'Show less' : 'Show {hidden} more';
+    ">Show {hidden} more</button>
+  </div>"""
+
+    win_rate_str = ""
+    if total_closed > 0:
+        win_rate = won_count / total_closed * 100
+        win_rate_str = (
+            f'<div class="resolved-bar">'
+            f'Closed: {total_closed} &nbsp;&middot;&nbsp; '
+            f'<span class="green">{won_count} profitable (+${won_pnl:.2f})</span> &nbsp;&middot;&nbsp; '
+            f'<span class="red">{lost_count} loss (${lost_pnl:.2f})</span> &nbsp;&middot;&nbsp; '
+            f'Win rate: {win_rate:.0f}%'
+            f'</div>'
+        )
+
+    return f"""
+<div class="card">
+  <div class="card-title">Closed Positions ({total_closed})</div>
+  <table>
+    <thead><tr>
+      <th>Market</th><th>Outcome</th>
+      <th class="r">Type</th><th class="r">Result</th>
+      <th class="r">Cost</th><th class="r">P&amp;L</th><th>Date</th>
+    </tr></thead>
+    <tbody>{rows_html}</tbody>
+  </table>
+  {win_rate_str}{show_more}
+</div>"""
+
+
+def _html_take_profit_log(analytics_db_path: str) -> str:
+    try:
+        aconn = sqlite3.connect(analytics_db_path)
+        aconn.row_factory = sqlite3.Row
+        rows = aconn.execute("""
+            SELECT tpl.outcome, tpl.entry_price, tpl.exit_price, tpl.shares,
+                   tpl.exit_value_usd, tpl.threshold, tpl.exited_at,
+                   tpl.final_outcome, tpl.final_price, tpl.counterfactual_pnl,
+                   COALESCE(m.question, tpl.market_condition_id) AS question
+            FROM take_profit_log tpl
+            LEFT JOIN markets m ON m.condition_id = tpl.market_condition_id
+            ORDER BY tpl.id DESC
+        """).fetchall()
+        aconn.close()
+    except Exception as e:
+        return f'<div class="card dim">Take-profit log unavailable: {_html_module.escape(str(e))}</div>'
+
+    if not rows:
+        return '<div class="card dim">No take-profit exits yet. Run paper-take-profit to scan open positions.</div>'
+
+    rows_html = ""
+    for r in rows:
+        ratio = r["exit_price"] / r["entry_price"] if r["entry_price"] else 0
+        exited = (r["exited_at"] or "")[:10]
+        fo = r["final_outcome"]
+        cpnl = r["counterfactual_pnl"]
+
+        if fo is None:
+            final_str = '<span class="dim">pending</span>'
+            cpnl_str = '<span class="dim">—</span>'
+            verdict_str = '<span class="dim">—</span>'
+        elif fo == "WON":
+            final_str = '<span class="yellow">WON</span>'
+            if cpnl is not None and cpnl > 0:
+                cpnl_str = f'<span class="yellow">+${cpnl:.2f}</span>'
+                verdict_str = '<span class="yellow">Left $ on table</span>'
+            else:
+                v = cpnl or 0
+                cpnl_str = f'<span class="green">${v:.2f}</span>'
+                verdict_str = '<span class="green">Perfect</span>'
+        elif fo == "LOST":
+            final_str = '<span class="red">LOST</span>'
+            v = cpnl or 0
+            cpnl_str = f'<span class="green">${v:.2f}</span>'
+            verdict_str = '<span class="green">TP saved trade</span>'
+        else:
+            final_str = '<span class="dim">VOID</span>'
+            cpnl_str = '<span class="dim">$0.00</span>'
+            verdict_str = '<span class="dim">—</span>'
+
+        rows_html += f"""
+    <tr>
+      <td>{_html_module.escape(r['question'][:55])}</td>
+      <td>{_html_module.escape((r['outcome'] or '').upper()[:12])}</td>
+      <td class="r">{r['entry_price']:.3f}</td>
+      <td class="r">{r['exit_price']:.3f}</td>
+      <td class="r">{ratio:.2f}x</td>
+      <td class="r">{r['shares']:,.0f}</td>
+      <td class="r">${r['exit_value_usd']:.2f}</td>
+      <td class="dim">{exited}</td>
+      <td class="r">{final_str}</td>
+      <td class="r">{cpnl_str}</td>
+      <td>{verdict_str}</td>
+    </tr>"""
+
+    return f"""
+<div class="card">
+  <div class="card-title">Take-Profit Exits ({len(rows)})</div>
+  <table>
+    <thead><tr>
+      <th>Market</th><th>Outcome</th>
+      <th class="r">Entry</th><th class="r">Exit</th><th class="r">Ratio</th>
+      <th class="r">Shares</th><th class="r">Value</th><th>Exited</th>
+      <th class="r">Result</th><th class="r">Counterfactual</th><th>Verdict</th>
+    </tr></thead>
+    <tbody>{rows_html}</tbody>
+  </table>
+  <div class="dim" style="font-size:11px;margin-top:8px">
+    Counterfactual P&amp;L = gains left on table (positive) or losses avoided (negative) vs holding to resolution.
+  </div>
+</div>"""
+
+
+def _html_signal_log(analytics_db_path: str, limit: int = 50) -> str:
+    DECISION_COLORS = {
+        "BUY": "green", "TAKE_PROFIT": "green",
+        "SKIP_PRICE": "yellow", "SKIP_SIZE": "yellow",
+        "SKIP_API": "red", "SKIP_ERROR": "red",
+        "DRY_RUN": "blue",
+    }
+    try:
+        aconn = sqlite3.connect(analytics_db_path)
+        aconn.row_factory = sqlite3.Row
+        rows = aconn.execute("""
+            SELECT bd.decision, bd.direction, bd.tier, bd.q5_count,
+                   bd.q5_avg_entry, bd.live_price, bd.spread_vs_q5,
+                   bd.size_usd, bd.reason, bd.checked_at,
+                   COALESCE(m.question, bd.market_id) AS question
+            FROM bridge_decisions bd
+            LEFT JOIN markets m ON m.condition_id = bd.market_id
+            ORDER BY bd.id DESC
+            LIMIT ?
+        """, (limit,)).fetchall()
+        aconn.close()
+    except Exception as e:
+        return f'<div class="card dim">Signal log unavailable: {_html_module.escape(str(e))}</div>'
+
+    if not rows:
+        return '<div class="card dim">No signal evaluations yet. Run paper-bridge to evaluate signals.</div>'
+
+    rows_html = ""
+    for r in rows:
+        color = DECISION_COLORS.get(r["decision"], "")
+        dec_cell = f'<span class="{color}">{_html_module.escape(r["decision"])}</span>' if color else _html_module.escape(r["decision"])
+        tier = r["tier"] or "—"
+        tier_cls = "yellow" if tier in ("ACT", "CONSIDER") else "dim"
+        q5 = str(r["q5_count"]) if r["q5_count"] is not None else "—"
+        entry = f'{r["q5_avg_entry"]:.3f}' if r["q5_avg_entry"] is not None else "—"
+        live = f'{r["live_price"]:.3f}' if r["live_price"] is not None else "—"
+        spread = f'{r["spread_vs_q5"]:.3f}' if r["spread_vs_q5"] is not None else "—"
+        size = f'${r["size_usd"]:.2f}' if r["size_usd"] else "—"
+        reason = (r["reason"] or "").strip()[:45]
+        checked = (r["checked_at"] or "")[:16].replace("T", " ")
+        rows_html += f"""
+    <tr>
+      <td style="max-width:320px;word-break:break-word">{_html_module.escape(r['question'])}</td>
+      <td>{_html_module.escape(r['direction'] or '')}</td>
+      <td class="{tier_cls}">{_html_module.escape(tier)}</td>
+      <td class="r">{q5}</td>
+      <td class="r">{entry}</td>
+      <td class="r">{live}</td>
+      <td class="r">{spread}</td>
+      <td class="r">{size}</td>
+      <td>{dec_cell}</td>
+      <td class="dim" style="font-size:10px;max-width:160px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">{_html_module.escape(reason)}</td>
+      <td class="dim" style="font-size:10px;white-space:nowrap">{checked}</td>
+    </tr>"""
+
+    return f"""
+<div class="card">
+  <div class="card-title">Signal Evaluations (last {limit})</div>
+  <table>
+    <thead><tr>
+      <th>Market</th><th>Dir</th><th>Tier</th>
+      <th class="r">Q5</th><th class="r">Q5 Entry</th><th class="r">Live</th><th class="r">Spread</th>
+      <th class="r">Size</th><th>Decision</th><th>Reason</th><th>Time</th>
+    </tr></thead>
+    <tbody>{rows_html}</tbody>
+  </table>
+</div>"""
 
 
 def _html_decision_stats(analytics_db_path: str, days: int = 7) -> str:
@@ -826,22 +1088,41 @@ def _generate_html(
     paper_db_path = Path(paper_data_dir) / "paper.db"
     if not paper_db_path.exists():
         err = '<div class="card"><p class="red">No paper.db found. Run paper-bridge first.</p></div>'
-        return _html_page(err)
+        return _html_page([("overview", "Overview", None, err)])
 
     now = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
     conn = sqlite3.connect(str(paper_db_path))
     conn.row_factory = sqlite3.Row
     try:
-        body = (
-            _html_account_summary(conn)
-            + _html_positions(conn, limit)
-            + _html_decision_stats(analytics_db_path, days)
-            + _html_recent_trades(conn, trade_limit)
-        )
+        open_count = conn.execute(
+            "SELECT COUNT(*) FROM positions WHERE is_resolved = 0 AND shares > 0"
+        ).fetchone()[0]
+        resolved_count = conn.execute(
+            "SELECT COUNT(*) FROM positions WHERE is_resolved = 1"
+        ).fetchone()[0]
+        trade_count = conn.execute("SELECT COUNT(*) FROM trades").fetchone()[0]
+
+        tp_count = None
+        try:
+            aconn = sqlite3.connect(analytics_db_path)
+            tp_count = aconn.execute("SELECT COUNT(*) FROM take_profit_log").fetchone()[0]
+            aconn.close()
+        except Exception:
+            pass
+
+        tabs = [
+            ("overview",  "Overview",        None,           _html_account_summary(conn)),
+            ("positions", "Open Positions",  open_count,     _html_open_positions(conn, limit)),
+            ("resolved",  "Resolved",        resolved_count, _html_resolved_positions(conn, limit)),
+            ("takeprofit","Take Profit",     tp_count,       _html_take_profit_log(analytics_db_path)),
+            ("signals",   "Signal Log",      None,           _html_signal_log(analytics_db_path)),
+            ("bridge",    "Bridge",          None,           _html_decision_stats(analytics_db_path, days)),
+            ("trades",    "Trades",          trade_count,    _html_recent_trades(conn, trade_limit)),
+        ]
     finally:
         conn.close()
 
-    return _html_page(body, now=now, msg=msg)
+    return _html_page(tabs, now=now, msg=msg)
 
 
 # ─── HTTP server ─────────────────────────────────────────────────────────────

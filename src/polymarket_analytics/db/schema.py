@@ -230,6 +230,15 @@ def create_indexes(db):
         if_not_exists=True,
         index_name="idx_trades_dedup",
     )
+    # Covering index for build-positions dirty-CTE: range scan on timestamp,
+    # returns trader_address + market_id without heap lookup. Replaces the
+    # planner's fallback to idx_trades_dedup (full 7M-row scan) on the
+    # incremental "WHERE timestamp > watermark" query.
+    db["trades"].create_index(
+        ["timestamp", "trader_address", "market_id"],
+        if_not_exists=True,
+        index_name="idx_trades_ts_trader_market",
+    )
 
     # market_entities - UNIQUE constraint on condition_id via unique index
     db["market_entities"].create_index(

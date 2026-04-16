@@ -463,6 +463,16 @@ async def _monitor_pass(
     stats["niche_filtered"] = sum(len(t) for t in trader_niche_trades.values())
     stats["traders_with_trades"] = len(trader_niche_trades)
 
+    # Build dirty pairs now (before ingestion) so _monitor_async can pass them
+    # to build_positions_from_trades without re-scanning the DB.
+    _dp: set = set()
+    for _a, _ts in trader_niche_trades.items():
+        for _t in _ts:
+            _c = _t.get("conditionId") or _t.get("condition_id")
+            if _c:
+                _dp.add((_a, _c))
+    stats["dirty_pairs"] = _dp  # type: ignore[assignment]
+
     if dry_run:
         console.print(f"  [blue]DRY RUN — skipping trade upsert[/blue]")
         _print_summary(stats, trader_niche_trades, db)
@@ -675,7 +685,7 @@ async def _monitor_async(
                     # Chain: run build-positions + detect using the
                     # monitor's existing db connection to avoid
                     # "database is locked" from a second connection.
-                    if chain and not dry_run and stats["new_trades"] > 0:
+                    if chain and not dry_run:
                         console.print("\n[bold]Chaining: build-positions → detect[/bold]")
                         from polymarket_analytics.positions.aggregation import (
                             build_positions_from_trades,
@@ -687,7 +697,12 @@ async def _monitor_async(
                             upsert_signals_batch,
                         )
 
-                        pos_count = build_positions_from_trades(db, niche)
+                        # dirty_pairs were computed inside _monitor_pass and
+                        # returned via stats. Pass them as-is if non-empty (fast
+                        # path — no DB scan). Fall back to None (watermark CTE)
+                        # if the set is empty, which preserves old behaviour.
+                        chain_dirty = stats.get("dirty_pairs") or None
+                        pos_count = build_positions_from_trades(db, niche, dirty_pairs=chain_dirty)
                         console.print(
                             f"  Positions built: {pos_count:,}"
                         )

@@ -6,7 +6,7 @@ with direction, size, volume-weighted entry price, and timestamps.
 
 import hashlib
 from datetime import datetime, timezone
-from typing import Any
+from typing import Any, Optional
 
 import click
 
@@ -25,16 +25,30 @@ def _generate_position_id(trader_address: str, market_id: str) -> str:
     return hashlib.sha256(combined.encode()).hexdigest()[:16]
 
 
-def build_positions_from_trades(db: Any, niche_slug: str, window_days: int = 35) -> int:
+def build_positions_from_trades(
+    db: Any,
+    niche_slug: str,
+    window_days: int = 35,
+    dirty_pairs: Optional[set] = None,
+) -> int:
     """Build positions from trades using SQL GROUP BY aggregation.
 
-    Runs incrementally: tracks last_built_at in _migrations and only re-aggregates
-    (trader, market) pairs that have trades newer than that timestamp. On first run
-    or after a full reset, falls back to a full scan.
+    Three execution paths depending on `dirty_pairs`:
+
+    1. dirty_pairs provided and non-empty (monitor --chain path): load the known
+       (trader_address, market_id) pairs into a temp table and re-aggregate only
+       those — no DB scan for dirty detection at all (~34s → <1s).
+    2. dirty_pairs is an empty set: nothing changed, return 0 immediately.
+    3. dirty_pairs is None (cron/CLI path): read last_built_at watermark from
+       _migrations and use the timestamp-range dirty CTE (or full scan on first run).
 
     Args:
         db: sqlite-utils Database instance
         niche_slug: Niche slug to scope aggregation (e.g., "esports")
+        window_days: Rolling window for position aggregation
+        dirty_pairs: Optional set of (trader_address, market_id) tuples that need
+            rebuilding. Pass from the monitor's in-memory trade data to skip the
+            dirty-detection DB scan. Pass None to use the watermark fallback.
 
     Returns:
         Count of positions created/updated
@@ -77,21 +91,8 @@ def build_positions_from_trades(db: Any, niche_slug: str, window_days: int = 35)
             "from positions (non-esports or unresolvable markets)."
         )
 
-    # Incremental mode: find (trader, market) pairs with trades newer than last run.
-    # Falls back to full scan if _migrations key is absent (first run or manual reset).
-    last_built_at = None
-    if "_migrations" in db.table_names():
-        row = db.execute(
-            "SELECT value FROM _migrations WHERE key = 'positions_last_built_at' LIMIT 1"
-        ).fetchone()
-        if row:
-            last_built_at = row[0]
-
     # Build the aggregation query.
-    # If incremental: a CTE finds dirty (trader, market) pairs (those with at least one
-    # trade newer than last_built_at) and the main query re-aggregates ALL their trades
-    # within the window (not just new ones — avg_entry_price needs all BUY records).
-    # If full: same query without the dirty-pair filter.
+    # Three paths — see docstring for rationale.
     #
     # HAVING MIN(timestamp) ensures we only process positions that started within the
     # window — avoids partial positions where the BUY predates the window but a later
@@ -113,8 +114,47 @@ def build_positions_from_trades(db: Any, niche_slug: str, window_days: int = 35)
     _having = f"""SUM(CASE WHEN side = 'BUY' THEN 1 ELSE 0 END) > 0
            AND MIN(timestamp) >= datetime('now', '-{window_days} days')"""
 
-    if last_built_at:
+    if dirty_pairs is not None:
+        # Monitor path: caller provides the exact dirty pairs in memory.
+        # Skip the 7.2M-row dirty CTE scan entirely.
+        if not dirty_pairs:
+            return 0
+
+        db.execute("""
+            CREATE TEMP TABLE IF NOT EXISTS _bp_dirty (
+                trader_address TEXT, market_id TEXT
+            )
+        """)
+        db.execute("DELETE FROM _bp_dirty")
+        db.conn.executemany("INSERT INTO _bp_dirty VALUES (?, ?)", list(dirty_pairs))
+
         trades_query = f"""
+        SELECT {_select_cols}
+        FROM trades t
+        JOIN market_entities me ON me.condition_id = t.market_id
+        JOIN _bp_dirty d ON d.trader_address = t.trader_address AND d.market_id = t.market_id
+        WHERE {_where}
+        GROUP BY t.trader_address, t.market_id
+        HAVING {_having}
+    """
+    else:
+        # Cron/CLI path: read watermark from _migrations.
+        # Falls back to full scan if _migrations key is absent (first run or manual reset).
+        last_built_at = None
+        if "_migrations" in db.table_names():
+            row = db.execute(
+                "SELECT value FROM _migrations WHERE key = 'positions_last_built_at' LIMIT 1"
+            ).fetchone()
+            if row:
+                last_built_at = row[0]
+
+        if last_built_at:
+            # Incremental: CTE finds dirty (trader, market) pairs (those with at least one
+            # trade newer than last_built_at), then re-aggregates ALL their trades within
+            # the window (not just new ones — avg_entry_price needs all BUY records).
+            # idx_trades_ts_trader_market (timestamp, trader_address, market_id) makes this
+            # a range-scan covering index rather than a full table scan.
+            trades_query = f"""
         WITH dirty AS (
             SELECT DISTINCT trader_address, market_id
             FROM trades
@@ -128,8 +168,8 @@ def build_positions_from_trades(db: Any, niche_slug: str, window_days: int = 35)
         GROUP BY t.trader_address, t.market_id
         HAVING {_having}
     """
-    else:
-        trades_query = f"""
+        else:
+            trades_query = f"""
         SELECT {_select_cols}
         FROM trades t
         JOIN market_entities me ON me.condition_id = t.market_id

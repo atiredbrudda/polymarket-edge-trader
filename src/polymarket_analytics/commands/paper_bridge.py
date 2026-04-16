@@ -53,6 +53,8 @@ def _get_actionable_signals(db: sqlite_utils.Database) -> list[dict]:
         FROM signals s
         JOIN markets m ON m.condition_id = s.market_id
         WHERE s.tier IN ('ACT', 'CONSIDER')
+          AND m.resolved = 0
+          AND m.active = 1
           AND (m.end_date IS NULL OR datetime(m.end_date) > datetime('now'))
     """
     cols = [
