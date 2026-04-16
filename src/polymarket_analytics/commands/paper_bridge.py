@@ -43,7 +43,7 @@ def _write_price_cache(paper_dir: Path, cache: dict) -> None:
 
 
 def _get_actionable_signals(db: sqlite_utils.Database) -> list[dict]:
-    """Fetch signals with tier ACT or CONSIDER, joined with market slug."""
+    """Fetch ACT-tier signals (net_q5 >= 5), joined with market slug."""
     query = """
         SELECT
             s.id, s.market_id, s.direction, s.tier,
@@ -53,7 +53,7 @@ def _get_actionable_signals(db: sqlite_utils.Database) -> list[dict]:
             m.question
         FROM signals s
         JOIN markets m ON m.condition_id = s.market_id
-        WHERE s.tier IN ('ACT', 'CONSIDER')
+        WHERE s.tier = 'ACT'
           AND m.resolved = 0
           AND m.active = 1
           AND (m.end_date IS NULL OR datetime(m.end_date) > datetime('now'))
