@@ -686,7 +686,7 @@ async def _monitor_async(
                     # monitor's existing db connection to avoid
                     # "database is locked" from a second connection.
                     if chain and not dry_run:
-                        console.print("\n[bold]Chaining: build-positions → detect[/bold]")
+                        console.print("\n[bold]Chaining: build-positions → detect → paper-bridge → paper-take-profit[/bold]")
                         from polymarket_analytics.positions.aggregation import (
                             build_positions_from_trades,
                         )
@@ -719,6 +719,25 @@ async def _monitor_async(
                             console.print(
                                 "  No consensus signals found."
                             )
+
+                        # Paper trading: evaluate signals and manage exits.
+                        # Uses its own DB connections (analytics via WAL,
+                        # paper.db is a separate file) so no lock contention.
+                        try:
+                            from polymarket_analytics.commands.paper_bridge import (
+                                _run_bridge,
+                            )
+                            _run_bridge(db_path, dry_run=False, paper_data_dir="data/paper_trader")
+                        except Exception as e:
+                            console.print(f"  [yellow]paper-bridge: {e}[/yellow]")
+
+                        try:
+                            from polymarket_analytics.commands.paper_take_profit import (
+                                _run_take_profit,
+                            )
+                            _run_take_profit(db_path, paper_data_dir="data/paper_trader", dry_run=False, threshold=1.5)
+                        except Exception as e:
+                            console.print(f"  [yellow]paper-take-profit: {e}[/yellow]")
 
             if not poll_minutes:
                 break

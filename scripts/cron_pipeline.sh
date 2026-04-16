@@ -65,18 +65,21 @@ if [ -n "$BACKFILL_MODE" ]; then
 fi
 
 # --- Pipeline stages ---
-# Errors in any stage abort the pipeline (set -e).
-# Track failed stages for the daily summary.
+# Individual stage failures are logged but do NOT abort the pipeline.
+# Downstream stages often still produce useful results (e.g. score can
+# run even if resolve-positions found nothing new to resolve).
 FAILED_STAGES=""
 
 run_stage() {
     local stage_name="$1"
     shift
     echo "$LOG_PREFIX Running: $stage_name"
-    if ! "$@"; then
-        echo "$LOG_PREFIX FAILED: $stage_name"
+    if "$@"; then
+        return 0
+    else
+        echo "$LOG_PREFIX FAILED: $stage_name (exit $?)"
         FAILED_STAGES="$FAILED_STAGES $stage_name"
-        return 1
+        return 0  # don't trigger set -e — let the pipeline continue
     fi
 }
 
@@ -90,8 +93,9 @@ run_stage "build-positions" polymarket --niche esports build-positions
 run_stage "resolve-positions" polymarket --niche esports resolve-positions
 run_stage "score" polymarket --niche esports score
 run_stage "detect" polymarket --niche esports detect
-run_stage "paper-bridge" polymarket --niche esports paper-bridge
-run_stage "paper-take-profit" polymarket --niche esports paper-take-profit
+# paper-bridge and paper-take-profit are handled by monitor --chain on every
+# poll cycle for faster signal-to-trade latency. Cron only resolves closed
+# markets (depends on ingest-events --full + resolve-outcomes above).
 run_stage "paper-resolve" polymarket --niche esports paper-dashboard --resolve
 
 # --- Update full backfill marker ---
@@ -103,5 +107,9 @@ fi
 # --- Post-run daily summary ---
 echo "$LOG_PREFIX Running daily health summary..."
 polymarket --niche esports health-check --tier daily || true
+
+if [ -n "$FAILED_STAGES" ]; then
+    echo "$LOG_PREFIX WARNING: Failed stages:$FAILED_STAGES"
+fi
 
 echo "$LOG_PREFIX Cron pipeline complete"

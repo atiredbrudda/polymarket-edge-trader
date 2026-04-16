@@ -106,5 +106,6 @@ def write_lift_scores(
         "DELETE FROM lift_scores WHERE category = ? AND computed_at < ?",
         [niche_slug, computed_at],
     )
+    db.conn.commit()
 
     return upserted

@@ -175,6 +175,10 @@ def _fill_final_outcomes(analytics_db: sqlite_utils.Database) -> list[dict]:
 
     Returns list of newly-resolved rows for display.
     """
+    from polymarket_analytics.commands.paper_dashboard import (
+        _determine_winner,
+    )
+
     pending = analytics_db.execute(
         "SELECT id, market_condition_id, outcome, entry_price, exit_price, shares "
         "FROM take_profit_log WHERE final_outcome IS NULL"
@@ -190,7 +194,7 @@ def _fill_final_outcomes(analytics_db: sqlite_utils.Database) -> list[dict]:
         # Look up the resolved market in analytics.db
         market_row = analytics_db.execute(
             """
-            SELECT outcome FROM markets
+            SELECT outcome, question FROM markets
             WHERE condition_id = ?
               AND (resolved = 1 OR active = 0)
               AND outcome IS NOT NULL
@@ -202,18 +206,23 @@ def _fill_final_outcomes(analytics_db: sqlite_utils.Database) -> list[dict]:
             continue  # not yet resolved — skip
 
         winning_outcome = market_row[0]
+        question = market_row[1] or ""
 
         # Determine final price for our position:
         #   1.0 if our outcome won, 0.0 if lost, entry_price if VOID
         if winning_outcome.upper() == "VOID":
             final_price = entry_price  # refunded at cost
             final_label = "VOID"
-        elif winning_outcome.upper() == tp_outcome.upper():
-            final_price = 1.0
-            final_label = "WON"
         else:
-            final_price = 0.0
-            final_label = "LOST"
+            won = _determine_winner(tp_outcome, winning_outcome, [], question=question)
+            if won is True:
+                final_price = 1.0
+                final_label = "WON"
+            elif won is False:
+                final_price = 0.0
+                final_label = "LOST"
+            else:
+                continue  # can't map team name — skip until we can
 
         # Counterfactual P&L: what would we have gained/lost by holding?
         # Positive = we missed extra gains; negative = TP saved us from a loss

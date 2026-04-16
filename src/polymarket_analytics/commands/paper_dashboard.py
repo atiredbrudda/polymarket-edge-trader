@@ -288,7 +288,24 @@ def _do_reset(paper_data_dir: str) -> None:
     console.print(f"[green]Account reset to ${BANKROLL:,.0f}. All positions and trades cleared.[/green]")
 
 
-def _determine_winner(paper_outcome: str, analytics_outcome: str, outcomes_list: list[str]) -> bool | None:
+def _parse_teams_from_question(question: str) -> list[str]:
+    """Extract [team_a, team_b] from a market question like 'Game: A vs B (BO3) - ...'
+
+    Returns empty list if the pattern doesn't match.
+    """
+    import re
+    m = re.search(r':\s*(.+?)\s+vs\.?\s+(.+?)(?:\s*\(|$|\s*-)', question)
+    if m:
+        return [m.group(1).strip(), m.group(2).strip()]
+    return []
+
+
+def _determine_winner(
+    paper_outcome: str,
+    analytics_outcome: str,
+    outcomes_list: list[str],
+    question: str = "",
+) -> bool | None:
     """Return True if paper position won, False if lost, None if unresolvable.
 
     analytics_outcome is always "YES" or "NO" (normalised by ingest-events).
@@ -298,6 +315,7 @@ def _determine_winner(paper_outcome: str, analytics_outcome: str, outcomes_list:
       - "yes" / "over"  → always YES token (index 0)
       - "no"  / "under" → always NO  token (index 1)
       - team name       → find case-insensitive match in outcomes_list
+      - fallback        → parse "Team A vs Team B" from question text
     """
     p = paper_outcome.lower()
 
@@ -313,6 +331,15 @@ def _determine_winner(paper_outcome: str, analytics_outcome: str, outcomes_list:
                 return analytics_outcome == "YES"
             else:
                 return analytics_outcome == "NO"
+
+    # Fallback: parse team names from market question text.
+    # Head-to-head format is "Game: Team A vs Team B (BO3) - ..."
+    # Index 0 (Team A) = YES, Index 1 (Team B) = NO.
+    if question:
+        parsed = _parse_teams_from_question(question)
+        for i, name in enumerate(parsed):
+            if name.lower() == p:
+                return (analytics_outcome == "YES") if i == 0 else (analytics_outcome == "NO")
 
     return None  # outcomes_list empty or name not matched
 
@@ -400,7 +427,10 @@ def _do_resolve(paper_data_dir: str, analytics_db_path: str) -> None:
                     except (json.JSONDecodeError, ValueError):
                         pass
 
-                won = _determine_winner(paper_outcome, analytics_outcome, outcomes_list)
+                won = _determine_winner(
+                    paper_outcome, analytics_outcome, outcomes_list,
+                    question=pos["market_question"] or "",
+                )
                 if won is None:
                     unresolvable += 1
                     continue
@@ -1098,7 +1128,7 @@ def _generate_html(
             "SELECT COUNT(*) FROM positions WHERE is_resolved = 0 AND shares > 0"
         ).fetchone()[0]
         resolved_count = conn.execute(
-            "SELECT COUNT(*) FROM positions WHERE is_resolved = 1"
+            "SELECT COUNT(*) FROM positions WHERE is_resolved = 1 OR shares = 0"
         ).fetchone()[0]
         trade_count = conn.execute("SELECT COUNT(*) FROM trades").fetchone()[0]
 

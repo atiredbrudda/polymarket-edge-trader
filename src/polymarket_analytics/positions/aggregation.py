@@ -232,21 +232,23 @@ def build_positions_from_trades(
     if positions:
         db["positions"].upsert_all(positions, pk="id")
 
-    # Persist last_built_at so the next run is incremental.
-    # Use the max last_trade_timestamp from the processed batch as the watermark
-    # (not wall clock) so historical backfills don't invalidate the marker and
-    # any trade with a timestamp strictly greater than this will be caught next run.
-    if positions:
-        watermark = max(p["last_trade_timestamp"] for p in positions)
-    else:
-        watermark = now_iso  # no positions processed — keep clock-based fallback
+    # Persist last_built_at so the next cron/CLI run is incremental.
+    # Only update the watermark on the cron/CLI path (dirty_pairs=None).
+    # The monitor path passes dirty_pairs and must NOT advance the watermark,
+    # because backfill may later import old trades whose timestamps predate
+    # the monitor's wall-clock — those would be eclipsed by a fresh watermark.
+    if dirty_pairs is None:
+        if positions:
+            watermark = max(p["last_trade_timestamp"] for p in positions)
+        else:
+            watermark = now_iso  # no positions processed — keep clock-based fallback
 
-    if "_migrations" not in db.table_names():
-        db.execute("CREATE TABLE _migrations (key TEXT PRIMARY KEY, value TEXT)")
-    db.execute(
-        "INSERT OR REPLACE INTO _migrations VALUES ('positions_last_built_at', ?)",
-        [watermark],
-    )
-    db.conn.commit()
+        if "_migrations" not in db.table_names():
+            db.execute("CREATE TABLE _migrations (key TEXT PRIMARY KEY, value TEXT)")
+        db.execute(
+            "INSERT OR REPLACE INTO _migrations VALUES ('positions_last_built_at', ?)",
+            [watermark],
+        )
+        db.conn.commit()
 
     return len(positions)
