@@ -133,18 +133,63 @@ def _print_positions(conn: sqlite3.Connection, limit: int = 20) -> None:
 
     console.print(table)
 
-    # Resolved summary
+    # Resolved positions table
+    resolved_rows = conn.execute("""
+        SELECT market_question, outcome, shares, total_cost, realized_pnl, resolved_at
+        FROM positions
+        WHERE is_resolved = 1
+        ORDER BY resolved_at DESC
+        LIMIT ?
+    """, (limit,)).fetchall()
+
     won_count, won_pnl = resolved_won
     lost_count, lost_pnl = resolved_lost
     total_resolved = won_count + lost_count
-    if total_resolved > 0:
-        win_rate = won_count / total_resolved * 100
-        console.print(
-            f"Resolved: {total_resolved} total  |  "
-            f"[green]{won_count} won (+${won_pnl:.2f})[/green]  |  "
-            f"[red]{lost_count} lost (${lost_pnl:.2f})[/red]  |  "
-            f"Win rate: {win_rate:.0f}%"
+
+    if resolved_rows:
+        rtable = Table(
+            title=f"Resolved Positions (last {len(resolved_rows)} of {total_resolved})",
+            show_lines=False,
         )
+        rtable.add_column("Market", max_width=42, no_wrap=True)
+        rtable.add_column("Outcome", max_width=12, no_wrap=True)
+        rtable.add_column("Result", justify="center", no_wrap=True)
+        rtable.add_column("Cost", justify="right", no_wrap=True)
+        rtable.add_column("P&L", justify="right", no_wrap=True)
+        rtable.add_column("Resolved", no_wrap=True)
+
+        for r in resolved_rows:
+            pnl = r["realized_pnl"] or 0.0
+            if pnl > 0:
+                result_str = "[green]WIN[/green]"
+                pnl_str = f"[green]+${pnl:.2f}[/green]"
+            elif pnl < 0:
+                result_str = "[red]LOSS[/red]"
+                pnl_str = f"[red]-${abs(pnl):.2f}[/red]"
+            else:
+                result_str = "[dim]VOID[/dim]"
+                pnl_str = "[dim]$0.00[/dim]"
+
+            resolved_at = (r["resolved_at"] or "")[:10]
+            rtable.add_row(
+                r["market_question"][:42],
+                (r["outcome"] or "").upper()[:12],
+                result_str,
+                f"${r['total_cost']:.2f}",
+                pnl_str,
+                resolved_at,
+            )
+
+        console.print(rtable)
+
+        if total_resolved > 0:
+            win_rate = won_count / total_resolved * 100
+            console.print(
+                f"Resolved: {total_resolved} total  |  "
+                f"[green]{won_count} won (+${won_pnl:.2f})[/green]  |  "
+                f"[red]{lost_count} lost (${lost_pnl:.2f})[/red]  |  "
+                f"Win rate: {win_rate:.0f}%"
+            )
 
 
 def _print_decision_stats(analytics_db_path: str, days: int = 7) -> None:
