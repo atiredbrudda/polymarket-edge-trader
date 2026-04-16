@@ -95,6 +95,25 @@ Wired into `cron_pipeline.sh` between `paper-bridge` and `paper-resolve`.
 
 ---
 
+### P-01: Incremental `build-positions`
+
+**Impact:** `build-positions` re-aggregates all ~900K positions on every `--chain` monitor pass (~9 min). A typical 30-min pass has hundreds of new trades — only those `(trader, market)` pairs need re-aggregating. Track `last_built_at`, find pairs with trades newer than that, re-aggregate only those. Could reduce from 900K upserts to a few hundred per pass.
+
+### P-02: Missing index on `positions.last_trade_timestamp`
+
+**File:** `src/polymarket_analytics/db/schema.py`
+**Impact:** `score` filters `WHERE p.last_trade_timestamp >= now - 30 days` against 1.4M rows with no index — full table scan every cron run. One-line schema fix.
+
+### P-03: Monitor lock
+
+**Impact:** With `--poll 30` and `build-positions` taking ~9 min, a slow pass (Graph fallback, API retries) can still be running when the next poll fires. Two concurrent passes write to analytics.db simultaneously. The cron has a lock protocol; the monitor does not.
+
+### P-04: Price cache across `paper-bridge` + `paper-take-profit`
+
+**Impact:** Both commands run back-to-back in cron and hit the live API independently for overlapping markets. Could share a price snapshot to avoid duplicate API calls for the same tokens.
+
+---
+
 ### L-06: Add structured error context to pipeline stages
 
 **Impact:** When errors occur in long-running processes (backfill, cron), debugging requires reading source code to triangulate. Adding stage-tagged logging, error aggregation with categories, and context managers would make failures self-diagnosing. Not urgent — current `✗ addr: error` output works, just lacks stage/category tagging for fast triage.
