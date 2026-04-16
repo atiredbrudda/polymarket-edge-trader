@@ -8,7 +8,9 @@ Usage:
     polymarket --niche esports paper-bridge [--db-path PATH] [--dry-run]
 """
 
+import json
 import sqlite3
+import time
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
@@ -26,6 +28,17 @@ console = Console()
 BANKROLL = 10_000.0
 SPREAD_HARD_LIMIT = 0.03  # 3c — edge is gone
 SPREAD_SOFT_LIMIT = 0.01  # 1-2c — reduce size by half
+
+_PRICE_CACHE_FILE = ".price_cache.json"
+
+
+def _write_price_cache(paper_dir: Path, cache: dict) -> None:
+    """Write a price snapshot so paper-take-profit can reuse prices fetched here."""
+    try:
+        data = {"written_at": time.time(), **cache}
+        (paper_dir / _PRICE_CACHE_FILE).write_text(json.dumps(data))
+    except OSError:
+        pass  # non-critical — take-profit will fall back to live API
 
 
 def _get_actionable_signals(db: sqlite_utils.Database) -> list[dict]:
@@ -331,6 +344,8 @@ def _run_bridge(db_path: str, dry_run: bool, paper_data_dir: str) -> None:
 
     buys = 0
     skips = 0
+    # Shared price snapshot written at end — consumed by paper-take-profit next stage.
+    _price_cache: dict = {"token_prices": {}, "market_tokens": {}}
 
     for sig in signals:
         signal = sig
@@ -343,6 +358,10 @@ def _run_bridge(db_path: str, dry_run: bool, paper_data_dir: str) -> None:
                 analytics_db, signal, market, outcome
             )
             live_price = engine.api.get_midpoint(token_id)
+            # Stash for take-profit reuse
+            _price_cache["token_prices"][token_id] = live_price
+            if signal["market_id"] not in _price_cache["market_tokens"]:
+                _price_cache["market_tokens"][signal["market_id"]] = market.tokens
         except Exception as e:
             _log_decision(analytics_db, signal, "SKIP_API", reason=str(e))
             results.add_row(
@@ -471,6 +490,10 @@ def _run_bridge(db_path: str, dry_run: bool, paper_data_dir: str) -> None:
             market = engine.api.get_market(market_condition_id)
             token_id = market.get_token_id(outcome)
             live_price = engine.api.get_midpoint(token_id)
+            # Stash for take-profit reuse
+            _price_cache["token_prices"][token_id] = live_price
+            if market_condition_id not in _price_cache["market_tokens"]:
+                _price_cache["market_tokens"][market_condition_id] = market.tokens
             entry = entry_prices.get((market_condition_id, outcome))
             _record_snapshot(paper_dir, market_condition_id, outcome,
                              live_price, entry)
@@ -481,6 +504,7 @@ def _run_bridge(db_path: str, dry_run: bool, paper_data_dir: str) -> None:
     if swept:
         console.print(f"[dim]Snapshotted {swept} stale-signal position(s).[/dim]")
 
+    _write_price_cache(paper_dir, _price_cache)
     engine.close()
 
 

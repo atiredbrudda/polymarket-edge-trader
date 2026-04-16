@@ -104,8 +104,8 @@ def pipeline_lock(process_type: str, lock_path: str | Path = "data/.pipeline.loc
         - If lock held by dead process: cleans up stale lock, acquires it.
         - Cron vs cron: blocked (yields None).
         - Monitor vs cron: blocked (yields None, monitor should skip pass).
-        - Cron vs monitor: acquires (monitor is lightweight, safe to overlap).
-        - Monitor vs monitor: acquires (multiple monitors is fine).
+        - Cron vs monitor: acquires (cron has priority, can preempt monitor).
+        - Monitor vs monitor: blocked (second monitor skips, avoids duplicate writes).
     """
     lock_path = Path(lock_path)
     existing = check_lock(lock_path)
@@ -113,9 +113,15 @@ def pipeline_lock(process_type: str, lock_path: str | Path = "data/.pipeline.loc
     if existing is not None:
         holder_type = existing.get("process_type", "unknown")
 
-        # Only block if the holder is a cron (heavy process)
-        # Monitor is lightweight — safe to overlap with
+        # Cron blocks everyone (cron is the scheduled heavy process).
         if holder_type == "cron":
+            yield None
+            return
+
+        # Monitor blocks another monitor: --chain is also heavy, and two concurrent
+        # monitor passes would do redundant work and race-write analytics.db.
+        # Cron is NOT blocked by a running monitor — cron has priority.
+        if holder_type == "monitor" and process_type == "monitor":
             yield None
             return
 

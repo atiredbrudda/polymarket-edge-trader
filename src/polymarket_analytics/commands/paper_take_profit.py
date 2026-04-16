@@ -11,7 +11,9 @@ Usage:
     polymarket --niche esports paper-take-profit --threshold 1.6
 """
 
+import json
 import sqlite3
+import time
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
@@ -27,6 +29,21 @@ from polymarket_analytics.db.schema import init_database
 console = Console()
 
 DEFAULT_THRESHOLD = 1.5  # exit when live_price >= avg_entry * threshold
+
+_PRICE_CACHE_FILE = ".price_cache.json"
+_PRICE_CACHE_TTL = 900  # 15 minutes — same cron pass is always within this window
+
+
+def _read_price_cache(paper_dir: Path) -> dict:
+    """Load the price snapshot written by paper-bridge, if fresh enough."""
+    try:
+        data = json.loads((paper_dir / _PRICE_CACHE_FILE).read_text())
+        if time.time() - data.get("written_at", 0) > _PRICE_CACHE_TTL:
+            return {}
+        return data
+    except (OSError, json.JSONDecodeError, KeyError):
+        return {}
+
 
 _CREATE_TP_LOG = """
     CREATE TABLE IF NOT EXISTS take_profit_log (
@@ -294,6 +311,7 @@ def _run_take_profit(
     _ensure_tp_log(analytics_db)
     paper_dir = Path(paper_data_dir)
     engine = Engine(paper_dir)
+    price_cache = _read_price_cache(paper_dir)
 
     # ── 1. Check-back: fill in final outcomes for past TP exits ──────────────
     filled = _fill_final_outcomes(analytics_db)
@@ -340,18 +358,33 @@ def _run_take_profit(
                       "[red]SKIP_ENTRY[/red]", "")
             continue
 
-        # Fetch live price
-        try:
-            market = engine.api.get_market(market_id)
-            token_id = market.get_token_id(outcome)
-            live_price = engine.api.get_midpoint(token_id)
-        except Exception as e:
-            _log_decision(analytics_db, market_id, outcome, "SKIP_API",
-                          reason=str(e), entry_price=avg_entry)
-            t.add_row(label, outcome, f"{avg_entry:.3f}", "ERR", "—",
-                      f"{shares:.1f}", "[red]SKIP_API[/red]", "")
-            errors += 1
-            continue
+        # Fetch live price — try the bridge price cache first (written seconds ago),
+        # fall back to a live API call only for cache misses.
+        cached_tokens = price_cache.get("market_tokens", {}).get(market_id, [])
+        cached_token_id = next(
+            (tok["token_id"] for tok in cached_tokens
+             if tok.get("outcome", "").lower() == outcome.lower()),
+            None,
+        )
+        cached_price = (
+            price_cache.get("token_prices", {}).get(cached_token_id)
+            if cached_token_id else None
+        )
+
+        if cached_price is not None:
+            live_price = cached_price
+        else:
+            try:
+                market = engine.api.get_market(market_id)
+                cached_token_id = market.get_token_id(outcome)
+                live_price = engine.api.get_midpoint(cached_token_id)
+            except Exception as e:
+                _log_decision(analytics_db, market_id, outcome, "SKIP_API",
+                              reason=str(e), entry_price=avg_entry)
+                t.add_row(label, outcome, f"{avg_entry:.3f}", "ERR", "—",
+                          f"{shares:.1f}", "[red]SKIP_API[/red]", "")
+                errors += 1
+                continue
 
         ratio = live_price / avg_entry
         value_usd = shares * live_price

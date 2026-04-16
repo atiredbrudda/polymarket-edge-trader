@@ -5,6 +5,7 @@ with direction, size, volume-weighted entry price, and timestamps.
 """
 
 import hashlib
+from datetime import datetime, timezone
 from typing import Any
 
 import click
@@ -27,6 +28,10 @@ def _generate_position_id(trader_address: str, market_id: str) -> str:
 def build_positions_from_trades(db: Any, niche_slug: str, window_days: int = 35) -> int:
     """Build positions from trades using SQL GROUP BY aggregation.
 
+    Runs incrementally: tracks last_built_at in _migrations and only re-aggregates
+    (trader, market) pairs that have trades newer than that timestamp. On first run
+    or after a full reset, falls back to a full scan.
+
     Args:
         db: sqlite-utils Database instance
         niche_slug: Niche slug to scope aggregation (e.g., "esports")
@@ -37,6 +42,10 @@ def build_positions_from_trades(db: Any, niche_slug: str, window_days: int = 35)
     Raises:
         click.ClickException: If dependencies missing (trades empty, no entities)
     """
+    # Capture start time before any queries so any trades that arrive during this
+    # run are caught on the next pass (their timestamp > our saved last_built_at).
+    now_iso = datetime.now(timezone.utc).isoformat()
+
     # Dependency assertions - fail loudly if prerequisites missing
     # 1. Assert trades table has data
     trades_count = db.execute("SELECT COUNT(*) as cnt FROM trades").fetchone()[0]
@@ -68,16 +77,28 @@ def build_positions_from_trades(db: Any, niche_slug: str, window_days: int = 35)
             "from positions (non-esports or unresolvable markets)."
         )
 
-    # Get trades grouped by (trader, market), limited to the rolling window.
-    # WHERE timestamp limits the index scan to recent trades only.
-    # HAVING MIN(timestamp) ensures we only process positions that started within
-    # the window — this avoids partial positions where the BUY trade predates the
-    # window but a later SELL falls inside it (which would corrupt avg_entry_price).
-    # Older positions already upserted in previous runs are left untouched.
-    trades_query = f"""
-        SELECT
-            trader_address,
-            market_id,
+    # Incremental mode: find (trader, market) pairs with trades newer than last run.
+    # Falls back to full scan if _migrations key is absent (first run or manual reset).
+    last_built_at = None
+    if "_migrations" in db.table_names():
+        row = db.execute(
+            "SELECT value FROM _migrations WHERE key = 'positions_last_built_at' LIMIT 1"
+        ).fetchone()
+        if row:
+            last_built_at = row[0]
+
+    # Build the aggregation query.
+    # If incremental: a CTE finds dirty (trader, market) pairs (those with at least one
+    # trade newer than last_built_at) and the main query re-aggregates ALL their trades
+    # within the window (not just new ones — avg_entry_price needs all BUY records).
+    # If full: same query without the dirty-pair filter.
+    #
+    # HAVING MIN(timestamp) ensures we only process positions that started within the
+    # window — avoids partial positions where the BUY predates the window but a later
+    # SELL falls inside it (which would corrupt avg_entry_price).
+    _select_cols = f"""
+            t.trader_address,
+            t.market_id,
             SUM(CASE WHEN side = 'BUY' THEN size ELSE -size END) as net_size,
             SUM(CASE WHEN side = 'BUY' THEN size * price ELSE 0 END) /
                 NULLIF(SUM(CASE WHEN side = 'BUY' THEN size ELSE 0 END), 0) as avg_entry_price,
@@ -86,14 +107,35 @@ def build_positions_from_trades(db: Any, niche_slug: str, window_days: int = 35)
             SUM(CASE WHEN side = 'BUY' THEN size ELSE 0 END) as gross_buy_size,
             MIN(timestamp) as entry_timestamp,
             MAX(timestamp) as last_trade_timestamp,
-            COUNT(*) as trade_count
+            COUNT(*) as trade_count"""
+    _where = f"""me.game IS NOT NULL
+          AND t.timestamp >= datetime('now', '-{window_days} days')"""
+    _having = f"""SUM(CASE WHEN side = 'BUY' THEN 1 ELSE 0 END) > 0
+           AND MIN(timestamp) >= datetime('now', '-{window_days} days')"""
+
+    if last_built_at:
+        trades_query = f"""
+        WITH dirty AS (
+            SELECT DISTINCT trader_address, market_id
+            FROM trades
+            WHERE timestamp > '{last_built_at}'
+        )
+        SELECT {_select_cols}
         FROM trades t
         JOIN market_entities me ON me.condition_id = t.market_id
-        WHERE me.game IS NOT NULL
-          AND t.timestamp >= datetime('now', '-{window_days} days')
-        GROUP BY trader_address, market_id
-        HAVING SUM(CASE WHEN side = 'BUY' THEN 1 ELSE 0 END) > 0
-           AND MIN(timestamp) >= datetime('now', '-{window_days} days')
+        JOIN dirty d ON d.trader_address = t.trader_address AND d.market_id = t.market_id
+        WHERE {_where}
+        GROUP BY t.trader_address, t.market_id
+        HAVING {_having}
+    """
+    else:
+        trades_query = f"""
+        SELECT {_select_cols}
+        FROM trades t
+        JOIN market_entities me ON me.condition_id = t.market_id
+        WHERE {_where}
+        GROUP BY t.trader_address, t.market_id
+        HAVING {_having}
     """
 
     # Process each (trader, market) pair
@@ -149,5 +191,22 @@ def build_positions_from_trades(db: Any, niche_slug: str, window_days: int = 35)
     # Upsert positions (idempotent, batched in single transaction)
     if positions:
         db["positions"].upsert_all(positions, pk="id")
+
+    # Persist last_built_at so the next run is incremental.
+    # Use the max last_trade_timestamp from the processed batch as the watermark
+    # (not wall clock) so historical backfills don't invalidate the marker and
+    # any trade with a timestamp strictly greater than this will be caught next run.
+    if positions:
+        watermark = max(p["last_trade_timestamp"] for p in positions)
+    else:
+        watermark = now_iso  # no positions processed — keep clock-based fallback
+
+    if "_migrations" not in db.table_names():
+        db.execute("CREATE TABLE _migrations (key TEXT PRIMARY KEY, value TEXT)")
+    db.execute(
+        "INSERT OR REPLACE INTO _migrations VALUES ('positions_last_built_at', ?)",
+        [watermark],
+    )
+    db.conn.commit()
 
     return len(positions)

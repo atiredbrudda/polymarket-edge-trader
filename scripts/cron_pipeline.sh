@@ -27,6 +27,13 @@ LOG_PREFIX="[$(date '+%Y-%m-%d %H:%M:%S')]"
 
 echo "$LOG_PREFIX Starting cron pipeline run"
 
+# --- Acquire pipeline lock so the monitor skips its pass while cron is running ---
+LOCK_FILE="$PROJECT_DIR/data/.pipeline.lock"
+mkdir -p "$(dirname "$LOCK_FILE")"
+LOCK_JSON="{\"pid\":$$,\"process_type\":\"cron\",\"started_at\":\"$(date -u +%Y-%m-%dT%H:%M:%SZ)\"}"
+echo "$LOCK_JSON" > "$LOCK_FILE"
+trap 'rm -f "$LOCK_FILE"' EXIT
+
 # --- Pre-flight health check (lock, memory, disk) ---
 echo "$LOG_PREFIX Running pre-flight health check..."
 if ! polymarket --niche esports health-check --tier cron; then
@@ -76,7 +83,7 @@ run_stage() {
 run_stage "discover" polymarket --niche esports discover --closing-within 4
 run_stage "backfill" polymarket --niche esports backfill $BACKFILL_MODE
 run_stage "retry-incomplete" polymarket --niche esports retry-incomplete
-run_stage "ingest-events" polymarket --niche esports ingest-events
+run_stage "ingest-events" polymarket --niche esports ingest-events --full
 run_stage "resolve-outcomes" polymarket --niche esports resolve-outcomes
 run_stage "sanity-check" polymarket --niche esports sanity-check
 run_stage "build-positions" polymarket --niche esports build-positions
