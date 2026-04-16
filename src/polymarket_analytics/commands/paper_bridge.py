@@ -28,6 +28,7 @@ console = Console()
 BANKROLL = 10_000.0
 SPREAD_HARD_LIMIT = 0.03  # 3c — edge is gone
 SPREAD_SOFT_LIMIT = 0.01  # 1-2c — reduce size by half
+PRICE_FLOOR = 0.05        # skip decided markets (backtest used 0.05-0.95 range)
 
 _PRICE_CACHE_FILE = ".price_cache.json"
 
@@ -398,6 +399,20 @@ def _run_bridge(db_path: str, dry_run: bool, paper_data_dir: str) -> None:
 
         q5_entry = signal["avg_entry_price"] or 0
         spread = live_price - q5_entry
+
+        # Floor check — skip decided markets where price has collapsed
+        if live_price < PRICE_FLOOR:
+            _log_decision(analytics_db, signal, "SKIP_FLOOR",
+                          live_price, spread, reason=f"live {live_price:.3f} < {PRICE_FLOOR}")
+            results.add_row(
+                signal.get("question", "")[:40],
+                signal["direction"], signal["tier"],
+                f"{signal['q5_count']}/{signal['net_q5_count']}",
+                f"{q5_entry:.3f}", f"{live_price:.3f}", f"{spread:+.3f}",
+                "[red]SKIP_FLOOR[/red]", ""
+            )
+            skips += 1
+            continue
 
         # Price check
         if spread > SPREAD_HARD_LIMIT:
