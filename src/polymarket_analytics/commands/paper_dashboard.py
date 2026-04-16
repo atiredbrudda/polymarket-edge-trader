@@ -56,15 +56,15 @@ def _print_account_summary(conn: sqlite3.Connection) -> float:
     starting = row["starting_balance"]
     created = row["created_at"]
 
-    # Deployed = total_cost of open (unresolved) positions
-    # Cash spent = starting - cash (ground truth, avoids pm_trader total_cost discrepancy)
-    deployed = starting - cash
+    # Deployed = actual cost tied up in open positions
+    deployed = conn.execute(
+        "SELECT COALESCE(SUM(total_cost), 0) FROM positions WHERE is_resolved = 0 AND shares > 0"
+    ).fetchone()[0]
 
     # Realized P&L: market-resolved positions (is_resolved=1) OR TP-exited (shares=0)
-    realized_row = conn.execute(
+    realized_pnl = conn.execute(
         "SELECT COALESCE(SUM(realized_pnl), 0) FROM positions WHERE is_resolved = 1 OR shares = 0"
-    ).fetchone()
-    realized_pnl = realized_row[0]
+    ).fetchone()[0]
 
     open_count = conn.execute(
         "SELECT COUNT(*) FROM positions WHERE is_resolved = 0 AND shares > 0"
@@ -78,9 +78,9 @@ def _print_account_summary(conn: sqlite3.Connection) -> float:
     lines = [
         f"Started:   ${starting:>10,.2f}    Created: {created[:10]}",
         f"Cash:      [{cash_color}]${cash:>10,.2f}[/{cash_color}]",
-        f"Deployed:  ${deployed:>10,.2f}    (cash spent on open positions)",
-        f"Realized:  [{pnl_color}]${realized_pnl:>+10,.2f}[/{pnl_color}]   (resolved positions)",
-        f"Positions: {open_count:>10,}    open   |   {trades_count:,} total trades",
+        f"Deployed:  ${deployed:>10,.2f}    (cost of {open_count} open positions)",
+        f"Realized:  [{pnl_color}]${realized_pnl:>+10,.2f}[/{pnl_color}]   (closed positions)",
+        f"Trades:    {trades_count:>10,}",
     ]
 
     if cash < LOW_CASH_THRESHOLD:
@@ -678,7 +678,11 @@ def _html_account_summary(conn: sqlite3.Connection) -> str:
     cash = row["cash"]
     starting = row["starting_balance"]
     created = row["created_at"]
-    deployed = starting - cash
+
+    # Deployed = actual cost tied up in open positions
+    deployed = conn.execute(
+        "SELECT COALESCE(SUM(total_cost), 0) FROM positions WHERE is_resolved = 0 AND shares > 0"
+    ).fetchone()[0]
 
     # Realized P&L: market-resolved positions (is_resolved=1) OR TP-exited (shares=0)
     realized_pnl = conn.execute(
@@ -715,17 +719,16 @@ def _html_account_summary(conn: sqlite3.Connection) -> str:
     <tr>
       <td>Deployed</td>
       <td>${deployed:,.2f}</td>
-      <td class="dim">cash spent on open positions</td>
+      <td class="dim">cost of {open_count} open positions</td>
     </tr>
     <tr>
       <td>Realized P&amp;L</td>
       <td class="{pnl_cls}">{pnl_sign}${realized_pnl:,.2f}</td>
-      <td class="dim">resolved positions</td>
+      <td class="dim">closed positions</td>
     </tr>
     <tr>
-      <td>Positions</td>
-      <td>{open_count:,} open</td>
-      <td class="dim">{trades_count:,} total trades</td>
+      <td>Trades</td>
+      <td>{trades_count:,}</td>
     </tr>
   </table>
   {warn}
