@@ -84,11 +84,10 @@ Deep review of the Polymarket analytics pipeline. All critical and most high/med
 **File:** `src/polymarket_analytics/extraction/llm.py`
 **Impact:** When the Anthropic API returns an "insufficient funds" / billing error, the pipeline silently falls back to empty extraction. Should trigger a Telegram alert via `health/notify.py` so the user knows to top up the account before LLM-dependent features degrade.
 
-### M-08: paper-bridge shows ERR for current price on some markets, silently skips
+### M-08: Take profit after 50% move in favoured direction
 
-**Observed:** 2026-04-13, multiple cron runs. Several signals show `ERR` in the current price column and get skipped at trade time. Affects markets where live price fetch fails (API unavailable, token not found, etc.).
-**Impact:** Silent missed trades — the signal is valid but never executed. No alert is raised, no count of ERR-skipped trades appears in the daily summary.
-**Fix direction:** Count ERR skips separately from intentional SKIP_API/SKIP_CONF skips in the paper-bridge summary. Optionally alert if ERR rate exceeds a threshold.
+**Motivation:** Open positions that have moved 50%+ toward 1.0 are approaching resolution. Holding to the end exposes capital to late reversal risk. Closing early at e.g. 0.70 after buying at 0.45 locks in most of the CLV edge and frees cash for new signals.
+**Fix direction:** In `paper-bridge` (or a separate `paper-take-profit` step), scan open positions where `current_price >= avg_entry_price * 1.5`. Sell via `engine.sell()`, log as `TAKE_PROFIT` decision. Wire into cron after `paper-bridge`.
 
 ---
 
