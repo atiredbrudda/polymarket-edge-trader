@@ -4,6 +4,7 @@ This module provides a rate-limited async client for the Polymarket Gamma API,
 handling pagination and error handling for market ingestion.
 """
 
+import asyncio
 from typing import Callable, List, Optional
 
 import httpx
@@ -95,12 +96,25 @@ class GammaAPIClient:
             params["closed"] = "true" if closed else "false"
 
         while True:
-            async with self.limiter:
-                response = await client.get(
-                    f"{GAMMA_BASE_URL}/markets",
-                    params={**params, "offset": offset},
-                )
-                response.raise_for_status()
+            last_err = None
+            for attempt in range(4):
+                try:
+                    async with self.limiter:
+                        response = await client.get(
+                            f"{GAMMA_BASE_URL}/markets",
+                            params={**params, "offset": offset},
+                        )
+                        response.raise_for_status()
+                    last_err = None
+                    break
+                except (httpx.ReadError, httpx.ConnectError, httpx.RemoteProtocolError,
+                        httpx.ReadTimeout, httpx.HTTPStatusError) as e:
+                    last_err = e
+                    if isinstance(e, httpx.HTTPStatusError) and e.response.status_code < 500:
+                        raise  # don't retry client errors
+                    await asyncio.sleep(2 ** attempt)
+            if last_err is not None:
+                raise last_err
 
             markets = response.json()
             if not markets:

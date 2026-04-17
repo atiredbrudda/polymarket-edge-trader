@@ -258,8 +258,8 @@ def _load_open_positions(paper_dir: Path) -> tuple[set, dict]:
         "FROM positions WHERE is_resolved=0 AND shares>0"
     ).fetchall()
     conn.close()
-    held = {(r[0], r[1]) for r in rows}
-    entries = {(r[0], r[1]): r[2] for r in rows}
+    held = {(r[0], r[1].lower()) for r in rows}
+    entries = {(r[0], r[1].lower()): r[2] for r in rows}
     return held, entries
 
 
@@ -379,8 +379,8 @@ def _run_bridge(db_path: str, dry_run: bool, paper_data_dir: str) -> None:
 
         # Idempotency: skip if already holding this position.
         # Also record a price snapshot so we can later compare hold-vs-exit.
-        if (signal["market_id"], resolved_outcome) in held:
-            entry = entry_prices.get((signal["market_id"], resolved_outcome))
+        if (signal["market_id"], resolved_outcome.lower()) in held:
+            entry = entry_prices.get((signal["market_id"], resolved_outcome.lower()))
             _record_snapshot(paper_dir, signal["market_id"], resolved_outcome,
                              live_price, entry)
             _log_decision(analytics_db, signal, "SKIP_HELD",

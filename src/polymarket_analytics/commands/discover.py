@@ -225,7 +225,7 @@ def discover(ctx, db_path: str, closing_within: Optional[int], use_llm: bool) ->
                 "end_date": m.get("endDate"),
                 "category": niche,
                 "active": True,
-                "tokens": json.dumps(m.get("tokens", [])),
+                "tokens": json.dumps(m.get("tokens") or m.get("clobTokenIds", [])),
                 "event_slug": event_slug,
             }
         )
@@ -247,6 +247,55 @@ def discover(ctx, db_path: str, closing_within: Optional[int], use_llm: bool) ->
             markets_records,
         )
     console.print(f"  [green]✓[/green] {len(markets_records):,} markets upserted")
+
+    # Upsert token_catalog from Gamma API clobTokenIds (parallel to outcomes)
+    catalog_records = []
+    for m in gamma_markets:
+        cid = m.get("conditionId")
+        if not cid:
+            continue
+        clob_token_ids = m.get("clobTokenIds") or []
+        if isinstance(clob_token_ids, str):
+            try:
+                clob_token_ids = json.loads(clob_token_ids)
+            except (json.JSONDecodeError, ValueError):
+                clob_token_ids = []
+        if not clob_token_ids:
+            continue
+        question = m.get("question", "")
+        raw_outcomes = m.get("outcomes") or []
+        if isinstance(raw_outcomes, str):
+            try:
+                raw_outcomes = json.loads(raw_outcomes)
+            except (json.JSONDecodeError, ValueError):
+                raw_outcomes = raw_outcomes.split(",")
+        market_type = "binary" if raw_outcomes == ["Yes", "No"] else "categorical"
+        for token_id in clob_token_ids[:2]:
+            if not token_id:
+                continue
+            catalog_records.append({
+                "token_id": str(token_id),
+                "condition_id": cid,
+                "question": question,
+                "niche_slug": niche,
+                "node_path": f"{niche}/{niche}",
+                "market_type": market_type,
+                "created_at": now_iso,
+            })
+
+    if catalog_records:
+        with db.conn:
+            db.conn.executemany(
+                """
+                INSERT INTO token_catalog (token_id, condition_id, question, niche_slug, node_path, market_type, created_at)
+                VALUES (:token_id, :condition_id, :question, :niche_slug, :node_path, :market_type, :created_at)
+                ON CONFLICT(token_id) DO UPDATE SET
+                    condition_id = excluded.condition_id,
+                    question = excluded.question
+                """,
+                catalog_records,
+            )
+        console.print(f"  [green]✓[/green] {len(catalog_records):,} token catalog entries upserted")
 
     # -------------------------------------------------------------------------
     # Step 3: Check cache and load existing entity rows
