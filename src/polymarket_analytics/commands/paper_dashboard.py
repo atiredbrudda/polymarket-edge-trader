@@ -227,7 +227,10 @@ def _print_decision_stats(analytics_db_path: str, days: int = 7) -> None:
                 "BUY": "green",
                 "SKIP_PRICE": "yellow",
                 "SKIP_SIZE": "yellow",
+                "SKIP_OPPOSITE_HELD": "yellow",
                 "SKIP_API": "red",
+                "SKIP_NO_BOOK": "dim",
+                "SKIP_TP_EXIT": "dim",
                 "SKIP_ERROR": "red",
                 "DRY_RUN": "blue",
             }.get(r["decision"], "white")
@@ -260,19 +263,23 @@ def _print_recent_trades(conn: sqlite3.Connection, limit: int = 10) -> None:
     table = Table(title=f"Recent Trades (last {limit})")
     table.add_column("Market", max_width=42, no_wrap=True)
     table.add_column("Outcome", max_width=12, no_wrap=True)
+    table.add_column("Side", no_wrap=True)
     table.add_column("Shares", justify="right", no_wrap=True)
     table.add_column("@ Price", justify="right", no_wrap=True)
     table.add_column("Cost", justify="right", no_wrap=True)
     table.add_column("Date", no_wrap=True)
 
     for r in rows:
+        side = r["side"].upper()
+        side_styled = f"[green]{side}[/green]" if side == "BUY" else f"[red]{side}[/red]"
         table.add_row(
             r["market_question"][:42],
             r["outcome"].upper()[:12],
+            side_styled,
             f"{r['shares']:,.0f}",
             f"{r['avg_price']:.3f}",
             f"${r['amount_usd']:.2f}",
-            r["created_at"][:10],
+            r["created_at"][:16],
         )
 
     console.print(table)
@@ -794,11 +801,17 @@ def _html_resolved_positions(conn: sqlite3.Connection, limit: int = 20) -> str:
     total_closed = won_count + lost_count
 
     rows = conn.execute(f"""
-        SELECT market_question, outcome, total_cost, realized_pnl,
-               resolved_at, is_resolved
-        FROM positions
+        SELECT p.market_question, p.outcome, p.total_cost, p.realized_pnl,
+               p.resolved_at, p.is_resolved,
+               COALESCE(
+                   NULLIF(p.total_cost, 0),
+                   (SELECT SUM(t.amount_usd) FROM trades t
+                    WHERE t.market_condition_id = p.market_condition_id
+                      AND t.outcome = p.outcome AND t.side = 'buy')
+               ) as original_cost
+        FROM positions p
         WHERE {_closed}
-        ORDER BY COALESCE(resolved_at, '9999') DESC
+        ORDER BY COALESCE(p.resolved_at, '9999') DESC
     """).fetchall()
 
     if not rows:
@@ -835,7 +848,7 @@ def _html_resolved_positions(conn: sqlite3.Connection, limit: int = 20) -> str:
       <td>{_html_module.escape((r['outcome'] or '').upper()[:12])}</td>
       <td class="r">{type_str}</td>
       <td class="r">{result}</td>
-      <td class="r">${r['total_cost']:.2f}</td>
+      <td class="r">${r['original_cost'] or 0:.2f}</td>
       <td class="r">{pnl_str}</td>
       <td class="dim">{date_str}</td>
     </tr>"""
@@ -884,14 +897,24 @@ def _html_take_profit_log(analytics_db_path: str) -> str:
     try:
         aconn = sqlite3.connect(analytics_db_path)
         aconn.row_factory = sqlite3.Row
+        # Aggregate by position — a single position may be sold across multiple TP runs
         rows = aconn.execute("""
-            SELECT tpl.outcome, tpl.entry_price, tpl.exit_price, tpl.shares,
-                   tpl.exit_value_usd, tpl.threshold, tpl.exited_at,
-                   tpl.final_outcome, tpl.final_price, tpl.counterfactual_pnl,
+            SELECT tpl.outcome,
+                   SUM(tpl.entry_price * tpl.shares) / SUM(tpl.shares) as entry_price,
+                   SUM(tpl.exit_price * tpl.shares) / SUM(tpl.shares) as exit_price,
+                   SUM(tpl.shares) as shares,
+                   SUM(tpl.exit_value_usd) as exit_value_usd,
+                   MAX(tpl.threshold) as threshold,
+                   MAX(tpl.exited_at) as exited_at,
+                   -- use latest non-null final_outcome/counterfactual
+                   MAX(tpl.final_outcome) as final_outcome,
+                   MAX(tpl.final_price) as final_price,
+                   SUM(tpl.counterfactual_pnl) as counterfactual_pnl,
                    COALESCE(m.question, tpl.market_condition_id) AS question
             FROM take_profit_log tpl
             LEFT JOIN markets m ON m.condition_id = tpl.market_condition_id
-            ORDER BY tpl.id DESC
+            GROUP BY tpl.market_condition_id, tpl.outcome
+            ORDER BY MAX(tpl.id) DESC
         """).fetchall()
         aconn.close()
     except Exception as e:
@@ -903,7 +926,7 @@ def _html_take_profit_log(analytics_db_path: str) -> str:
     rows_html = ""
     for r in rows:
         ratio = r["exit_price"] / r["entry_price"] if r["entry_price"] else 0
-        exited = (r["exited_at"] or "")[:10]
+        exited = (r["exited_at"] or "")[:16]
         fo = r["final_outcome"]
         cpnl = r["counterfactual_pnl"]
 
@@ -967,7 +990,10 @@ def _html_signal_log(analytics_db_path: str, limit: int = 50) -> str:
     DECISION_COLORS = {
         "BUY": "green", "TAKE_PROFIT": "green",
         "SKIP_PRICE": "yellow", "SKIP_SIZE": "yellow",
-        "SKIP_API": "red", "SKIP_ERROR": "red",
+        "SKIP_OPPOSITE_HELD": "yellow",
+        "SKIP_API": "red", "SKIP_NO_BOOK": "gray",
+        "SKIP_TP_EXIT": "gray",
+        "SKIP_ERROR": "red",
         "DRY_RUN": "blue",
     }
     try:
@@ -1035,7 +1061,10 @@ def _html_signal_log(analytics_db_path: str, limit: int = 50) -> str:
 def _html_decision_stats(analytics_db_path: str, days: int = 7) -> str:
     COLORS = {
         "BUY": "green", "SKIP_PRICE": "yellow", "SKIP_SIZE": "yellow",
-        "SKIP_API": "red", "SKIP_ERROR": "red", "DRY_RUN": "blue",
+        "SKIP_OPPOSITE_HELD": "yellow",
+        "SKIP_API": "red", "SKIP_NO_BOOK": "gray",
+        "SKIP_TP_EXIT": "gray",
+        "SKIP_ERROR": "red", "DRY_RUN": "blue",
     }
     try:
         aconn = sqlite3.connect(analytics_db_path)
@@ -1078,7 +1107,7 @@ def _html_decision_stats(analytics_db_path: str, days: int = 7) -> str:
 
 def _html_recent_trades(conn: sqlite3.Connection, limit: int = 10) -> str:
     rows = conn.execute("""
-        SELECT market_question, outcome, avg_price, amount_usd, shares, created_at
+        SELECT market_question, outcome, side, avg_price, amount_usd, shares, created_at
         FROM trades
         ORDER BY id DESC
         LIMIT ?
@@ -1091,10 +1120,11 @@ def _html_recent_trades(conn: sqlite3.Connection, limit: int = 10) -> str:
     <tr>
       <td>{_html_module.escape(r['market_question'][:55])}</td>
       <td>{_html_module.escape(r['outcome'].upper()[:12])}</td>
+      <td class="{'green' if r['side'] == 'buy' else 'red'}">{r['side'].upper()}</td>
       <td class="r">{r['shares']:,.0f}</td>
       <td class="r">{r['avg_price']:.3f}</td>
       <td class="r">${r['amount_usd']:.2f}</td>
-      <td class="dim">{_html_module.escape(r['created_at'][:10])}</td>
+      <td class="dim">{_html_module.escape(r['created_at'][:16])}</td>
     </tr>""" for r in rows)
 
     return f"""
@@ -1102,7 +1132,7 @@ def _html_recent_trades(conn: sqlite3.Connection, limit: int = 10) -> str:
   <div class="card-title">Recent Trades (last {limit})</div>
   <table>
     <thead><tr>
-      <th>Market</th><th>Outcome</th>
+      <th>Market</th><th>Outcome</th><th>Side</th>
       <th class="r">Shares</th><th class="r">Price</th><th class="r">Cost</th><th>Date</th>
     </tr></thead>
     <tbody>{rows_html}</tbody>
@@ -1138,7 +1168,7 @@ def _generate_html(
         tp_count = None
         try:
             aconn = sqlite3.connect(analytics_db_path)
-            tp_count = aconn.execute("SELECT COUNT(*) FROM take_profit_log").fetchone()[0]
+            tp_count = aconn.execute("SELECT COUNT(DISTINCT market_condition_id || outcome) FROM take_profit_log").fetchone()[0]
             aconn.close()
         except Exception:
             pass

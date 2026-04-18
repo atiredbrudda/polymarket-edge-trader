@@ -324,6 +324,14 @@ def _run_bridge(db_path: str, dry_run: bool, paper_data_dir: str) -> None:
     # Load existing positions — used for idempotency guard and price snapshots
     held, entry_prices = _load_open_positions(paper_dir)
 
+    # Load TP-exited positions — don't re-enter after taking profit
+    tp_exited: set[tuple[str, str]] = set()
+    if "take_profit_log" in analytics_db.table_names():
+        for row in analytics_db.execute(
+            "SELECT DISTINCT market_condition_id, outcome FROM take_profit_log"
+        ).fetchall():
+            tp_exited.add((row[0], row[1].lower()))
+
     signals = _get_actionable_signals(analytics_db)
     if not signals:
         console.print("[yellow]No actionable signals found.[/yellow]")
@@ -366,13 +374,45 @@ def _run_bridge(db_path: str, dry_run: bool, paper_data_dir: str) -> None:
             if signal["market_id"] not in _price_cache["market_tokens"]:
                 _price_cache["market_tokens"][signal["market_id"]] = market.tokens
         except Exception as e:
-            _log_decision(analytics_db, signal, "SKIP_API", reason=str(e))
+            err = str(e)
+            # CLOB 404 = orderbook removed (market resolved/settled before DB caught up)
+            if "No orderbook exists" in err:
+                analytics_db.execute(
+                    "UPDATE markets SET resolved = 1 WHERE condition_id = ?",
+                    [signal["market_id"]],
+                )
+                decision = "SKIP_NO_BOOK"
+                label = "[dim]SKIP_NO_BOOK[/dim]"
+            else:
+                decision = "SKIP_API"
+                label = "[red]SKIP_API[/red]"
+            _log_decision(analytics_db, signal, decision, reason=err)
             results.add_row(
                 signal.get("question", signal["market_id"])[:40],
                 signal["direction"], signal["tier"],
                 f"{signal['q5_count']}/{signal['net_q5_count']}",
                 f"{signal['avg_entry_price']:.3f}" if signal["avg_entry_price"] else "?",
-                "ERR", "", "SKIP_API", ""
+                "ERR", "", label, ""
+            )
+            skips += 1
+            continue
+
+        # Opposing position guardrail: refuse if we hold the other side
+        # of the same binary market. See wiki: opposing-positions-guardrail.md
+        opposite_held = [
+            (m, o) for (m, o) in held
+            if m == signal["market_id"] and o != resolved_outcome.lower()
+        ]
+        if opposite_held:
+            _log_decision(analytics_db, signal, "SKIP_OPPOSITE_HELD",
+                          live_price, reason=f"holding opposite outcome: {opposite_held[0][1]}")
+            results.add_row(
+                signal.get("question", "")[:40],
+                signal["direction"], signal["tier"],
+                f"{signal['q5_count']}/{signal['net_q5_count']}",
+                f"{signal['avg_entry_price']:.3f}" if signal["avg_entry_price"] else "?",
+                f"{live_price:.3f}", "",
+                "[yellow]SKIP_OPPOSITE[/yellow]", "",
             )
             skips += 1
             continue
@@ -393,6 +433,21 @@ def _run_bridge(db_path: str, dry_run: bool, paper_data_dir: str) -> None:
                 f"{entry:.3f}" if entry else "?",
                 f"{live_price:.3f}", "",
                 "[dim]SKIP_HELD[/dim]", "",
+            )
+            skips += 1
+            continue
+
+        # Don't re-enter a position we already took profit on
+        if (signal["market_id"], resolved_outcome.lower()) in tp_exited:
+            _log_decision(analytics_db, signal, "SKIP_TP_EXIT",
+                          live_price, reason="already took profit on this position")
+            results.add_row(
+                signal.get("question", "")[:40],
+                signal["direction"], signal["tier"],
+                f"{signal['q5_count']}/{signal['net_q5_count']}",
+                f"{signal['avg_entry_price']:.3f}" if signal["avg_entry_price"] else "?",
+                f"{live_price:.3f}", "",
+                "[dim]SKIP_TP_EXIT[/dim]", "",
             )
             skips += 1
             continue
@@ -465,7 +520,8 @@ def _run_bridge(db_path: str, dry_run: bool, paper_data_dir: str) -> None:
         try:
             result = engine.buy(signal["market_id"], resolved_outcome, size_usd)
             _log_decision(analytics_db, signal, "BUY",
-                          live_price, spread, size_usd)
+                          live_price, spread, size_usd,
+                          reason=f"{resolved_outcome} @ {live_price:.3f}, q5_entry={q5_entry:.3f}")
             results.add_row(
                 signal.get("question", "")[:40],
                 signal["direction"], signal["tier"],

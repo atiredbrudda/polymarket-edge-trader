@@ -103,7 +103,8 @@ def _apply_opposing_direction_cancellation(df: pd.DataFrame) -> pd.DataFrame:
     """Layer 1: Cancel opposing Q5 traders on the same market.
 
     When Q5 traders are on both LONG and SHORT sides of the same market,
-    compute net_q5_count = |LONG_count - SHORT_count|. Re-tier based on net.
+    compute net_q5_count = own_count - opposing_count (floored at 0).
+    Only the dominant side keeps a positive net; the minority side gets 0.
     """
     # Build a map of market_id -> {direction: q5_count}
     market_directions = df.groupby("market_id")["direction"].nunique()
@@ -116,7 +117,7 @@ def _apply_opposing_direction_cancellation(df: pd.DataFrame) -> pd.DataFrame:
             same_market = df[df["market_id"] == row["market_id"]]
             opposing = same_market[same_market["direction"] != row["direction"]]
             opposing_count = int(opposing["q5_count"].iloc[0]) if len(opposing) > 0 else 0
-            net = abs(int(row["q5_count"]) - opposing_count)
+            net = max(0, int(row["q5_count"]) - opposing_count)
             net_counts.append(net)
         else:
             # No opposition — net equals raw count
