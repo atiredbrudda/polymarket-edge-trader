@@ -388,10 +388,17 @@ def _run_take_profit(
                 cached_token_id = market.get_token_id(outcome)
                 live_price = engine.api.get_midpoint(cached_token_id)
             except Exception as e:
-                _log_decision(analytics_db, market_id, outcome, "SKIP_API",
-                              reason=str(e), entry_price=avg_entry)
+                err = str(e)
+                if "No orderbook exists" in err:
+                    decision = "SKIP_NO_BOOK"
+                    dec_label = "[dim]SKIP_NO_BOOK[/dim]"
+                else:
+                    decision = "SKIP_API"
+                    dec_label = "[red]SKIP_API[/red]"
+                _log_decision(analytics_db, market_id, outcome, decision,
+                              reason=err, entry_price=avg_entry)
                 t.add_row(label, outcome, f"{avg_entry:.3f}", "ERR", "—",
-                          f"{shares:.1f}", "[red]SKIP_API[/red]", "")
+                          f"{shares:.1f}", dec_label, "")
                 errors += 1
                 continue
 

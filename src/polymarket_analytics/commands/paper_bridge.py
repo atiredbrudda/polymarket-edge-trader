@@ -31,6 +31,57 @@ SPREAD_SOFT_LIMIT = 0.01  # 1-2c — reduce size by half
 PRICE_FLOOR = 0.05        # skip decided markets (backtest used 0.05-0.95 range)
 
 _PRICE_CACHE_FILE = ".price_cache.json"
+_JOURNAL_FILE = "decision_journal.log"
+
+
+class _Journal:
+    """Append-only strategy rules log.
+
+    Records the active trading rules at the start of each bridge run.
+    When a rule changes, the difference is visible by comparing headers.
+    File lives next to paper.db at data/paper_trader/decision_journal.log.
+    """
+
+    def __init__(self, paper_dir: Path):
+        self._path = paper_dir / _JOURNAL_FILE
+        self._f = open(self._path, "a")
+
+    def run_header(self, cash: float, n_signals: int, n_held: int,
+                   n_tp_exited: int) -> None:
+        self._f.write(
+            f"\n{'=' * 80}\n"
+            f"BRIDGE RUN  {datetime.now(timezone.utc).strftime('%Y-%m-%d %H:%M:%S UTC')}\n"
+            f"{'=' * 80}\n"
+            f"Cash: ${cash:,.2f}  |  Signals: {n_signals}  |  "
+            f"Open: {n_held}  |  TP-exited: {n_tp_exited}\n"
+            f"\n"
+            f"Entry rules:\n"
+            f"  Signal tier      : ACT only (net_q5 >= 5)\n"
+            f"  Spread hard limit: {SPREAD_HARD_LIMIT}  → SKIP if live > q5_entry + this\n"
+            f"  Spread soft limit: {SPREAD_SOFT_LIMIT}  → half size if spread > this\n"
+            f"  Price floor      : {PRICE_FLOOR}  → SKIP if live price below this\n"
+            f"\n"
+            f"Sizing:\n"
+            f"  High conviction  : 2.5% bankroll (q5 >= 5 AND clv_ratio > 60%)\n"
+            f"  Standard ACT     : 2.0% bankroll\n"
+            f"  Correlated adj   : ÷ event_group_size\n"
+            f"  Minimum order    : $1.00\n"
+            f"\n"
+            f"Exit rules:\n"
+            f"  Take-profit      : sell at 1.5x entry (50% gain)\n"
+            f"  Stop-loss        : none (proven harmful — 95% false-stop rate)\n"
+            f"\n"
+            f"Guardrails:\n"
+            f"  SKIP_OPPOSITE_HELD : don't buy other side of same binary market\n"
+            f"  SKIP_TP_EXIT       : don't re-enter after taking profit\n"
+            f"  SKIP_NO_BOOK       : auto-resolve markets with dead orderbooks\n"
+            f"  SKIP_HELD          : don't double-buy same position\n"
+            f"{'=' * 80}\n"
+        )
+        self._f.flush()
+
+    def close(self) -> None:
+        self._f.close()
 
 
 def _write_price_cache(paper_dir: Path, cache: dict) -> None:
@@ -338,6 +389,10 @@ def _run_bridge(db_path: str, dry_run: bool, paper_data_dir: str) -> None:
         engine.close()
         return
 
+    # Decision journal — append-only log file
+    journal = _Journal(paper_dir)
+    journal.run_header(account.cash, len(signals), len(held), len(tp_exited))
+
     console.print(f"\n[bold]=== Paper Trading Bridge ===[/bold]")
     console.print(f"Account cash: ${account.cash:,.2f}")
     console.print(f"Signals to evaluate: {len(signals)}  |  Open positions: {len(held)}\n")
@@ -578,6 +633,7 @@ def _run_bridge(db_path: str, dry_run: bool, paper_data_dir: str) -> None:
         console.print(f"[dim]Snapshotted {swept} stale-signal position(s).[/dim]")
 
     _write_price_cache(paper_dir, _price_cache)
+    journal.close()
     engine.close()
 
 

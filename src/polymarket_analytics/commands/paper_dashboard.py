@@ -858,13 +858,20 @@ def _html_resolved_positions(conn: sqlite3.Connection, limit: int = 20) -> str:
         hidden = len(rows) - SHOW_FIRST
         show_more = f"""
   <div style="margin-top:10px">
-    <button class="btn-show-more" onclick="
+    <button class="btn-show-more" id="res-toggle" onclick="
       var els = document.querySelectorAll('.res-extra');
-      var hidden = els[0] && els[0].style.display === 'none';
-      els.forEach(function(el) {{ el.style.display = hidden ? '' : 'none'; }});
-      this.textContent = hidden ? 'Show less' : 'Show {hidden} more';
+      var isHidden = els[0] && els[0].style.display === 'none';
+      els.forEach(function(el) {{ el.style.display = isHidden ? '' : 'none'; }});
+      this.textContent = isHidden ? 'Show less' : 'Show {hidden} more';
+      localStorage.setItem('res-expanded', isHidden ? '1' : '');
     ">Show {hidden} more</button>
-  </div>"""
+  </div>
+  <script>
+    if (localStorage.getItem('res-expanded')) {{
+      document.querySelectorAll('.res-extra').forEach(function(el) {{ el.style.display = ''; }});
+      document.getElementById('res-toggle').textContent = 'Show less';
+    }}
+  </script>"""
 
     win_rate_str = ""
     if total_closed > 0:
