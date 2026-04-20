@@ -317,9 +317,8 @@ async def _discover_markets(
             eid = hashlib.sha256(f"{cid}:{entity_str}".encode()).hexdigest()[:16]
             db.execute(
                 """
-                INSERT INTO market_entities (id, condition_id, game, team_a, team_b, tournament, market_type)
+                INSERT OR IGNORE INTO market_entities (id, condition_id, game, team_a, team_b, tournament, market_type)
                 VALUES (:id, :condition_id, :game, :team_a, :team_b, :tournament, :market_type)
-                ON CONFLICT(id) DO NOTHING
                 """,
                 {
                     "id": eid,
@@ -504,6 +503,29 @@ async def _monitor_pass(
             total_so = sum(len(v) for v in sell_only_by_trader.values())
             console.print(f"  [dim]Sell-only pre-check: {total_so} market(s) need Graph fallback[/dim]")
 
+        # Phase 4.5: Concurrent Graph pre-fetch for all sell-only traders
+        prefetched_graph_by_trader: dict[str, list] = {}
+        sell_only_traders = list(sell_only_by_trader.keys())
+        if sell_only_traders:
+            console.print(f"  Pre-fetching Graph data for {len(sell_only_traders)} sell-only trader(s)...")
+            graph_semaphore = asyncio.Semaphore(CONCURRENT_LIMIT)
+
+            async def _fetch_graph_one(addr: str) -> tuple[str, list]:
+                async with graph_semaphore:
+                    try:
+                        events = await asyncio.wait_for(
+                            graph_client.fetch_trader_trades(addr, since_unix_ts=None),
+                            timeout=35.0,
+                        )
+                    except Exception:
+                        events = []
+                    return addr, events
+
+            graph_results = await asyncio.gather(*[_fetch_graph_one(a) for a in sell_only_traders])
+            for addr, events in graph_results:
+                prefetched_graph_by_trader[addr] = events
+            console.print(f"  [dim]Graph pre-fetch complete[/dim]")
+
         upsert_total = len(trader_niche_trades)
         traders_updated: set[str] = set()
         for i, (address, trades) in enumerate(trader_niche_trades.items(), 1):
@@ -522,6 +544,7 @@ async def _monitor_pass(
                         prefetched_trades=trades,
                         global_catalog=global_catalog,
                         prefetched_sell_only_markets=sell_only_by_trader.get(address, []),
+                        prefetched_graph=prefetched_graph_by_trader.get(address),
                     )
                     db.conn.execute(
                         "UPDATE traders SET last_monitored_at = ? WHERE address = ?",
