@@ -152,6 +152,7 @@ async def _ingest_events_async(ctx, db_path: str, full: bool):
         # Prepare records for gamma_events
         gamma_events_records = []
         markets_records = []
+        props_skipped_by_label: dict[str, int] = {}
 
         for market in markets:
             condition_id = market.get("conditionId", "")
@@ -204,6 +205,13 @@ async def _ingest_events_async(ctx, db_path: str, full: bool):
                                 break
                     except (ValueError, TypeError, json.JSONDecodeError):
                         pass
+
+            # Prop-market filter — skip kill counts, first blood, etc. Wiki: prop-market-prune.
+            from polymarket_analytics.filters.prop_filter import matched_prop_label
+            _prop_label = matched_prop_label(question)
+            if _prop_label is not None:
+                props_skipped_by_label[_prop_label] = props_skipped_by_label.get(_prop_label, 0) + 1
+                continue
 
             # Generate hash ID for gamma_events
             event_id = hashlib.sha256(condition_id.encode()).hexdigest()
@@ -297,6 +305,11 @@ async def _ingest_events_async(ctx, db_path: str, full: bool):
         click.echo(f"Ingested {len(markets)} markets for niche '{niche_slug}'")
         click.echo(f"  - gamma_events: {len(gamma_events_records)} records")
         click.echo(f"  - markets: {len(markets_records)} records")
+        if props_skipped_by_label:
+            total_skipped = sum(props_skipped_by_label.values())
+            top = sorted(props_skipped_by_label.items(), key=lambda x: -x[1])
+            summary = ", ".join(f"{label} ({n})" for label, n in top[:8])
+            click.echo(f"  - props_skipped: {total_skipped} ({summary})")
 
     finally:
         await client.close()

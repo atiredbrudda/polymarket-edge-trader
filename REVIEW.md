@@ -1,10 +1,11 @@
 # Code Review: Polymarket Analytics Pipeline
 
 **Reviewed:** 2026-04-09
-**Updated:** 2026-04-15 (session 3)
+**Updated:** 2026-04-18 (CLOB v2 migration prep + P-03 confirmed fixed)
 **Depth:** deep (cross-file analysis)
 **Files Reviewed:** 20
 **Status:** mostly_resolved (14 fixed, 3 acceptable, open: paper resolution)
+**⚠ Scheduled action:** S-01 CLOB v2 cutover on **2026-04-28 ~11:00 UTC** — see Scheduled section.
 
 ## Summary
 
@@ -39,6 +40,59 @@ Deep review of the Polymarket analytics pipeline. All critical and most high/med
 | M-06 | Resolution UPDATE ordering dependency (FLAT before market-outcome) | **Acceptable** — ordering is correct and both UPDATEs run in same transaction. Fragile but functional. |
 | L-02 | `extraction.py` swallows all exceptions | **Acceptable** — defensive fallback to empty DataFrame. Low-risk since extraction failures are visible downstream (no scores generated). |
 
+---
+
+## Scheduled — Polymarket CLOB v2 Migration
+
+### S-01: CLOB v2 cutover — **TRIGGER DATE: 2026-04-28 (~11:00 UTC)**
+
+**Status:** prep complete, awaiting cutover. ~1 hour downtime expected; all open orders cancelled at cutover.
+
+**Migration docs:** https://docs.polymarket.com/v2-migration
+
+**Audit summary (2026-04-18):**
+- This pipeline is **read-only** on Polymarket APIs. No on-chain order signing.
+- pm_trader (`polymarket-paper-trader` fork) is a pure paper trader — no `py-clob-client` dep, no EIP-712 signing, no hardcoded USDC.e addresses.
+- Probed v2 endpoints (`/book`, `/midpoint`, `/fee-rate`, `/tick-size`, `/markets/{cond}`) against `clob-v2.polymarket.com` — **schemas are byte-identical to v1**. No parsing changes needed.
+- `getClobMarketInfo` is a JS-SDK helper, not a new REST route. `/fee-rate` and `/tick-size` are NOT being removed.
+- Total breakage scope: 1 hardcoded URL.
+
+**Prep already done:**
+- Fork patched + pushed: `atiredbrudda/polymarket-paper-trader@eb801f1` adds `POLYMARKET_CLOB_URL` and `POLYMARKET_GAMMA_URL` env-var overrides (defaults unchanged — behavior-neutral until env var is set).
+
+**Cutover playbook (run on 2026-04-28):**
+```bash
+# 1. Pull latest pm_trader into venv
+cd /Users/macbookair/polymarketv2
+.venv/bin/pip install --upgrade --force-reinstall \
+  "polymarket-paper-trader @ git+https://github.com/atiredbrudda/polymarket-paper-trader.git"
+
+# 2. Flip CLOB endpoint via env var (Gamma stays default unless docs change)
+export POLYMARKET_CLOB_URL="https://clob-v2.polymarket.com"
+
+# 3. Smoke test before next cron pass
+.venv/bin/polymarket --niche esports paper-bridge --dry-run
+
+# 4. If broken, instant rollback:
+unset POLYMARKET_CLOB_URL
+```
+
+**Add the export to wherever cron sources its env** (crontab wrapper, .env file, systemd unit — verify before cutover).
+
+**Verification checklist post-cutover:**
+- [ ] `paper-bridge --dry-run` returns prices (not SKIP_API)
+- [ ] `paper-take-profit --dry-run` returns live prices for open positions
+- [ ] Monitor poll cycle completes without API errors
+- [ ] One real cron pass (next 4h interval) completes cleanly
+
+**What's NOT affected (verified safe):**
+- Gamma API (`gamma-api.polymarket.com`) — no announced changes
+- Data API (`data-api.polymarket.com`) — read-only trades/holders
+- Graph subgraph — read-only fallback
+- Bridge decision logic, scoring formulas, detection — all data-agnostic
+
+---
+
 ## Remaining Open
 
 ### H-06: Paper trading results monitor/dashboard — **FIXED 2026-04-15**
@@ -48,6 +102,21 @@ Deep review of the Polymarket analytics pipeline. All critical and most high/med
 ---
 
 ## Remaining Open (Low Impact)
+
+### H-07: `ingest-events --full` OOM hang on memory-constrained runs
+
+**File:** `src/polymarket_analytics/api/gamma.py:67` / `src/polymarket_analytics/commands/ingest_events.py:97`
+**Impact:** `fetch_markets(closed=True)` paginates all ~115k+ closed esports markets into a single in-memory list before any processing begins. On a low-memory machine (e.g. post-VACUUM when the OS has been paging heavily), Python stalls mid-pagination with no timeout on the httpx client. Observed 2026-04-20: stuck at page 575 / 115k markets for 40+ min, required manual kill.
+
+**Root cause:** Two problems compound: (1) no httpx read timeout on the Gamma client, so a stalled response waits forever; (2) fetching all 115k closed markets per run is unnecessary — we only need markets closed within the last ~7 days for resolution chain freshness.
+
+**Fix (implement together):**
+1. **Date-filtered closed sweep** — add `end_date_min` param to `fetch_markets`, pass `now − 7 days` for the closed fetch in `ingest-events --full`. Cuts 115k pages to ~50 markets. Also eliminates the memory pressure entirely.
+2. **httpx read timeout** — set `timeout=httpx.Timeout(30.0)` on the Gamma client so stalled requests surface as `ReadTimeout` (already retried) rather than hanging forever.
+
+**Note:** `--full` must remain unconditional in cron — incremental mode misses newly-resolved markets and breaks the resolution chain (see Cron Architecture wiki).
+
+---
 
 ### H-04: `discover` sequential HTTP — 45 min for 283 markets
 
@@ -110,9 +179,9 @@ Fixed via dirty_pairs in-memory set (monitor path) and timestamp watermark CTE (
 
 Added `idx_positions_last_trade_ts` and `idx_trades_ts_trader_market` covering index. Commit `ff98baf`.
 
-### P-03: Monitor lock
+### P-03: Monitor lock — **FIXED**
 
-**Impact:** With `--poll 30` and `build-positions` taking ~9 min, a slow pass (Graph fallback, API retries) can still be running when the next poll fires. Two concurrent passes write to analytics.db simultaneously. The cron has a lock protocol; the monitor does not.
+Monitor now acquires the same `.pipeline.lock` cron uses (`src/polymarket_analytics/health/lock.py:91`). Each poll pass wraps in `with pipeline_lock("monitor", lock_path=lock_path)` (`monitor.py:668`); if cron holds the lock, the pass is skipped with `Pipeline locked by {holder} — skipping this pass`. Per-trader transactions release the write lock between traders (`monitor.py:483`) so the lock isn't held continuously. Operational matrix documented in `OPERATIONS.md:124-128`.
 
 ### P-04: Price cache across `paper-bridge` + `paper-take-profit`
 

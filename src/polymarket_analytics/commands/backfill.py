@@ -22,6 +22,7 @@ from typing import Any, Dict, List, Optional
 from contextlib import contextmanager
 
 import click
+import httpx
 from dotenv import load_dotenv
 from rich.console import Console
 
@@ -193,7 +194,7 @@ async def fetch_trades_with_retry(
         except Exception as e:
             error_str = str(e)
             # Retry on rate-limit and transient errors: 408, 425, 429
-            if any(
+            if isinstance(e, (httpx.ReadTimeout, httpx.ConnectTimeout)) or any(
                 code in error_str
                 for code in (
                     "408",
@@ -406,9 +407,12 @@ async def backfill_trader(
             graph_events = prefetched_graph
         else:
             with time_component(f"Graph fallback ({trader_address[:8]}...)"):
-                graph_events = await graph_client.fetch_trader_trades(
-                    trader_address, since_unix_ts=None
-                )
+                try:
+                    graph_events = await graph_client.fetch_trader_trades(
+                        trader_address, since_unix_ts=None
+                    )
+                except (httpx.ReadTimeout, httpx.ConnectTimeout):
+                    graph_events = []
         # Merge Graph trades with API trades (union — INSERT OR IGNORE deduplicates)
         for event in graph_events:
             api_trades.append(parse_graph_event(event, trader_address))
@@ -568,14 +572,23 @@ async def backfill_trader(
             if last_trade_iso is None or ts_iso > last_trade_iso:
                 last_trade_iso = ts_iso
 
-        db["traders"].update(
-            trader_address,
-            {
-                "last_backfilled_at": datetime.now(timezone.utc).isoformat(),
-                "last_trade_seen_at": last_trade_iso,
-                "backfill_complete": True,
-            },
-        )
+        try:
+            db["traders"].update(
+                trader_address,
+                {
+                    "last_backfilled_at": datetime.now(timezone.utc).isoformat(),
+                    "last_trade_seen_at": last_trade_iso,
+                    "backfill_complete": True,
+                },
+            )
+        except Exception as _upd_e:
+            console.print(
+                f"  [yellow]⚠ traders.update {trader_address[:10]}... "
+                f"type={type(_upd_e).__name__} args={_upd_e.args!r} "
+                f"ingested={stats['ingested']} skipped={stats['skipped']} "
+                f"fallback={stats['fallback']}[/yellow]"
+            )
+            raise
 
     return stats
 
@@ -879,7 +892,8 @@ async def backfill_async(ctx, db_path: str, new_only: bool = False) -> None:
                         total_stats["traders_processed"] += 1
                         _shutdown.record_completed(trader_address)
                         console.print(
-                            f"  [red]✗ {trader_address[:10]}...: {e}[/red]"
+                            f"  [red]✗ {trader_address[:10]}... "
+                            f"{type(e).__name__}({e.args!r}): {e}[/red]"
                         )
 
                     progress.update(task, description=_desc())
@@ -926,6 +940,7 @@ async def backfill_async(ctx, db_path: str, new_only: bool = False) -> None:
                     SELECT COUNT(*) FROM positions
                     WHERE data_incomplete = 1
                       AND COALESCE(graph_retry_count, 0) < ?
+                      AND resolved = 0
                     """,
                     [GRAPH_RETRY_LIMIT],
                 ).fetchone()[0]

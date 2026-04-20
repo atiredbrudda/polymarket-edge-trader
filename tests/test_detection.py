@@ -578,6 +578,32 @@ class TestEdgeCases:
             f"Expected 0 convergence signals for wrong niche, got {len(result_df)}"
         )
 
+    def test_below_threshold_q5_excluded_from_convergence(
+        self, detection_db, fixture_traders, fixture_markets, future_end_date
+    ):
+        """Q5 traders with composite_score below threshold must not count toward convergence.
+
+        Fixture: 2 traders above threshold + 1 trader with quintile=5 but composite_score=-0.20.
+        All three hold positions on the same market/direction.
+        Expected: q5_count=2, not 3 — the sub-threshold trader is invisible.
+        """
+        db = detection_db
+        create_market(db, fixture_markets["market_a"], "esports", None, end_date=future_end_date)
+
+        create_q5_trader(db, fixture_traders["q5_trader_a"], "esports", composite_score=0.5)
+        create_q5_trader(db, fixture_traders["q5_trader_b"], "esports", composite_score=-0.05)
+        create_qn_trader(db, fixture_traders["q3_trader"], "esports", quintile=5, composite_score=-0.20)
+
+        for addr in (fixture_traders["q5_trader_a"], fixture_traders["q5_trader_b"], fixture_traders["q3_trader"]):
+            create_position(db, addr, fixture_markets["market_a"], "LONG", size=100.0, resolved=False)
+
+        result_df = detect_convergence(db, "esports")
+
+        assert len(result_df) == 1, f"Expected 1 signal, got {len(result_df)}"
+        assert result_df.iloc[0]["q5_count"] == 2, (
+            f"Expected q5_count=2 (sub-threshold trader excluded), got {result_df.iloc[0]['q5_count']}"
+        )
+
     def test_detect_dependency_assertions(self, detection_db):
         """Test that missing dependency tables raise clear error messages.
 

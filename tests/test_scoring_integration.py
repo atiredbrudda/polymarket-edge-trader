@@ -16,7 +16,9 @@ from polymarket_analytics.db.schema import init_database
 from polymarket_analytics.scoring.extraction import extract_resolved_positions
 from polymarket_analytics.scoring.metrics import calculate_all_metrics
 from polymarket_analytics.scoring.normalization import compute_normalized_scores
+from polymarket_analytics.scoring.thresholds import Q5_COMPOSITE_THRESHOLD
 from polymarket_analytics.scoring.writer import write_lift_scores
+from tests.conftest import create_market, create_position, create_q5_trader, create_qn_trader
 
 
 @pytest.fixture
@@ -871,3 +873,97 @@ class TestFullScoringPipeline:
         window_end = datetime.now(timezone.utc).isoformat().replace("+00:00", "Z")
         upserted = write_lift_scores(scoring_db, scores_df, "esports", 30, window_end)
         assert upserted == 3
+
+
+class TestQ5CompositeThreshold:
+    """Tests that the composite_score >= Q5_COMPOSITE_THRESHOLD filter is applied consistently."""
+
+    MARKET_ID = "0xThresholdTestMarket_ESports_TeamLiquid_vs_NaVi"
+    TOKEN_ID = "0xThresholdTestToken_001"
+
+    def _setup_traders(self, db):
+        """Insert 3 quintile=5 traders: scores +0.5, -0.05 (above), -0.20 (below threshold)."""
+        create_q5_trader(db, "0xAboveHigh", "esports", composite_score=0.5)
+        create_q5_trader(db, "0xAboveLow", "esports", composite_score=-0.05)
+        create_qn_trader(db, "0xBelowThreshold", "esports", quintile=5, composite_score=-0.20)
+
+    def test_q5_view_filters_below_threshold(self, scoring_db):
+        """q5_traders view must exclude quintile=5 traders with composite_score < threshold."""
+        self._setup_traders(scoring_db)
+
+        rows = list(scoring_db.execute(
+            "SELECT trader_address FROM q5_traders WHERE category = 'esports'"
+        ))
+        addresses = {r[0] for r in rows}
+
+        assert len(addresses) == 2
+        assert "0xAboveHigh" in addresses
+        assert "0xAboveLow" in addresses
+        assert "0xBelowThreshold" not in addresses
+
+    def test_convergence_query_filters_below_threshold(self, scoring_db, tmp_path):
+        """detect_convergence must not count Q5 traders below the composite threshold."""
+        from polymarket_analytics.detection.convergence import detect_convergence
+
+        future_end = (
+            (datetime.now(timezone.utc) + timedelta(days=30))
+            .isoformat()
+            .replace("+00:00", "Z")
+        )
+        create_market(scoring_db, self.MARKET_ID, "esports", outcome=None, end_date=future_end)
+        self._setup_traders(scoring_db)
+
+        for addr in ("0xAboveHigh", "0xAboveLow", "0xBelowThreshold"):
+            create_position(scoring_db, addr, self.MARKET_ID, "LONG", size=100.0, resolved=False)
+
+        result = detect_convergence(scoring_db, "esports")
+
+        assert len(result) == 1
+        assert result.iloc[0]["q5_count"] == 2, (
+            f"Expected q5_count=2 (below-threshold trader excluded), got {result.iloc[0]['q5_count']}"
+        )
+
+    def test_paper_bridge_query_filters_below_threshold(self, scoring_db):
+        """Paper-bridge token-vote query must exclude sub-threshold Q5 traders."""
+        self._setup_traders(scoring_db)
+
+        # market required by token_catalog FK on condition_id
+        create_market(scoring_db, self.MARKET_ID, "esports", outcome=None)
+        # token_catalog required by FK on trades.token_id
+        scoring_db["token_catalog"].insert(
+            {"token_id": self.TOKEN_ID, "condition_id": self.MARKET_ID,
+             "question": "Test", "niche_slug": "esports"},
+            ignore=True,
+        )
+        for i, addr in enumerate(("0xAboveHigh", "0xAboveLow", "0xBelowThreshold")):
+            scoring_db["trades"].insert({
+                "trade_id": f"trade_{i}",
+                "token_id": self.TOKEN_ID,
+                "timestamp": "2026-01-01T12:00:00Z",
+                "side": "BUY",
+                "price": 0.5,
+                "size": 100.0,
+                "market_id": self.MARKET_ID,
+                "trader_address": addr,
+            })
+
+        rows = scoring_db.execute(
+            """
+            SELECT t.token_id, COUNT(*) as n
+            FROM trades t
+            JOIN lift_scores ls ON ls.trader_address = t.trader_address
+            WHERE t.market_id = ?
+              AND t.side = ?
+              AND ls.quintile = 5
+              AND ls.composite_score >= ?
+            GROUP BY t.token_id
+            ORDER BY n DESC
+            LIMIT 1
+            """,
+            [self.MARKET_ID, "BUY", Q5_COMPOSITE_THRESHOLD],
+        ).fetchall()
+
+        assert len(rows) == 1
+        assert rows[0][1] == 2, (
+            f"Expected count=2 (below-threshold trader excluded), got {rows[0][1]}"
+        )

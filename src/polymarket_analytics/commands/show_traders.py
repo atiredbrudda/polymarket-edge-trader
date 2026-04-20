@@ -18,6 +18,7 @@ from rich import box
 
 from polymarket_analytics.cli import cli
 from polymarket_analytics.db.schema import init_database
+from polymarket_analytics.scoring.thresholds import Q5_COMPOSITE_THRESHOLD
 
 console = Console()
 
@@ -134,12 +135,13 @@ def _signals_table(db, niche_slug: str) -> None:
               AND p.resolved = 0
               AND p.size > 0
               AND ls.quintile = 5
+              AND ls.composite_score >= :q5_threshold
               AND ls.category = :niche_slug
               AND ls.computed_at = :cutoff
             ORDER BY ls.composite_score DESC
             """,
             {"market_id": market_id, "direction": direction,
-             "niche_slug": niche_slug, "cutoff": cutoff},
+             "niche_slug": niche_slug, "cutoff": cutoff, "q5_threshold": Q5_COMPOSITE_THRESHOLD},
         ))
         if contributors:
             ctab = Table(box=box.MINIMAL, show_header=True, padding=(0, 1))

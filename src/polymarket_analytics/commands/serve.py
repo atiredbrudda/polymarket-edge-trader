@@ -19,6 +19,7 @@ import click
 
 from polymarket_analytics.cli import cli
 from polymarket_analytics.db.connection import get_db
+from polymarket_analytics.scoring.thresholds import Q5_COMPOSITE_THRESHOLD
 
 # ── HTML page ──────────────────────────────────────────────────────────────────
 
@@ -280,11 +281,12 @@ def _get_data(db, niche_slug: str) -> dict:
               AND COALESCE(p.data_incomplete, 0) = 0
               AND p.size > 0
               AND ls.quintile = 5
+              AND ls.composite_score >= ?
               AND ls.category = ?
               AND ls.computed_at = ?
             ORDER BY ls.composite_score DESC
             """,
-            signal_market_ids + [niche_slug, cutoff],
+            signal_market_ids + [Q5_COMPOSITE_THRESHOLD, niche_slug, cutoff],
         ))
         for mid, direction, trader_addr, score, size, entry_price in all_contribs:
             key = (mid, direction)

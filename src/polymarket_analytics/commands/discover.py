@@ -199,6 +199,28 @@ def discover(ctx, db_path: str, closing_within: Optional[int], use_llm: bool) ->
             )
 
     # -------------------------------------------------------------------------
+    # Prop-market filter — kill counts, first blood, dragon objectives etc.
+    # carry no Q5 signal (see wiki: prop-market-prune). Skip at ingest.
+    # -------------------------------------------------------------------------
+    from polymarket_analytics.filters.prop_filter import matched_prop_label
+    accepted_props: list = []
+    skipped_by_label: Dict[str, int] = {}
+    for m in gamma_markets:
+        label = matched_prop_label(m.get("question"))
+        if label is None:
+            accepted_props.append(m)
+        else:
+            skipped_by_label[label] = skipped_by_label.get(label, 0) + 1
+    props_skipped = len(gamma_markets) - len(accepted_props)
+    gamma_markets = accepted_props
+    if props_skipped:
+        top = sorted(skipped_by_label.items(), key=lambda x: -x[1])
+        summary = ", ".join(f"{label} ({n})" for label, n in top[:8])
+        console.print(
+            f"  [dim]props_skipped: {props_skipped:,} ({summary})[/dim]"
+        )
+
+    # -------------------------------------------------------------------------
     # Step 2: Upsert live markets into DB
     # -------------------------------------------------------------------------
     console.print(

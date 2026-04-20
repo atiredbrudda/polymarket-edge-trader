@@ -5,9 +5,9 @@
 #   Scheduled via launchd: ~/Library/LaunchAgents/com.polymarket.cron-pipeline.plist
 #
 # Two backfill modes:
-#   - Lean (--new-only): Mon-Sat, only never-backfilled traders (~20 min)
-#   - Full: Sunday, all ~6,000 active traders (~3h)
-#   - Missed-Sunday fallback: auto-upgrades to full if >8 days since last full
+#   - Lean (--new-only): all non-midnight passes, only never-backfilled traders (~20 min)
+#   - Full: midnight run (00:xx), all ~6,000 active traders (~3h)
+#   - Missed-midnight fallback: auto-upgrades to full if >2 days since last full
 #
 # Pre-flight: runs health-check --tier cron before pipeline.
 # Post-run: runs health-check --tier daily for summary alerts.
@@ -21,8 +21,8 @@ cd "$PROJECT_DIR"
 source .venv/bin/activate
 
 FULL_BACKFILL_MARKER="data/.last_full_backfill"
-DOW=$(date +%u)  # 1=Monday, 7=Sunday
-MAX_DAYS_WITHOUT_FULL=8
+HOUR=$(date +%H)  # 00-23
+MAX_DAYS_WITHOUT_FULL=2
 LOG_PREFIX="[$(date '+%Y-%m-%d %H:%M:%S')]"
 
 echo "$LOG_PREFIX Starting cron pipeline run"
@@ -44,9 +44,9 @@ fi
 # --- Determine backfill mode ---
 BACKFILL_MODE="--new-only"
 
-if [ "$DOW" -eq 7 ]; then
+if [ "$HOUR" -eq 0 ]; then
     BACKFILL_MODE=""
-    echo "$LOG_PREFIX Sunday — full backfill mode"
+    echo "$LOG_PREFIX Midnight run — full backfill mode"
 elif [ -f "$FULL_BACKFILL_MARKER" ]; then
     LAST_FULL=$(cat "$FULL_BACKFILL_MARKER")
     DAYS_SINCE=$(( ($(date +%s) - LAST_FULL) / 86400 ))

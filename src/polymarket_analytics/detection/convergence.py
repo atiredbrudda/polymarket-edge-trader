@@ -11,6 +11,8 @@ import click
 import pandas as pd
 import sqlite_utils
 
+from polymarket_analytics.scoring.thresholds import Q5_COMPOSITE_THRESHOLD
+
 
 def detect_convergence(db: sqlite_utils.Database, niche_slug: str) -> pd.DataFrame:
     """Detect consensus signals from Q5 trader convergence.
@@ -75,6 +77,7 @@ def detect_convergence(db: sqlite_utils.Database, niche_slug: str) -> pd.DataFra
         WHERE p.resolved = 0
           AND COALESCE(p.data_incomplete, 0) = 0
           AND ls.quintile = 5
+          AND ls.composite_score >= :q5_threshold
           AND ls.category = :niche_slug
           AND ls.computed_at = (
               SELECT MAX(computed_at) FROM lift_scores WHERE category = :niche_slug
@@ -87,7 +90,7 @@ def detect_convergence(db: sqlite_utils.Database, niche_slug: str) -> pd.DataFra
 
     # Execute query and return DataFrame
     # Empty DataFrame returned if no convergence found (no crash)
-    df = pd.read_sql_query(query, db.conn, params={"niche_slug": niche_slug})
+    df = pd.read_sql_query(query, db.conn, params={"niche_slug": niche_slug, "q5_threshold": Q5_COMPOSITE_THRESHOLD})
 
     if df.empty:
         return df

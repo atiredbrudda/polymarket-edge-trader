@@ -3,6 +3,7 @@
 from pathlib import Path
 
 from polymarket_analytics.db.connection import get_db
+from polymarket_analytics.scoring.thresholds import Q5_COMPOSITE_THRESHOLD
 
 
 def create_core_tables(db):
@@ -296,8 +297,9 @@ def create_views(db):
 
     Views are always recreated so they stay current with any schema changes.
     """
-    db.execute("""
-        CREATE VIEW IF NOT EXISTS q5_traders AS
+    db.execute("DROP VIEW IF EXISTS q5_traders")
+    db.execute(f"""
+        CREATE VIEW q5_traders AS
         SELECT
             trader_address,
             category,
@@ -310,6 +312,7 @@ def create_views(db):
             computed_at
         FROM lift_scores
         WHERE quintile = 5
+          AND composite_score >= {Q5_COMPOSITE_THRESHOLD}
           AND computed_at = (
               SELECT MAX(computed_at) FROM lift_scores ls2
               WHERE ls2.category = lift_scores.category

@@ -22,6 +22,7 @@ from rich.table import Table
 
 from polymarket_analytics.cli import cli
 from polymarket_analytics.db.schema import init_database
+from polymarket_analytics.scoring.thresholds import Q5_COMPOSITE_THRESHOLD
 
 console = Console()
 
@@ -184,11 +185,12 @@ def _resolve_token_and_outcome(
         WHERE t.market_id = ?
           AND t.side = ?
           AND ls.quintile = 5
+          AND ls.composite_score >= ?
         GROUP BY t.token_id
         ORDER BY n DESC
         LIMIT 1
         """,
-        [signal["market_id"], trade_side],
+        [signal["market_id"], trade_side, Q5_COMPOSITE_THRESHOLD],
     ).fetchall()
 
     if not rows:

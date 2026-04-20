@@ -791,6 +791,31 @@ def test_weekly_tier_sends_alert():
     assert "Weekly Health" in alert_title
 
 
+def test_q5_view_sql_contains_threshold(tmp_path):
+    """q5_traders view definition must embed the threshold literal.
+
+    This is the IF-NOT-EXISTS regression guard: if create_views() ever reverts
+    to CREATE VIEW IF NOT EXISTS, an existing DB will silently keep the old
+    view without the composite_score filter. The DROP+CREATE approach in
+    schema.py prevents that — but this test catches any future regression.
+    """
+    from polymarket_analytics.db.schema import init_database
+    from polymarket_analytics.scoring.thresholds import Q5_COMPOSITE_THRESHOLD
+
+    db = init_database(tmp_path / "threshold_check.db")
+    row = db.execute(
+        "SELECT sql FROM sqlite_master WHERE type='view' AND name='q5_traders'"
+    ).fetchone()
+
+    assert row is not None, "q5_traders view not found in sqlite_master"
+    view_sql = row[0]
+    threshold_str = str(Q5_COMPOSITE_THRESHOLD)
+    assert threshold_str in view_sql, (
+        f"q5_traders view SQL does not contain threshold '{threshold_str}'. "
+        f"View SQL: {view_sql}"
+    )
+
+
 def test_weekly_stores_q5_snapshot():
     """health-check --tier weekly persists q5_snapshot in health_log row."""
     import json
