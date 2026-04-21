@@ -717,13 +717,13 @@ async def backfill_async(ctx, db_path: str, new_only: bool = False) -> None:
             f"  Loaded {len(global_catalog):,} token catalog entries"
         )
 
+        _fetched = {"n": 0}
         _done = {"n": 0}
         _total = len(traders)
 
         def _print_progress() -> None:
-            n = _done["n"]
             print(
-                f"\r  [{n}/{_total}] processing traders...  "
+                f"\r  [{_done['n']}/{_total}] done  [{_fetched['n']}/{_total}] fetched  "
                 f"ingested: {total_stats['trades_ingested']:,} | "
                 f"skipped: {total_stats['trades_skipped']:,} | "
                 f"graph: {total_stats['graph_fallbacks']:,} | "
@@ -773,6 +773,8 @@ async def backfill_async(ctx, db_path: str, new_only: bool = False) -> None:
                                 )
                             except Exception:
                                 api_trades = []
+                            _fetched["n"] += 1
+                            _print_progress()
                             try:
                                 stats = await backfill_trader(
                                     db,
