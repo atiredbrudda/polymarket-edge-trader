@@ -69,6 +69,7 @@ class GammaAPIClient:
         tag_id: int,
         limit: int = 200,
         closed: Optional[bool] = None,
+        end_date_min: Optional[str] = None,
         on_page: Optional[Callable[[int, int], None]] = None,
     ) -> List[dict]:
         """Fetch all markets for a given tag_id with pagination.
@@ -78,6 +79,9 @@ class GammaAPIClient:
             limit: Number of markets per page (default: 200)
             closed: If False, fetch only open/unresolved markets. If True, only closed.
                     If None (default), fetch all markets.
+            end_date_min: ISO timestamp string. If provided, only returns markets whose
+                          endDate >= this value. Used to limit closed sweeps to recently-
+                          closed markets instead of all 115k+ historical markets.
             on_page: Optional callback(page_num, total_so_far) called after each page
 
         Returns:
@@ -94,6 +98,8 @@ class GammaAPIClient:
         params: dict = {"tag_id": tag_id, "limit": limit}
         if closed is not None:
             params["closed"] = "true" if closed else "false"
+        if end_date_min is not None:
+            params["end_date_min"] = end_date_min
 
         while True:
             last_err = None

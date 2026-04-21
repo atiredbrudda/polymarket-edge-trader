@@ -7,7 +7,7 @@ and populates the gamma_events and markets tables.
 import asyncio
 import hashlib
 import json
-from datetime import datetime
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
 import click
@@ -94,8 +94,13 @@ async def _ingest_events_async(ctx, db_path: str, full: bool):
             )
             console.print()
             click.echo(f"  Active: {len(active_markets):,} markets. Fetching closed...")
+            # Limit closed sweep to last 7 days — cuts ~115k pages to ~52.
+            # No end_date_max so voided markets (future endDate, closed=True) are included.
+            closed_since = (
+                datetime.now(timezone.utc) - timedelta(days=7)
+            ).strftime("%Y-%m-%dT%H:%M:%SZ")
             closed_markets = await client.fetch_markets(
-                tag_id, closed=True, on_page=on_page
+                tag_id, closed=True, end_date_min=closed_since, on_page=on_page
             )
             console.print()
             click.echo(f"  Closed: {len(closed_markets):,} markets.")

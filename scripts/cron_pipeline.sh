@@ -24,12 +24,22 @@ FULL_BACKFILL_MARKER="data/.last_full_backfill"
 HOUR=$(date +%H)  # 00-23
 MAX_DAYS_WITHOUT_FULL=2
 LOG_PREFIX="[$(date '+%Y-%m-%d %H:%M:%S')]"
+RUN_START=$(date -u +%Y-%m-%dT%H:%M:%SZ)
 
 echo "$LOG_PREFIX Starting cron pipeline run"
 
 # --- Acquire pipeline lock so the monitor skips its pass while cron is running ---
 LOCK_FILE="$PROJECT_DIR/data/.pipeline.lock"
 mkdir -p "$(dirname "$LOCK_FILE")"
+if [ -f "$LOCK_FILE" ]; then
+    EXISTING_PID=$(python3 -c "import json,sys; d=json.load(open('$LOCK_FILE')); print(d.get('pid',''))" 2>/dev/null)
+    if [ -n "$EXISTING_PID" ] && kill -0 "$EXISTING_PID" 2>/dev/null; then
+        echo "$LOG_PREFIX Lock held by PID $EXISTING_PID (still alive) — skipping run"
+        exit 0
+    else
+        echo "$LOG_PREFIX Stale lock (PID ${EXISTING_PID:-unknown} is gone) — overwriting"
+    fi
+fi
 LOCK_JSON="{\"pid\":$$,\"process_type\":\"cron\",\"started_at\":\"$(date -u +%Y-%m-%dT%H:%M:%SZ)\"}"
 echo "$LOCK_JSON" > "$LOCK_FILE"
 trap 'rm -f "$LOCK_FILE"' EXIT
@@ -106,7 +116,10 @@ fi
 
 # --- Post-run daily summary ---
 echo "$LOG_PREFIX Running daily health summary..."
-polymarket --niche esports health-check --tier daily || true
+STAGES_CSV=$(echo "$FAILED_STAGES" | xargs | tr ' ' ',')
+polymarket --niche esports health-check --tier daily \
+    --run-start "$RUN_START" \
+    --stages-failed "$STAGES_CSV" || true
 
 if [ -n "$FAILED_STAGES" ]; then
     echo "$LOG_PREFIX WARNING: Failed stages:$FAILED_STAGES"

@@ -47,12 +47,17 @@ console = Console()
     help="Comma-separated list of failed stage names (from cron script)",
 )
 @click.option(
+    "--run-start",
+    default="",
+    help="ISO timestamp when this cron run started (used to scope traders_backfilled to this run)",
+)
+@click.option(
     "--db-path",
     default="data/analytics.db",
     help="Path to SQLite database (default: data/analytics.db)",
 )
 @click.pass_context
-def health_check(ctx, tier: str, stages_failed: str, db_path: str):
+def health_check(ctx, tier: str, stages_failed: str, run_start: str, db_path: str):
     """Run pipeline health checks.
 
     Exit codes:
@@ -68,7 +73,7 @@ def health_check(ctx, tier: str, stages_failed: str, db_path: str):
     if tier == "cron":
         _run_cron_checks(db, db_path_obj, niche, stages_failed)
     elif tier == "daily":
-        _run_daily_checks(db, niche, stages_failed)
+        _run_daily_checks(db, niche, stages_failed, run_start)
     elif tier == "weekly":
         _run_weekly_checks(db, niche)
 
@@ -150,17 +155,18 @@ def _run_cron_checks(db, db_path: Path, niche: str, stages_failed: str):
     console.print("\n[green bold]All checks passed[/green bold]")
 
 
-def _run_daily_checks(db, niche: str, stages_failed: str):
+def _run_daily_checks(db, niche: str, stages_failed: str, run_start: str = ""):
     """Daily summary (D-09): signals, traders, errors in last 24h."""
     failed_list = [s.strip() for s in stages_failed.split(",") if s.strip()] if stages_failed else []
-    summary_data = daily_summary(db, niche, stages_failed=failed_list)
+    summary_data = daily_summary(db, niche, stages_failed=failed_list, run_start=run_start)
 
     # Format message
+    backfill_label = "Traders backfilled (this run)" if run_start else "Traders backfilled (24h)"
     lines = [
         f"New signals: {summary_data['new_signals']}",
         f"Updated signals: {summary_data['updated_signals']}",
         f"Traders discovered: {summary_data['traders_discovered']}",
-        f"Traders backfilled: {summary_data['traders_backfilled']}",
+        f"{backfill_label}: {summary_data['traders_backfilled']}",
     ]
     if summary_data["errored_stages"]:
         lines.append(f"Errored stages: {', '.join(summary_data['errored_stages'])}")

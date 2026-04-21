@@ -1,10 +1,10 @@
 # Code Review: Polymarket Analytics Pipeline
 
 **Reviewed:** 2026-04-09
-**Updated:** 2026-04-18 (CLOB v2 migration prep + P-03 confirmed fixed)
+**Updated:** 2026-04-21 (session 10: H-07, H-08 fixed)
 **Depth:** deep (cross-file analysis)
 **Files Reviewed:** 20
-**Status:** mostly_resolved (14 fixed, 3 acceptable, open: paper resolution)
+**Status:** mostly_resolved (18 fixed, 3 acceptable, open: H-04, H-09)
 **⚠ Scheduled action:** S-01 CLOB v2 cutover on **2026-04-28 ~11:00 UTC** — see Scheduled section.
 
 ## Summary
@@ -103,18 +103,53 @@ unset POLYMARKET_CLOB_URL
 
 ## Remaining Open (Low Impact)
 
-### H-07: `ingest-events --full` OOM hang on memory-constrained runs
+### N-01: Daily notification metrics wrong — **FIXED 2026-04-21**
 
-**File:** `src/polymarket_analytics/api/gamma.py:67` / `src/polymarket_analytics/commands/ingest_events.py:97`
-**Impact:** `fetch_markets(closed=True)` paginates all ~115k+ closed esports markets into a single in-memory list before any processing begins. On a low-memory machine (e.g. post-VACUUM when the OS has been paging heavily), Python stalls mid-pagination with no timeout on the httpx client. Observed 2026-04-20: stuck at page 575 / 115k markets for 40+ min, required manual kill.
+**Files:** `scripts/cron_pipeline.sh`, `src/polymarket_analytics/commands/health_check.py`, `src/polymarket_analytics/health/checks.py`
 
-**Root cause:** Two problems compound: (1) no httpx read timeout on the Gamma client, so a stalled response waits forever; (2) fetching all 115k closed markets per run is unnecessary — we only need markets closed within the last ~7 days for resolution chain freshness.
+Two bugs found from cron log analysis:
 
-**Fix (implement together):**
-1. **Date-filtered closed sweep** — add `end_date_min` param to `fetch_markets`, pass `now − 7 days` for the closed fetch in `ingest-events --full`. Cuts 115k pages to ~50 markets. Also eliminates the memory pressure entirely.
-2. **httpx read timeout** — set `timeout=httpx.Timeout(30.0)` on the Gamma client so stalled requests surface as `ReadTimeout` (already retried) rather than hanging forever.
+1. **`traders_backfilled` was a 24h rolling DB count**, not a per-run count. A lean run of 248 traders reported "Traders backfilled: 18,616" because the 24h window still included the previous day's 18,456-trader full backfill. The number was technically correct but completely misleading.
 
-**Note:** `--full` must remain unconditional in cron — incremental mode misses newly-resolved markets and breaks the resolution chain (see Cron Architecture wiki).
+2. **Failed stages were silently dropped from the daily notification.** `cron_pipeline.sh` called `health-check --tier daily` with no `--stages-failed` arg. The Apr 21 midnight full backfill exit 137 produced a clean-looking daily summary with no mention of the failure.
+
+**Fix:** `RUN_START` timestamp captured at cron start, passed as `--run-start` to daily health check. `daily_summary()` now uses `last_backfilled_at >= run_start` (this-run window) instead of `>= now-24h`. Notification label shows `"Traders backfilled (this run)"` vs `"(24h)"`. `FAILED_STAGES` (space-separated) converted to CSV and passed as `--stages-failed`.
+
+---
+
+### H-08: Zero-trade traders never get `last_backfilled_at` set — **FIXED 2026-04-21**
+
+**File:** `src/polymarket_analytics/commands/backfill.py:561`
+
+`last_backfilled_at` was only stamped when `stats["ingested"] > 0 or stats["skipped"] > 0`. Traders that returned nothing from both API and Graph stayed `IS NULL` forever and were re-selected on every `--new-only` lean run.
+
+**Fix:** `last_backfilled_at` now stamped unconditionally after every API+Graph attempt. `last_trade_seen_at` and `backfill_complete` remain conditional on actual trades found.
+
+---
+
+### H-09: Full backfill OOM-killed at 19k traders (exit 137)
+
+**File:** `src/polymarket_analytics/commands/backfill.py` (Phase A concurrent fetch)
+**Impact:** Midnight full backfill (Apr 21 00:00) was SIGKILL'd mid-run with 19,074 traders queued. `last_full_backfill` marker never updated → next midnight will attempt full again → same result. Compounds with H-07: `ingest-events --full` runs immediately after backfill on the same pass, adding more memory pressure.
+
+**Observed:** SSL error mid-run (`SSLV3_ALERT_BAD_RECORD_MAC`) suggesting the process was paging heavily before the kill. Phase A fetches all traders concurrently (semaphore=10) and holds all API responses in memory before Phase B begins processing them.
+
+**Fix options (discuss next session):**
+1. **Chunked full backfill** — process traders in batches of N (e.g. 2,000), commit after each chunk. Caps peak memory to one chunk's worth of API responses rather than all 19k.
+2. **Reduce Phase A concurrency on full runs** — lower semaphore from 10→3 for full backfills to reduce simultaneous in-flight responses.
+3. **Fix H-07 first** — removing the 115k-page `ingest-events --full` will free significant memory and may be enough on its own.
+
+**Note:** H-08 (zombie traders) and H-07 (ingest-events OOM) are now fixed. H-08 reduces the full backfill population; H-07 removes the post-backfill memory spike from ingest-events. Together these may reduce OOM pressure, but the core gather-all-19k issue in Phase A still needs the chunked fix.
+
+---
+
+### H-07: `ingest-events --full` OOM hang on memory-constrained runs — **FIXED 2026-04-21**
+
+**Files:** `src/polymarket_analytics/api/gamma.py:67` / `src/polymarket_analytics/commands/ingest_events.py:97`
+
+`fetch_markets(closed=True)` was paginating all ~115k+ closed markets (~575 pages) into memory. Observed 2026-04-20: stuck at page 575 for 40+ min, required manual kill. httpx read timeout was already set (60s). The real problem was fetching all historical closed markets when only the last 7 days are needed for resolution chain freshness.
+
+**Fix:** Added `end_date_min` param to `fetch_markets` in `gamma.py`. `ingest_events.py` closed sweep now passes `end_date_min = now − 7 days` (no `end_date_max`, so voided markets with future endDates are still captured). Probed live: Gamma API confirmed to support both params. Result: ~115k markets / 575 pages → ~10k markets / 52 pages (~91% reduction). Voided/cancelled markets (165 total, 1 page) remain included via the no-max approach.
 
 ---
 
@@ -194,6 +229,33 @@ Monitor now acquires the same `.pipeline.lock` cron uses (`src/polymarket_analyt
 **Impact:** When errors occur in long-running processes (backfill, cron), debugging requires reading source code to triangulate. Adding stage-tagged logging, error aggregation with categories, and context managers would make failures self-diagnosing. Not urgent — current `✗ addr: error` output works, just lacks stage/category tagging for fast triage.
 
 ---
+
+---
+
+## Session 10 handoff — 2026-04-21
+
+### Done this session
+- **H-08 FIXED** — `last_backfilled_at` now stamped unconditionally; zombie traders cleared from lean run queue
+- **H-07 FIXED** — `ingest-events --full` closed sweep limited to last 7 days via `end_date_min`; 575 pages → 52 pages. Gamma API date filter confirmed working via live probe.
+
+### Pending next session (priority order)
+1. **H-09** — full backfill OOM at 19k traders. H-07/H-08 reduce pressure but the core issue (Phase A gathers all 19k responses before Phase B starts) still needs chunked processing.
+2. **H-04** — discover sequential HTTP (lower priority)
+
+---
+
+## Session 9 handoff — 2026-04-21
+
+### Done this session
+- **N-01 FIXED** — daily notification metrics corrected: `traders_backfilled` now scoped to current run via `--run-start`, failed stages passed via `--stages-failed`
+- **Cron log audit** — reviewed all backfill runs since cron went live; confirmed Apr 21 midnight full OOM-killed (exit 137), marker never updated
+- **H-08, H-09 identified and documented** — zombie traders + full backfill OOM
+
+### Pending next session (priority order)
+1. **H-09** — full backfill OOM at 19k traders. Discuss chunked approach vs concurrency reduction vs fixing H-07 first
+2. **H-07** — `ingest-events --full` 115k closed market pages. Fix: `end_date_min = now − 7 days` + `httpx.Timeout(30.0)`
+3. **H-08** — zombie traders never getting `last_backfilled_at` set. Simple one-liner fix
+4. **H-04** — discover sequential HTTP (lower priority, prop filter reduced market count)
 
 ---
 

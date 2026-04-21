@@ -558,9 +558,13 @@ async def backfill_trader(
                 [GRAPH_RETRY_LIMIT, trader_address, market_id],
             )
 
-    # Mark trader as backfill complete and update timestamps
+    # Always stamp last_backfilled_at — zero-trade result is a completed backfill.
+    # Without this, traders that return nothing from both API and Graph stay
+    # last_backfilled_at IS NULL forever and are re-selected on every lean run.
+    update_fields: dict = {"last_backfilled_at": datetime.now(timezone.utc).isoformat()}
+
     if stats["ingested"] > 0 or stats["skipped"] > 0:
-        # Compute max trade timestamp from ingested trades
+        # Compute max trade timestamp from ingested trades.
         # Normalize all timestamps to ISO strings before comparing to avoid
         # TypeError from mixed int (Graph) vs str (API) types.
         last_trade_iso = None
@@ -571,24 +575,19 @@ async def backfill_trader(
             ts_iso = _normalize_ts(ts)
             if last_trade_iso is None or ts_iso > last_trade_iso:
                 last_trade_iso = ts_iso
+        update_fields["last_trade_seen_at"] = last_trade_iso
+        update_fields["backfill_complete"] = True
 
-        try:
-            db["traders"].update(
-                trader_address,
-                {
-                    "last_backfilled_at": datetime.now(timezone.utc).isoformat(),
-                    "last_trade_seen_at": last_trade_iso,
-                    "backfill_complete": True,
-                },
-            )
-        except Exception as _upd_e:
-            console.print(
-                f"  [yellow]⚠ traders.update {trader_address[:10]}... "
-                f"type={type(_upd_e).__name__} args={_upd_e.args!r} "
-                f"ingested={stats['ingested']} skipped={stats['skipped']} "
-                f"fallback={stats['fallback']}[/yellow]"
-            )
-            raise
+    try:
+        db["traders"].update(trader_address, update_fields)
+    except Exception as _upd_e:
+        console.print(
+            f"  [yellow]⚠ traders.update {trader_address[:10]}... "
+            f"type={type(_upd_e).__name__} args={_upd_e.args!r} "
+            f"ingested={stats['ingested']} skipped={stats['skipped']} "
+            f"fallback={stats['fallback']}[/yellow]"
+        )
+        raise
 
     return stats
 
@@ -851,17 +850,34 @@ async def backfill_async(ctx, db_path: str, new_only: bool = False) -> None:
             PROCESS_LIMIT = 10
             process_sem = asyncio.Semaphore(PROCESS_LIMIT)
 
+            _phase_b_done = {"n": 0}
+            _total_phase_b = len(traders)
+
+            def _print_phase_b_progress() -> None:
+                n = _phase_b_done["n"]
+                print(
+                    f"\r  [{n}/{_total_phase_b}] processing traders...  "
+                    f"ingested: {total_stats['trades_ingested']:,} | "
+                    f"skipped: {total_stats['trades_skipped']:,} | "
+                    f"graph: {total_stats['graph_fallbacks']:,} | "
+                    f"errors: {total_stats['errors']:,}    ",
+                    end="",
+                    flush=True,
+                )
+
             async def _process_one(
-                trader_address: str, api_trades: list, progress, task
+                trader_address: str, api_trades: list
             ) -> None:
                 if _shutdown.shutdown_requested:
                     _shutdown.record_skipped(trader_address)
-                    progress.advance(task)
+                    _phase_b_done["n"] += 1
+                    _print_phase_b_progress()
                     return
                 async with process_sem:
                     if _shutdown.shutdown_requested:
                         _shutdown.record_skipped(trader_address)
-                        progress.advance(task)
+                        _phase_b_done["n"] += 1
+                        _print_phase_b_progress()
                         return
                     since_unix_ts = trader_meta[trader_address]["since_unix_ts"]
                     try:
@@ -892,30 +908,20 @@ async def backfill_async(ctx, db_path: str, new_only: bool = False) -> None:
                         total_stats["traders_processed"] += 1
                         _shutdown.record_completed(trader_address)
                         console.print(
-                            f"  [red]✗ {trader_address[:10]}... "
+                            f"\n  [red]✗ {trader_address[:10]}... "
                             f"{type(e).__name__}({e.args!r}): {e}[/red]"
                         )
 
-                    progress.update(task, description=_desc())
-                    progress.advance(task)
+                    _phase_b_done["n"] += 1
+                    _print_phase_b_progress()
 
-            with Progress(
-                SpinnerColumn(),
-                TextColumn("{task.description}"),
-                BarColumn(),
-                MofNCompleteColumn(),
-                TaskProgressColumn(),
-                TimeElapsedColumn(),
-                console=console,
-                transient=False,
-            ) as progress:
-                task = progress.add_task(_desc(), total=len(traders))
-                await asyncio.gather(
-                    *[
-                        _process_one(addr, trades, progress, task)
-                        for addr, trades in fetch_results
-                    ]
-                )
+            await asyncio.gather(
+                *[
+                    _process_one(addr, trades)
+                    for addr, trades in fetch_results
+                ]
+            )
+            print()  # end the \r progress line
 
             elapsed = time.time() - start_time
             status_label = (

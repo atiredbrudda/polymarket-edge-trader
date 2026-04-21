@@ -140,28 +140,35 @@ def check_lift_scores_freshness(db, niche: str) -> dict:
         }
 
 
-def daily_summary(db, niche: str, stages_failed: list[str] | None = None) -> dict:
+def daily_summary(
+    db, niche: str, stages_failed: list[str] | None = None, run_start: str = ""
+) -> dict:
     """Daily summary (D-09): signals, traders, errors in last 24h.
+
+    run_start: ISO timestamp of cron run start. When provided, traders_backfilled
+    is scoped to that run only (last_backfilled_at >= run_start) instead of the
+    24h rolling window, which stays inflated for 24h after every full backfill.
 
     Returns dict with keys: new_signals, updated_signals, traders_discovered,
     traders_backfilled, errored_stages.
     """
-    cutoff = (datetime.now(timezone.utc) - timedelta(hours=24)).isoformat()
+    cutoff_24h = (datetime.now(timezone.utc) - timedelta(hours=24)).isoformat()
+    backfill_cutoff = run_start if run_start else cutoff_24h
 
     new_signals = db.execute(
-        "SELECT COUNT(*) FROM signals WHERE first_seen >= ?", [cutoff]
+        "SELECT COUNT(*) FROM signals WHERE first_seen >= ?", [cutoff_24h]
     ).fetchone()[0]
 
     updated_signals = db.execute(
-        "SELECT COUNT(*) FROM signals WHERE last_updated >= ?", [cutoff]
+        "SELECT COUNT(*) FROM signals WHERE last_updated >= ?", [cutoff_24h]
     ).fetchone()[0]
 
     traders_discovered = db.execute(
-        "SELECT COUNT(*) FROM traders WHERE first_seen >= ?", [cutoff]
+        "SELECT COUNT(*) FROM traders WHERE first_seen >= ?", [cutoff_24h]
     ).fetchone()[0]
 
     traders_backfilled = db.execute(
-        "SELECT COUNT(*) FROM traders WHERE last_backfilled_at >= ?", [cutoff]
+        "SELECT COUNT(*) FROM traders WHERE last_backfilled_at >= ?", [backfill_cutoff]
     ).fetchone()[0]
 
     return {
