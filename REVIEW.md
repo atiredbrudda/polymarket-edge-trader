@@ -1,10 +1,10 @@
 # Code Review: Polymarket Analytics Pipeline
 
 **Reviewed:** 2026-04-09
-**Updated:** 2026-04-21 (session 10: H-07, H-08 fixed)
+**Updated:** 2026-04-21 (session 11: H-09 fixed)
 **Depth:** deep (cross-file analysis)
 **Files Reviewed:** 20
-**Status:** mostly_resolved (18 fixed, 3 acceptable, open: H-04, H-09)
+**Status:** mostly_resolved (19 fixed, 3 acceptable, open: H-04)
 **⚠ Scheduled action:** S-01 CLOB v2 cutover on **2026-04-28 ~11:00 UTC** — see Scheduled section.
 
 ## Summary
@@ -127,19 +127,13 @@ Two bugs found from cron log analysis:
 
 ---
 
-### H-09: Full backfill OOM-killed at 19k traders (exit 137)
+### H-09: Full backfill OOM-killed at 19k traders — **FIXED 2026-04-21**
 
-**File:** `src/polymarket_analytics/commands/backfill.py` (Phase A concurrent fetch)
-**Impact:** Midnight full backfill (Apr 21 00:00) was SIGKILL'd mid-run with 19,074 traders queued. `last_full_backfill` marker never updated → next midnight will attempt full again → same result. Compounds with H-07: `ingest-events --full` runs immediately after backfill on the same pass, adding more memory pressure.
+**File:** `src/polymarket_analytics/commands/backfill.py`
 
-**Observed:** SSL error mid-run (`SSLV3_ALERT_BAD_RECORD_MAC`) suggesting the process was paging heavily before the kill. Phase A fetches all traders concurrently (semaphore=10) and holds all API responses in memory before Phase B begins processing them.
+Root cause: Phase A gathered all 19k API responses via `asyncio.gather` into `fetch_results` before Phase B began. Peak memory = `n_traders × avg_response_size` (observed ~19k × response → SIGKILL).
 
-**Fix options (discuss next session):**
-1. **Chunked full backfill** — process traders in batches of N (e.g. 2,000), commit after each chunk. Caps peak memory to one chunk's worth of API responses rather than all 19k.
-2. **Reduce Phase A concurrency on full runs** — lower semaphore from 10→3 for full backfills to reduce simultaneous in-flight responses.
-3. **Fix H-07 first** — removing the 115k-page `ingest-events --full` will free significant memory and may be enough on its own.
-
-**Note:** H-08 (zombie traders) and H-07 (ingest-events OOM) are now fixed. H-08 reduces the full backfill population; H-07 removes the post-backfill memory spike from ingest-events. Together these may reduce OOM pressure, but the core gather-all-19k issue in Phase A still needs the chunked fix.
+**Fix:** Merged Phase A + Phase A.5 + Phase B into a single `_fetch_and_process` coroutine per trader under one `semaphore=10`. Memory now bounded to `CONCURRENT_LIMIT × avg_response_size` (~10 responses at once). Sell-only Graph fallbacks run inline inside `backfill_trader` (unchanged path — `prefetched_graph=None` was already handled). Phase A.5 pre-fetch removed: with concurrent Phase B it provided no wall-clock benefit (same `semaphore=10` throughput either way; the "~10x" claim from commit `e5bf4a2` only applied when Phase B was sequential, before commit `b48528f` made it concurrent).
 
 ---
 
@@ -239,8 +233,17 @@ Monitor now acquires the same `.pipeline.lock` cron uses (`src/polymarket_analyt
 - **H-07 FIXED** — `ingest-events --full` closed sweep limited to last 7 days via `end_date_min`; 575 pages → 52 pages. Gamma API date filter confirmed working via live probe.
 
 ### Pending next session (priority order)
-1. **H-09** — full backfill OOM at 19k traders. H-07/H-08 reduce pressure but the core issue (Phase A gathers all 19k responses before Phase B starts) still needs chunked processing.
-2. **H-04** — discover sequential HTTP (lower priority)
+1. **H-04** — discover sequential HTTP (lower priority)
+
+---
+
+## Session 11 handoff — 2026-04-21
+
+### Done this session
+- **H-09 FIXED** — Phase A/A.5/B gather-all replaced with single `_fetch_and_process` coroutine per trader under one `semaphore=10`. Memory bounded to 10 responses at once instead of 19k. Phase A.5 Graph pre-fetch removed (redundant with concurrent Phase B — same throughput math). Sell-only Graph fallbacks run inline in `backfill_trader` (existing `prefetched_graph=None` path).
+
+### Pending next session (priority order)
+1. **H-04** — discover sequential HTTP (45 min / 283 markets). Compare full backfill performance against prior OOM run to confirm fix.
 
 ---
 

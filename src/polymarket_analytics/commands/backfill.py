@@ -697,85 +697,6 @@ async def backfill_async(ctx, db_path: str, new_only: bool = False) -> None:
         CONCURRENT_LIMIT = 10
         semaphore = asyncio.Semaphore(CONCURRENT_LIMIT)
 
-        fetch_completed = 0
-        fetch_total = 0
-
-        async def _fetch_one(trader_address: str, since_unix_ts) -> tuple[str, list]:
-            """Fetch trades for one trader under semaphore, return (address, trades)."""
-            nonlocal fetch_completed
-            if _shutdown.shutdown_requested:
-                return trader_address, []
-            async with semaphore:
-                if _shutdown.shutdown_requested:
-                    return trader_address, []
-                try:
-                    result = (
-                        trader_address,
-                        await fetch_trades_with_retry(
-                            data_client, trader_address, since_unix_ts=since_unix_ts
-                        ),
-                    )
-                except Exception:
-                    result = trader_address, []
-                fetch_completed += 1
-                if fetch_completed % 100 == 0 or fetch_completed == fetch_total:
-                    print(
-                        f"\r  [{fetch_completed}/{fetch_total}] fetching traders...    ",
-                        end="",
-                        flush=True,
-                    )
-                return result
-
-        # Pre-scan: identify traders with sell-only positions needing Graph fallback.
-        # Fetching Graph data concurrently here avoids sequential blocking in Phase B.
-        trader_addresses_in_batch = {t[0] for t in traders}
-        sell_only_traders: set[str] = set()
-        try:
-            rows = db.execute(
-                """
-                SELECT DISTINCT t.trader_address
-                FROM trades t
-                JOIN positions p ON p.trader_address = t.trader_address
-                    AND p.market_id = t.market_id
-                WHERE p.resolved = 0 AND COALESCE(p.graph_retry_count, 0) < ?
-                GROUP BY t.trader_address, t.market_id
-                HAVING SUM(CASE WHEN t.side = 'BUY' THEN 1 ELSE 0 END) = 0
-                   AND SUM(CASE WHEN t.side = 'SELL' THEN 1 ELSE 0 END) > 0
-                """,
-                [GRAPH_RETRY_LIMIT],
-            ).fetchall()
-            sell_only_traders = {r[0] for r in rows} & trader_addresses_in_batch
-        except Exception:
-            pass  # pre-scan failure is non-fatal; Phase B detection still works
-
-        graph_prefetch: dict[str, list] = {}  # trader_address -> Graph events
-
-        graph_fetch_completed = 0
-        graph_fetch_total = 0
-
-        async def _graph_fetch_one(trader_address: str) -> tuple[str, list]:
-            """Fetch full Graph history for one trader under semaphore."""
-            nonlocal graph_fetch_completed
-            if _shutdown.shutdown_requested:
-                return trader_address, []
-            async with semaphore:
-                if _shutdown.shutdown_requested:
-                    return trader_address, []
-                try:
-                    events = await graph_client.fetch_trader_trades(
-                        trader_address, since_unix_ts=None
-                    )
-                except Exception:
-                    events = []
-                graph_fetch_completed += 1
-                if graph_fetch_completed % 10 == 0 or graph_fetch_completed == graph_fetch_total:
-                    print(
-                        f"\r  [{graph_fetch_completed}/{graph_fetch_total}] fetching Graph history...    ",
-                        end="",
-                        flush=True,
-                    )
-                return trader_address, events
-
         start_time = time.time()
         total_stats = {
             "traders_processed": 0,
@@ -785,18 +706,34 @@ async def backfill_async(ctx, db_path: str, new_only: bool = False) -> None:
             "errors": 0,
         }
 
-        def _desc() -> str:
-            return (
-                f"[cyan]Traders[/cyan]  "
-                f"[dim]ingested: {total_stats['trades_ingested']:,} | "
+        # Pre-load token catalog to avoid per-trader DB queries
+        global_catalog = {
+            row[0]: row[1]
+            for row in db.execute(
+                "SELECT token_id, condition_id FROM token_catalog"
+            ).fetchall()
+        }
+        console.print(
+            f"  Loaded {len(global_catalog):,} token catalog entries"
+        )
+
+        _done = {"n": 0}
+        _total = len(traders)
+
+        def _print_progress() -> None:
+            n = _done["n"]
+            print(
+                f"\r  [{n}/{_total}] processing traders...  "
+                f"ingested: {total_stats['trades_ingested']:,} | "
                 f"skipped: {total_stats['trades_skipped']:,} | "
-                f"graph fallbacks: {total_stats['graph_fallbacks']:,} | "
-                f"errors: {total_stats['errors']:,}[/dim]"
+                f"graph: {total_stats['graph_fallbacks']:,} | "
+                f"errors: {total_stats['errors']:,}    ",
+                end="",
+                flush=True,
             )
 
         try:
-            # Phase A: Concurrent fetch (API + Graph pre-fetch for sell-only traders)
-            fetch_tasks = []
+            # Build per-trader since_unix_ts metadata
             trader_meta: dict[str, dict] = {}
             for trader in traders:
                 trader_address = trader[0]
@@ -811,115 +748,62 @@ async def backfill_async(ctx, db_path: str, new_only: bool = False) -> None:
                     except Exception:
                         pass
                 trader_meta[trader_address] = {"since_unix_ts": since_unix_ts}
-                fetch_tasks.append(_fetch_one(trader_address, since_unix_ts))
 
-            fetch_total = len(fetch_tasks)
             console.print(
-                f"  Fetching {fetch_total:,} traders concurrently (limit={CONCURRENT_LIMIT})..."
-            )
-            fetch_results: list[tuple[str, list]] = await asyncio.gather(
-                *fetch_tasks, return_exceptions=False
-            )
-            print()  # end the \r progress line
-
-            # Phase A.5: Concurrent Graph pre-fetch for sell-only traders
-            if sell_only_traders:
-                graph_tasks = [_graph_fetch_one(addr) for addr in sell_only_traders]
-                graph_fetch_total = len(graph_tasks)
-                console.print(
-                    f"  Pre-fetching Graph history for {graph_fetch_total:,} sell-only traders (limit={CONCURRENT_LIMIT})..."
-                )
-                graph_results = await asyncio.gather(*graph_tasks, return_exceptions=False)
-                print()  # end the \r progress line
-                for addr, events in graph_results:
-                    if events:
-                        graph_prefetch[addr] = events
-
-            # Phase B: Concurrent processing
-            # Pre-load entire token catalog to avoid per-trader DB queries
-            global_catalog = {
-                row[0]: row[1]
-                for row in db.execute(
-                    "SELECT token_id, condition_id FROM token_catalog"
-                ).fetchall()
-            }
-            console.print(
-                f"  Loaded {len(global_catalog):,} token catalog entries"
+                f"  Processing {len(traders):,} traders concurrently (limit={CONCURRENT_LIMIT})..."
             )
 
-            PROCESS_LIMIT = 10
-            process_sem = asyncio.Semaphore(PROCESS_LIMIT)
-
-            _phase_b_done = {"n": 0}
-            _total_phase_b = len(traders)
-
-            def _print_phase_b_progress() -> None:
-                n = _phase_b_done["n"]
-                print(
-                    f"\r  [{n}/{_total_phase_b}] processing traders...  "
-                    f"ingested: {total_stats['trades_ingested']:,} | "
-                    f"skipped: {total_stats['trades_skipped']:,} | "
-                    f"graph: {total_stats['graph_fallbacks']:,} | "
-                    f"errors: {total_stats['errors']:,}    ",
-                    end="",
-                    flush=True,
-                )
-
-            async def _process_one(
-                trader_address: str, api_trades: list
-            ) -> None:
+            # Single-phase concurrent fetch + process.
+            # Memory is bounded to CONCURRENT_LIMIT × avg_response_size rather than
+            # all traders at once. Sell-only Graph fallbacks run inline inside
+            # backfill_trader — equivalent throughput to the old pre-fetch approach
+            # because Phase B was already concurrent (semaphore=10 either way).
+            async def _fetch_and_process(trader_address: str) -> None:
                 if _shutdown.shutdown_requested:
                     _shutdown.record_skipped(trader_address)
-                    _phase_b_done["n"] += 1
-                    _print_phase_b_progress()
-                    return
-                async with process_sem:
-                    if _shutdown.shutdown_requested:
-                        _shutdown.record_skipped(trader_address)
-                        _phase_b_done["n"] += 1
-                        _print_phase_b_progress()
-                        return
-                    since_unix_ts = trader_meta[trader_address]["since_unix_ts"]
-                    try:
-                        stats = await backfill_trader(
-                            db,
-                            trader_address,
-                            data_client,
-                            graph_client,
-                            since_unix_ts=since_unix_ts,
-                            prefetched_trades=api_trades,
-                            prefetched_graph=graph_prefetch.get(
-                                trader_address
-                            ),
-                            global_catalog=global_catalog,
-                        )
-
-                        total_stats["traders_processed"] += 1
-                        total_stats["trades_ingested"] += stats["ingested"]
-                        total_stats["trades_skipped"] += stats["skipped"]
-                        if stats["fallback"]:
-                            total_stats["graph_fallbacks"] += 1
-                        _shutdown.record_completed(trader_address)
-
-                    except click.ClickException:
-                        raise
-                    except Exception as e:
-                        total_stats["errors"] += 1
-                        total_stats["traders_processed"] += 1
-                        _shutdown.record_completed(trader_address)
-                        console.print(
-                            f"\n  [red]✗ {trader_address[:10]}... "
-                            f"{type(e).__name__}({e.args!r}): {e}[/red]"
-                        )
-
-                    _phase_b_done["n"] += 1
-                    _print_phase_b_progress()
+                else:
+                    async with semaphore:
+                        if _shutdown.shutdown_requested:
+                            _shutdown.record_skipped(trader_address)
+                        else:
+                            _since = trader_meta[trader_address]["since_unix_ts"]
+                            try:
+                                api_trades = await fetch_trades_with_retry(
+                                    data_client, trader_address, since_unix_ts=_since
+                                )
+                            except Exception:
+                                api_trades = []
+                            try:
+                                stats = await backfill_trader(
+                                    db,
+                                    trader_address,
+                                    data_client,
+                                    graph_client,
+                                    since_unix_ts=_since,
+                                    prefetched_trades=api_trades,
+                                    global_catalog=global_catalog,
+                                )
+                                total_stats["traders_processed"] += 1
+                                total_stats["trades_ingested"] += stats["ingested"]
+                                total_stats["trades_skipped"] += stats["skipped"]
+                                if stats["fallback"]:
+                                    total_stats["graph_fallbacks"] += 1
+                                _shutdown.record_completed(trader_address)
+                            except click.ClickException:
+                                raise
+                            except Exception as e:
+                                total_stats["errors"] += 1
+                                total_stats["traders_processed"] += 1
+                                _shutdown.record_completed(trader_address)
+                                console.print(
+                                    f"\n  [red]✗ {trader_address[:10]}... "
+                                    f"{type(e).__name__}({e.args!r}): {e}[/red]"
+                                )
+                _done["n"] += 1
+                _print_progress()
 
             await asyncio.gather(
-                *[
-                    _process_one(addr, trades)
-                    for addr, trades in fetch_results
-                ]
+                *[_fetch_and_process(t[0]) for t in traders]
             )
             print()  # end the \r progress line
 
