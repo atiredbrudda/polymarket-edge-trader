@@ -94,11 +94,15 @@ async def _ingest_events_async(ctx, db_path: str, full: bool):
             )
             console.print()
             click.echo(f"  Active: {len(active_markets):,} markets. Fetching closed...")
-            # Limit closed sweep to last 7 days — cuts ~115k pages to ~52.
-            # No end_date_max so voided markets (future endDate, closed=True) are included.
+            # On re-runs (existing_count > 0), limit closed sweep to last 7 days —
+            # cuts ~115k pages to ~52. No end_date_max so voided markets with future
+            # endDate are still captured. On first run, fetch all historical closed
+            # markets so the DB is fully populated from the start.
             closed_since = (
-                datetime.now(timezone.utc) - timedelta(days=7)
-            ).strftime("%Y-%m-%dT%H:%M:%SZ")
+                (datetime.now(timezone.utc) - timedelta(days=7)).strftime("%Y-%m-%dT%H:%M:%SZ")
+                if existing_count > 0
+                else None
+            )
             closed_markets = await client.fetch_markets(
                 tag_id, closed=True, end_date_min=closed_since, on_page=on_page
             )
