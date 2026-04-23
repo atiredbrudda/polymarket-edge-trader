@@ -116,8 +116,12 @@ def parse_graph_event(event: dict, trader_address: str) -> dict:
     else:
         size = taker_amt / _DECIMALS
 
+    # trade_id is prefixed with the trader's address because a CLOB fill is ONE
+    # on-chain event shared between maker and taker. Without this prefix, both
+    # sides share the same trade_id and INSERT OR IGNORE silently drops the
+    # second-backfilled participant's view of the fill.
     return {
-        "trade_id": f"{event.get('transactionHash', '')}_{event.get('id', '')}",
+        "trade_id": f"{trader_address.lower()}_{event.get('transactionHash', '')}_{event.get('id', '')}",
         "token_id": token_id,
         "timestamp": int(event.get("timestamp", "0")),
         # BUY if trader pays USDC to receive tokens; SELL if trader pays tokens.
