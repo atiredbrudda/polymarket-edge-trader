@@ -1,12 +1,13 @@
 #!/bin/bash
 # One-time recovery: reset last_trade_seen_at for trapped traders so the next
-# backfill re-fetches their Graph history. Under the new composite-PK schema,
-# BUYs that previously collided with other traders' SELLs now persist.
+# backfill re-fetches their Graph history. Previously-dropped BUYs now insert
+# because parse_graph_event (commit 98cfc3b) prefixes trade_ids with the
+# trader address, eliminating the maker/taker PK collision that dropped them.
 #
 # Safety:
-#   - requires the composite-PK migration to have already run
 #   - dry-run mode lists affected traders without modifying DB
 #   - --sample N resets only the first N traders (handy for testing)
+#   - refuses to run if monitor/backfill is active (avoid lock contention)
 #
 # Usage:
 #   scripts/recover_trapped_traders.sh --dry-run
@@ -19,15 +20,13 @@ DB="/Users/macbookair/polymarketv2/data/analytics.db"
 MODE="${1:-}"
 SAMPLE_N="${2:-}"
 
-# 1. Require composite PK already in place
-schema=$(sqlite3 "$DB" "SELECT sql FROM sqlite_master WHERE type='table' AND name='trades';")
-if ! echo "$schema" | grep -q "PRIMARY KEY (trade_id, trader_address)"; then
-  echo "ERROR: trades table still has single-column PK."
-  echo "Run scripts/migrate_trades_composite_pk.sh first."
+# Guard against concurrent writers that would block the UPDATE.
+if pgrep -f "polymarket.*monitor" >/dev/null || pgrep -f "polymarket.*backfill" >/dev/null; then
+  echo "ERROR: polymarket monitor or backfill is running. Stop it first."
   exit 1
 fi
 
-# 2. Compute trapped-trader set (same definition used to identify the 9,130 pairs)
+# Compute trapped-trader set (same definition used to identify the 9,130 pairs)
 TRAPPED_CTE="
 WITH pairs AS (SELECT DISTINCT trader_address, market_id FROM trades),
 no_pos AS (
