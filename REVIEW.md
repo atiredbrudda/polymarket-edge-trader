@@ -281,7 +281,136 @@ Monitor now acquires the same `.pipeline.lock` cron uses (`src/polymarket_analyt
 
 Bypassed `engine.resolve_market()` entirely. New `_do_resolve()` cross-references `paper.db positions` by `market_condition_id` against `analytics.db markets WHERE active=0 OR resolved=1` — same condition used by `resolve-positions`. Team-name → YES/NO mapping uses the `outcomes[]` array from `paper.db market_cache` (populated at trade time, no live API calls). VOIDs refund stake at break-even. `paper-resolve` step added to `cron_pipeline.sh` after `paper-bridge`.
 
+---
+
+## Session 12 handoff — 2026-04-25
+
+### Done this session
+- **Heal script patches** (`scripts/heal_trapped_batch.py`):
+  - Added `failed` set tracking in progress JSON; skips known-failed traders on `--resume`
+  - Added `--retry-failed` flag to opt-in re-attempt
+  - Auto-marks irredeemable: `data_incomplete=1, graph_retry_count=3` on positions where Graph fetch succeeded but markets stayed trapped
+  - Seeded 21 known-failed addresses into progress file from prior run logs
+- **3 heal runs completed:** 2,939 → 2,853 trapped pairs (−74), 37k trades inserted, 76 markets healed across 100 attempted traders
+- **Diagnosed 8.7h midnight backfill** (vs 3h target) — caused by 6 whale traders generating 147 Graph pagination fallback events: `0x21ffd2b7`, `0x5df52b96`, `0x7edb8d9e`, `0xa3c2ec15`, `0xe9076a87`, `0xf68a2819`
+- **Trapped cohort taxonomy:**
+  - `exhausted` (positions row, `data_incomplete=1`) — already excluded from backfill
+  - `no_pos` orphans (no positions row, ~3,080 pairs) — caused by old `trade_id` PK collision bug; 1,381 won't ever auto-prune (626 still-open + 755 markets-table-missing)
+- **DB-level findings (verified):**
+  - `wal_autocheckpoint = 1000 pages = 3.9 MB` on a 14.6 GB DB — too aggressive
+  - `cache_size = -2000` (2 MB) — shockingly small; monitor SELECTs hit disk constantly
+  - `busy_timeout`: monitor/backfill have 30s ✓; **heal uses 5s default** (bypasses `get_db()`)
+- **Latent scoring pollution:** `src/polymarket_analytics/scoring/extraction.py:43-62` does NOT filter `data_incomplete=1`. 1,715 incomplete positions currently feed the 30d esports scoring set (~0.28% pollution). Dashboard (`serve.py:281`) does filter; only scoring path doesn't.
+
+### Plan for next session
+
+**Goals (in priority order):**
+1. Full backfill ≤4h (currently 8.7h)
+2. Data integrity (no scoring pollution, no real-data loss)
+3. Zero monitor stalls
+4. Continuous heal alongside cron + monitor
+
+**Implementation order — ship-now items (safe during experiment):**
+
+1. **PRAGMA tune** in `src/polymarket_analytics/db/connection.py`:
+   - `PRAGMA wal_autocheckpoint = 10000` (3.9MB → 40MB; 10× fewer checkpoint lock spikes)
+   - `PRAGMA cache_size = -200000` (2MB → 200MB; cuts monitor SELECT I/O)
+   - Keep `synchronous = 2` (don't trade durability)
+   - One PR; pure config; reversible
+
+2. **Heal politeness** (`scripts/heal_trapped_batch.py`):
+   - Route through `get_db()` instead of raw `sqlite_utils.Database()` (inherits 30s busy_timeout)
+   - Chunk `db["trades"].insert_all` into 500-row pieces with `await asyncio.sleep(0.05)` between chunks
+   - Drops max lock-hold from ~1500ms to ~50ms per chunk
+   - One PR; local to heal script
+
+3. **`graph_unservable` flag on traders** (~50 lines `src/polymarket_analytics/commands/backfill.py`):
+   - New column `graph_unservable INTEGER DEFAULT 0` on `traders`
+   - Promote trader to `graph_unservable=1` after 2 consecutive timeouts in full-backfill mode
+   - Full backfill `WHERE graph_unservable = 0` to skip them
+   - Lean backfill (small deltas) still serves them — incremental fetches typically fit one window
+   - Heal script also reads this flag and skips
+   - Estimated speedup: midnight cron 8.7h → ~3h
+   - One PR
+
+4. **heal_loop daemon** (`scripts/heal_loop.sh` + launchd plist):
+   ```
+   loop:
+     if data/.pipeline.lock exists → sleep 5min, continue   (cron has it)
+     if data/.monitor_heartbeat <10s old → sleep 20s, continue   (monitor mid-cycle)
+     if heal queue empty → sleep 1h, continue
+     run: heal_trapped_batch.py --resume --limit 10 --batch-size 10
+     sleep 30min
+   ```
+   - Monitor must touch `data/.monitor_heartbeat` at the start of each poll cycle (~5 lines in `monitor.py`)
+   - One PR
+
+**Deferred items (post-experiment, ~7 days from now ≈ 2026-05-02):**
+
+5. **Patch `scoring/extraction.py`** — add `AND COALESCE(p.data_incomplete, 0) = 0` to the WHERE clause
+   - Fixes the 1,715-row latent pollution
+   - Will shift z-scores; **DO NOT ship during experiment**
+   - Re-run scoring + signal generation after merge
+
+6. **Snapshot + delete `no_pos` orphan SELLs** (mirror `scripts/prune_resolved_40d.py` pattern)
+   - Snapshot orphan trades to `data/audit/orphan_sells_<date>/` first
+   - Guards: trader must be in `heal_trapped_batch_progress.json` `completed` set; pair must still have `buys=0 sells>0` at delete time
+   - Single transaction with verification queries
+   - Brings trapped count to ~zero permanently
+
+### Bot vs retail finding (informational, not action item)
+Of the 6 whales blocking backfill, only 2 are clear bots/MMs (`0x7edb8d9e` HFT @ 28s IAT, `0xf68a2819` MM batches at 0s IAT). Others are long-lived/wide-spread retail. Operational signal "Graph can't serve them" matters more than identity classification — the `graph_unservable` flag handles all six the same way.
+
+### Operational notes
+- Lock file pattern `data/.pipeline.lock` confirmed in both `scripts/cron_pipeline.sh:32` and `monitor.py:677` — heal_loop must respect it
+- Heal progress file: `data/audit/heal_trapped_batch_progress.json` (1,150 completed + 21 failed as of session end)
+- During experiment (~7 days): pause additional heal runs; each insert changes positions → scoring drift
+
+---
+
+## Session 13 handoff — 2026-04-25
+
+### Done this session — all 4 ship-now items from session 12 plan
+
+1. **PRAGMA tune** (`src/polymarket_analytics/db/connection.py`):
+   - `wal_autocheckpoint = 10000` (3.9MB → 40MB)
+   - `cache_size = -200000` (2MB → 200MB)
+   - Verified live: `(10000,)` and `(-200000,)` round-trip on a fresh `get_db()`.
+
+2. **Heal politeness** (`scripts/heal_trapped_batch.py`):
+   - Routed through `get_db()` (inherits 30s busy_timeout + new PRAGMAs)
+   - `db["trades"].insert_all` chunked to 500 rows with `await asyncio.sleep(0.05)` between chunks
+   - `TRAPPED_TRADERS_SQL` now joins `traders` and excludes `graph_unservable=1`
+
+3. **`graph_unservable` flag** (`db/schema.py` + `commands/backfill.py`):
+   - Migration adds `graph_unservable INTEGER DEFAULT 0` and `graph_timeout_streak INTEGER DEFAULT 0` on `traders`
+   - `GRAPH_UNSERVABLE_THRESHOLD = 2`. Streak increments on Graph timeout (`httpx.ReadTimeout`/`ConnectTimeout`/`asyncio.TimeoutError`) and resets on success
+   - Promotion only happens when caller passes `track_graph_streak=True` (full backfill only — lean leaves it alone)
+   - Full backfill query filters `COALESCE(graph_unservable, 0) = 0`; lean keeps serving them
+   - Live DB migration verified: 22,980 traders, 0 currently flagged
+
+4. **heal_loop daemon** (`scripts/heal_loop.sh` + `scripts/com.polymarket.heal-loop.plist`):
+   - Loop invariant: defer to `data/.pipeline.lock` (5min cooldown), `.monitor_heartbeat <10s` (20s cooldown), heal `--limit 10 --batch-size 10` then sleep 30min, long nap (1h) when queue empty
+   - `monitor.py` touches `data/.monitor_heartbeat` at top of every poll cycle
+   - Plist not auto-loaded — install via `launchctl load ~/Library/LaunchAgents/com.polymarket.heal-loop.plist`
+
+### Validation
+- `pytest`: 165 passed, 8 pre-existing failures (`test_enrichment.py` + `test_graph.py`) — confirmed unrelated by stash + re-run
+- `heal_trapped_batch.py --dry-run --resume`: 1,053 servable trapped traders, 1,173 completed, 23 failed
+- Live DB schema: both new columns present, defaults correct
+
+### Wiki
+- New: [[Graph Unservable Flag]], [[Heal Loop Daemon]], [[SQLite PRAGMA Tune]]
+- Cross-refs added: [[Market Maker Bot Detection]], [[Graph Pagination Truncation]], [[index]]
+
+### Pending (deferred to ~2026-05-02 per session 12 plan)
+- Patch `scoring/extraction.py` to filter `data_incomplete=1` (would shift z-scores during experiment)
+- Snapshot + delete `no_pos` orphan SELLs (audit guard pattern, mirror of `prune_resolved_40d.py`)
+- Manual: `launchctl load` the heal-loop plist when ready
+
+---
+
 _Reviewed: 2026-04-09_
-_Updated: 2026-04-15_
+_Updated: 2026-04-25 (session 13: PRAGMA tune + heal politeness + graph_unservable + heal_loop)_
 _Reviewer: Claude (gsd-code-reviewer)_
 _Depth: deep_

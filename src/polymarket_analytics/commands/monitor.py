@@ -675,11 +675,19 @@ async def _monitor_async(
 
     # Resolve lock file path relative to db_path
     lock_path = str(Path(db_path).parent / ".pipeline.lock")
+    heartbeat_path = Path(db_path).parent / ".monitor_heartbeat"
 
     try:
         pass_num = 0
         while True:
             pass_num += 1
+            # Touch heartbeat at the start of every poll cycle so heal_loop
+            # knows the monitor is mid-cycle and can defer its run.
+            try:
+                heartbeat_path.touch(exist_ok=True)
+            except Exception:
+                pass
+
             if poll_minutes:
                 console.print(
                     f"\n[bold]=== Monitor Pass #{pass_num} ===[/bold]"

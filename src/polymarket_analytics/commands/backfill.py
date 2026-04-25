@@ -51,6 +51,13 @@ console = Console()
 # Max Graph retry attempts before marking a position as permanently data_incomplete
 GRAPH_RETRY_LIMIT = 3
 
+# Promote trader to graph_unservable after this many consecutive Graph timeouts
+# in full-backfill mode. ~6 whales were observed blocking 8.7h backfills with
+# 147 fallback events (project_session12). Skipping them in full backfill cuts
+# midnight cron from 8.7h → ~3h. Lean backfill still serves them since
+# incremental fetches typically fit a single 40-day window.
+GRAPH_UNSERVABLE_THRESHOLD = 2
+
 # Per-trader wall-clock cap on fetch_trader_trades. Without this, one trader
 # parked in httpx (e.g. Goldsky drops the TCP connection without RST) can
 # block asyncio.gather indefinitely and hang the entire pipeline. The retry
@@ -239,6 +246,7 @@ async def backfill_trader(
     prefetched_graph: Optional[list] = None,
     global_catalog: Optional[Dict[str, str]] = None,
     prefetched_sell_only_markets: Optional[list] = None,
+    track_graph_streak: bool = False,
 ) -> Dict[str, int]:
     """Backfill trades for a single trader with 2-tier logic.
 
@@ -411,6 +419,7 @@ async def backfill_trader(
         stats["fallback"] = True
         # Use pre-fetched Graph data if available (from concurrent Phase A.5),
         # otherwise fall back to sequential fetch.
+        graph_timed_out = False
         if prefetched_graph is not None:
             graph_events = prefetched_graph
         else:
@@ -424,6 +433,35 @@ async def backfill_trader(
                     )
                 except (httpx.ReadTimeout, httpx.ConnectTimeout, asyncio.TimeoutError):
                     graph_events = []
+                    graph_timed_out = True
+
+        # Promote whales to graph_unservable after consecutive timeouts in
+        # full-backfill mode. Only tracked when caller opts in (full mode);
+        # lean mode and monitor leave streak alone.
+        if track_graph_streak and prefetched_graph is None:
+            try:
+                if graph_timed_out:
+                    db.execute(
+                        """
+                        UPDATE traders
+                        SET graph_timeout_streak = COALESCE(graph_timeout_streak, 0) + 1,
+                            graph_unservable = CASE
+                                WHEN COALESCE(graph_timeout_streak, 0) + 1 >= ? THEN 1
+                                ELSE COALESCE(graph_unservable, 0)
+                            END
+                        WHERE address = ?
+                        """,
+                        [GRAPH_UNSERVABLE_THRESHOLD, trader_address],
+                    )
+                else:
+                    # Reset on a successful Graph fetch — even an empty result
+                    # set means Goldsky responded in time.
+                    db.execute(
+                        "UPDATE traders SET graph_timeout_streak = 0 WHERE address = ?",
+                        [trader_address],
+                    )
+            except Exception:
+                pass
         # Merge Graph trades with API trades (union — INSERT OR IGNORE deduplicates)
         for event in graph_events:
             api_trades.append(parse_graph_event(event, trader_address))
@@ -669,6 +707,8 @@ async def backfill_async(ctx, db_path: str, new_only: bool = False) -> None:
     ).isoformat()
 
     if new_only:
+        # Lean mode keeps serving graph_unservable traders — incremental fetches
+        # typically fit one 40-day window so they don't trigger fallback.
         traders = list(
             db.execute(
                 """
@@ -679,6 +719,8 @@ async def backfill_async(ctx, db_path: str, new_only: bool = False) -> None:
         )
         console.print(f"  [dim]--new-only mode: selecting only never-backfilled traders[/dim]")
     else:
+        # Full mode skips graph_unservable traders to keep midnight cron under
+        # the 4h target — see GRAPH_UNSERVABLE_THRESHOLD.
         traders = list(
             db.execute(
                 """
@@ -686,10 +728,19 @@ async def backfill_async(ctx, db_path: str, new_only: bool = False) -> None:
             WHERE
                 (last_trade_seen_at IS NULL OR last_trade_seen_at >= :cutoff)
                 AND (last_backfilled_at IS NULL OR last_backfilled_at < :threshold)
+                AND COALESCE(graph_unservable, 0) = 0
         """,
                 {"cutoff": cutoff, "threshold": threshold},
             ).fetchall()
         )
+        unservable_count = db.execute(
+            "SELECT COUNT(*) FROM traders WHERE COALESCE(graph_unservable, 0) = 1"
+        ).fetchone()[0]
+        if unservable_count:
+            console.print(
+                f"  [dim]Skipping {unservable_count:,} graph_unservable trader(s) "
+                f"(served by lean backfill instead)[/dim]"
+            )
 
     if not traders:
         console.print(
@@ -795,6 +846,11 @@ async def backfill_async(ctx, db_path: str, new_only: bool = False) -> None:
                                     since_unix_ts=_since,
                                     prefetched_trades=api_trades,
                                     global_catalog=global_catalog,
+                                    # Only track the timeout streak in full
+                                    # mode; lean (--new-only) traders haven't
+                                    # been backfilled before so a single timeout
+                                    # shouldn't stick them with the unservable flag.
+                                    track_graph_streak=not new_only,
                                 )
                                 total_stats["traders_processed"] += 1
                                 total_stats["trades_ingested"] += stats["ingested"]

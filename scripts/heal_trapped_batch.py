@@ -44,6 +44,7 @@ REPO = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(REPO / "src"))
 
 from polymarket_analytics.api.graph import GraphAPIClient, parse_graph_event
+from polymarket_analytics.db.connection import get_db
 
 DB_PATH = REPO / "data" / "analytics.db"
 PROGRESS_PATH = REPO / "data" / "audit" / "heal_trapped_batch_progress.json"
@@ -68,10 +69,13 @@ WITH pairs AS (
   FROM trades
   GROUP BY trader_address, market_id
 )
-SELECT DISTINCT trader_address
-FROM pairs
-WHERE buys = 0 AND sells > 0
-ORDER BY trader_address
+SELECT DISTINCT p.trader_address
+FROM pairs p
+LEFT JOIN traders t ON t.address = p.trader_address
+WHERE p.buys = 0
+  AND p.sells > 0
+  AND COALESCE(t.graph_unservable, 0) = 0
+ORDER BY p.trader_address
 """
 
 
@@ -88,22 +92,24 @@ def _install_signal_handlers() -> None:
     signal.signal(signal.SIGTERM, _handler)
 
 
-def load_progress() -> set[str]:
+def load_progress() -> tuple[set[str], set[str]]:
+    """Return (completed, failed). Both default to empty if file missing/malformed."""
     if not PROGRESS_PATH.exists():
-        return set()
+        return set(), set()
     try:
         data = json.loads(PROGRESS_PATH.read_text())
-        return set(data.get("completed", []))
+        return set(data.get("completed", [])), set(data.get("failed", []))
     except Exception:
-        return set()
+        return set(), set()
 
 
-def save_progress(completed: set[str], stats: dict) -> None:
+def save_progress(completed: set[str], failed: set[str], stats: dict) -> None:
     PROGRESS_PATH.parent.mkdir(parents=True, exist_ok=True)
     PROGRESS_PATH.write_text(
         json.dumps(
             {
                 "completed": sorted(completed),
+                "failed": sorted(failed),
                 "stats": stats,
                 "updated_at": datetime.now(timezone.utc)
                 .replace(microsecond=0)
@@ -218,11 +224,17 @@ async def heal_one_trader(
 
     # Count trades before insert so we can compute how many were new.
     # Approximate via INSERT OR IGNORE diff using total_changes.
+    # Chunk into 500-row pieces with brief asyncio yields so a heal pass
+    # never holds the write lock for >50ms — monitor SELECTs stay responsive.
     inserted = 0
     if batch:
         before = db.conn.total_changes
         try:
-            db["trades"].insert_all(batch, ignore=True)
+            for i in range(0, len(batch), 500):
+                chunk = batch[i : i + 500]
+                db["trades"].insert_all(chunk, ignore=True)
+                if i + 500 < len(batch):
+                    await asyncio.sleep(0.05)
             inserted = db.conn.total_changes - before
         except Exception as e:
             return {
@@ -237,6 +249,26 @@ async def heal_one_trader(
     trapped_after = trader_trapped_markets(db, trader)
     healed_markets = len(trapped_before - trapped_after)
 
+    # Mark irredeemable (trader, market) pairs: Graph fetch succeeded yet no
+    # BUYs landed for these markets — Goldsky doesn't have them. Setting
+    # graph_retry_count=3 + data_incomplete=1 makes backfill stop retrying
+    # them (matches the threshold used in commands/backfill.py).
+    irredeemable_marked = 0
+    if trapped_after:
+        still = list(trapped_after)
+        placeholders = ",".join("?" * len(still))
+        cur = db.execute(
+            f"""
+            UPDATE positions
+            SET graph_retry_count = 3, data_incomplete = 1
+            WHERE trader_address = ?
+              AND market_id IN ({placeholders})
+              AND (COALESCE(graph_retry_count, 0) < 3 OR data_incomplete = 0)
+            """,
+            [trader, *still],
+        )
+        irredeemable_marked = cur.rowcount or 0
+
     return {
         "trader": trader,
         "events": len(events),
@@ -244,6 +276,7 @@ async def heal_one_trader(
         "healed_markets": healed_markets,
         "trapped_before": len(trapped_before),
         "trapped_after": len(trapped_after),
+        "irredeemable_marked": irredeemable_marked,
         "elapsed_s": round(elapsed, 1),
     }
 
@@ -254,9 +287,13 @@ async def run(
     limit: int | None,
     resume: bool,
     dry_run: bool,
+    retry_failed: bool,
 ) -> int:
     api_key = os.environ.get("GOLDSKY_API_KEY") or os.environ.get("GRAPH_API_KEY")
-    db = Database(str(DB_PATH))
+    # Route through get_db() so heal inherits the same 30s busy_timeout +
+    # tuned cache/WAL PRAGMAs as monitor/backfill, instead of the raw
+    # 5s default that lets heal abort on contention.
+    db = get_db(DB_PATH)
 
     print(f"[heal] db={DB_PATH}")
     print("[heal] computing trapped-trader set...")
@@ -264,10 +301,25 @@ async def run(
     all_traders = [row[0] for row in db.execute(TRAPPED_TRADERS_SQL).fetchall()]
     print(f"[heal]   {len(all_traders):,} trapped traders (scan {time.time()-t0:.1f}s)")
 
-    completed = load_progress() if resume else set()
+    if resume:
+        completed, failed = load_progress()
+    else:
+        completed, failed = set(), set()
     if completed:
         print(f"[heal]   {len(completed):,} already completed — resuming")
-    queue = [t for t in all_traders if t not in completed]
+    if failed:
+        if retry_failed:
+            print(
+                f"[heal]   {len(failed):,} previously failed — retrying (--retry-failed)"
+            )
+            failed = set()
+        else:
+            print(
+                f"[heal]   {len(failed):,} previously failed — skipping "
+                f"(use --retry-failed to retry)"
+            )
+    skip = completed | failed
+    queue = [t for t in all_traders if t not in skip]
     if limit:
         queue = queue[:limit]
     print(f"[heal]   {len(queue):,} traders to process this run")
@@ -293,6 +345,7 @@ async def run(
         "traders_done": 0,
         "trades_inserted": 0,
         "markets_healed": 0,
+        "irredeemable_marked": 0,
         "errors": 0,
     }
 
@@ -321,6 +374,7 @@ async def run(
             ]
             batch_inserted = 0
             batch_healed = 0
+            batch_irredeemable = 0
             batch_errors = 0
             finished = 0
             for fut in asyncio.as_completed(tasks):
@@ -328,6 +382,7 @@ async def run(
                 finished += 1
                 if "error" in r:
                     batch_errors += 1
+                    failed.add(r["trader"])
                     print(
                         f"  [{finished:>2}/{len(chunk)}] [err] "
                         f"{r['trader'][:10]}  {r['error']}"
@@ -336,32 +391,37 @@ async def run(
                 completed.add(r["trader"])
                 batch_inserted += r["inserted"]
                 batch_healed += r["healed_markets"]
+                irr = r.get("irredeemable_marked", 0)
+                batch_irredeemable += irr
+                irr_tag = f"  irr={irr}" if irr else ""
                 # Log every completion (success or no-op) so we always see
                 # forward progress in the log, not just healing ones.
                 print(
                     f"  [{finished:>2}/{len(chunk)}] {r['trader'][:10]}  "
                     f"events={r['events']:>6}  inserted={r['inserted']:>5}  "
-                    f"healed={r['healed_markets']}/{r['trapped_before']}  "
+                    f"healed={r['healed_markets']}/{r['trapped_before']}{irr_tag}  "
                     f"({r['elapsed_s']}s)"
                 )
 
             totals["traders_done"] += len(chunk) - batch_errors
             totals["trades_inserted"] += batch_inserted
             totals["markets_healed"] += batch_healed
+            totals["irredeemable_marked"] += batch_irredeemable
             totals["errors"] += batch_errors
 
-            save_progress(completed, totals)
+            save_progress(completed, failed, totals)
 
             elapsed_b = time.time() - t_batch
             print(
                 f"[heal]   batch done in {elapsed_b:.1f}s  "
                 f"inserted={batch_inserted}  healed={batch_healed}  "
-                f"errors={batch_errors}"
+                f"irredeemable={batch_irredeemable}  errors={batch_errors}"
             )
             print(
                 f"[heal]   cumulative: traders_done={totals['traders_done']:,}  "
                 f"trades_inserted={totals['trades_inserted']:,}  "
                 f"markets_healed={totals['markets_healed']:,}  "
+                f"irredeemable={totals['irredeemable_marked']:,}  "
                 f"errors={totals['errors']}"
             )
 
@@ -369,13 +429,14 @@ async def run(
                 await asyncio.sleep(batch_sleep_s)
     finally:
         await graph.close()
-        save_progress(completed, totals)
+        save_progress(completed, failed, totals)
 
     print("\n[heal] === done ===")
     print(
         f"  traders_done={totals['traders_done']:,}  "
         f"trades_inserted={totals['trades_inserted']:,}  "
         f"markets_healed={totals['markets_healed']:,}  "
+        f"irredeemable_marked={totals['irredeemable_marked']:,}  "
         f"errors={totals['errors']}"
     )
     print(f"  progress saved to {PROGRESS_PATH}")
@@ -398,6 +459,11 @@ def main() -> int:
     ap.add_argument(
         "--resume", action="store_true", help="Skip traders already in progress file"
     )
+    ap.add_argument(
+        "--retry-failed",
+        action="store_true",
+        help="Also retry traders previously marked as failed (timeouts/errors)",
+    )
     ap.add_argument("--dry-run", action="store_true")
     args = ap.parse_args()
 
@@ -408,6 +474,7 @@ def main() -> int:
             limit=args.limit,
             resume=args.resume,
             dry_run=args.dry_run,
+            retry_failed=args.retry_failed,
         )
     )
 

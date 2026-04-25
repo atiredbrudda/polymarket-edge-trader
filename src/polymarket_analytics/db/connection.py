@@ -21,4 +21,9 @@ def get_db(db_path: Path) -> sqlite_utils.Database:
     db.enable_wal()  # Enable WAL mode for read concurrency (SCHM-02)
     db.execute("PRAGMA busy_timeout = 30000")  # Wait up to 30s on lock contention
     db.execute("PRAGMA foreign_keys = ON")  # Enforce foreign key constraints
+    # 10000 pages ≈ 40MB WAL before checkpoint — 10× fewer checkpoint lock spikes
+    # on the 14.6 GB DB (default 1000 pages = 3.9MB churns far too often).
+    db.execute("PRAGMA wal_autocheckpoint = 10000")
+    # 200MB page cache — default -2000 (2MB) hits disk on every monitor SELECT.
+    db.execute("PRAGMA cache_size = -200000")
     return db

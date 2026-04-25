@@ -368,6 +368,18 @@ def run_migrations(db):
             db.execute("ALTER TABLE traders ADD COLUMN last_trade_seen_at TEXT")
         if "last_monitored_at" not in traders_cols:
             db.execute("ALTER TABLE traders ADD COLUMN last_monitored_at TEXT")
+        # graph_unservable: set after 2 consecutive Graph timeouts in full
+        # backfill. Full backfill skips these traders; lean (small deltas)
+        # still serves them since incremental fetches typically fit one
+        # window. Heal script also reads this flag.
+        if "graph_unservable" not in traders_cols:
+            db.execute(
+                "ALTER TABLE traders ADD COLUMN graph_unservable INTEGER DEFAULT 0"
+            )
+        if "graph_timeout_streak" not in traders_cols:
+            db.execute(
+                "ALTER TABLE traders ADD COLUMN graph_timeout_streak INTEGER DEFAULT 0"
+            )
         # One-time migration: seed last_backfilled_at for traders that were
         # marked complete before this column existed. Guarded by _migrated flag
         # in the DB so it doesn't overwrite intentional NULL resets.
