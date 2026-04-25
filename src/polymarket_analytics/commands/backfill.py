@@ -51,6 +51,14 @@ console = Console()
 # Max Graph retry attempts before marking a position as permanently data_incomplete
 GRAPH_RETRY_LIMIT = 3
 
+# Per-trader wall-clock cap on fetch_trader_trades. Without this, one trader
+# parked in httpx (e.g. Goldsky drops the TCP connection without RST) can
+# block asyncio.gather indefinitely and hang the entire pipeline. The retry
+# loop inside fetch_trader_trades bounds individual pages but cannot recover
+# from connection-level stalls. 300s is generous: a 2-window 40-day fetch on
+# a whale should finish well under this cap.
+GRAPH_FETCH_TIMEOUT_S = 300.0
+
 # Component timing tracking
 component_timers: Dict[str, float] = {}
 
@@ -408,10 +416,13 @@ async def backfill_trader(
         else:
             with time_component(f"Graph fallback ({trader_address[:8]}...)"):
                 try:
-                    graph_events = await graph_client.fetch_trader_trades(
-                        trader_address, since_unix_ts=None
+                    graph_events = await asyncio.wait_for(
+                        graph_client.fetch_trader_trades(
+                            trader_address, since_unix_ts=None
+                        ),
+                        timeout=GRAPH_FETCH_TIMEOUT_S,
                     )
-                except (httpx.ReadTimeout, httpx.ConnectTimeout):
+                except (httpx.ReadTimeout, httpx.ConnectTimeout, asyncio.TimeoutError):
                     graph_events = []
         # Merge Graph trades with API trades (union — INSERT OR IGNORE deduplicates)
         for event in graph_events:
@@ -1193,8 +1204,11 @@ async def retry_incomplete_async(ctx, db_path: str) -> None:
                 if _shutdown.shutdown_requested:
                     return
                 try:
-                    graph_events = await graph_client.fetch_trader_trades(
-                        trader_address, since_unix_ts=None
+                    graph_events = await asyncio.wait_for(
+                        graph_client.fetch_trader_trades(
+                            trader_address, since_unix_ts=None
+                        ),
+                        timeout=GRAPH_FETCH_TIMEOUT_S,
                     )
                 except Exception as e:
                     console.print(
