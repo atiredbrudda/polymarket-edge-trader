@@ -57,7 +57,7 @@ class _Journal:
             f"Open: {n_held}  |  TP-exited: {n_tp_exited}\n"
             f"\n"
             f"Entry rules:\n"
-            f"  Signal tier      : ACT only (net_q5 >= 5)\n"
+            f"  Signal tier      : ACT (net_q5 >= 3) + CONSIDER (net_q5 >= 2)\n"
             f"  Spread hard limit: {SPREAD_HARD_LIMIT}  → SKIP if live > q5_entry + this\n"
             f"  Spread soft limit: {SPREAD_SOFT_LIMIT}  → half size if spread > this\n"
             f"  Price floor      : {PRICE_FLOOR}  → SKIP if live price below this\n"
@@ -95,7 +95,7 @@ def _write_price_cache(paper_dir: Path, cache: dict) -> None:
 
 
 def _get_actionable_signals(db: sqlite_utils.Database) -> list[dict]:
-    """Fetch ACT-tier signals (net_q5 >= 5), joined with market slug."""
+    """Fetch ACT (net_q5 >= 3) and CONSIDER (net_q5 >= 2) signals, joined with market slug."""
     query = """
         SELECT
             s.id, s.market_id, s.direction, s.tier,
@@ -105,7 +105,7 @@ def _get_actionable_signals(db: sqlite_utils.Database) -> list[dict]:
             m.question
         FROM signals s
         JOIN markets m ON m.condition_id = s.market_id
-        WHERE s.tier = 'ACT'
+        WHERE s.tier IN ('ACT', 'CONSIDER')
           AND m.resolved = 0
           AND m.active = 1
           AND (m.end_date IS NULL OR datetime(m.end_date) > datetime('now'))
@@ -125,8 +125,8 @@ def _compute_size(signal: dict, account_cash: float) -> float:
 
     Sizing tiers:
         - High conviction (q5_count >= 5, CLV dominant): 2.5% bankroll
-        - Standard ACT (q5_count >= 3): 2.0% bankroll
-        - CONSIDER (q5_count >= 2): 1.0% bankroll
+        - Standard ACT (net_q5 >= 3): 2.0% bankroll
+        - CONSIDER (net_q5 >= 2): 1.0% bankroll
 
     Divided by event_group_size to avoid over-allocating to correlated markets.
     """
