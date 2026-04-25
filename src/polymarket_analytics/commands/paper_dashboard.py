@@ -447,9 +447,13 @@ def _do_resolve(paper_data_dir: str, analytics_db_path: str) -> None:
                 label = "WIN" if won else "LOSS"
 
             now = datetime.now(timezone.utc).isoformat()
+            # Zero out shares on settlement so closed-position views don't
+            # display phantom holdings. The payout was already credited to
+            # cash above; shares are either converted (WIN), worthless (LOSS),
+            # or abandoned with refunded stake (VOID) — none of them are held.
             paper_conn.execute(
-                "UPDATE positions SET is_resolved=1, realized_pnl=?, resolved_at=? "
-                "WHERE market_condition_id=? AND outcome=?",
+                "UPDATE positions SET is_resolved=1, shares=0, realized_pnl=?, "
+                "resolved_at=? WHERE market_condition_id=? AND outcome=?",
                 (pnl, now, cid, paper_outcome),
             )
             paper_conn.execute(
