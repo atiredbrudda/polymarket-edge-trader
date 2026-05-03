@@ -55,6 +55,11 @@ sys.path.insert(0, str(REPO / "src"))
 from polymarket_analytics.api.data import DataAPIClient
 from polymarket_analytics.api.graph import GraphAPIClient, parse_graph_event
 from polymarket_analytics.db.connection import get_db
+from polymarket_analytics.scoring.thresholds import (
+    BOT_TPR_THRESHOLD,
+    BOT_TRADE_FLOOR,
+    Q5_COMPOSITE_THRESHOLD,
+)
 
 DB_PATH = REPO / "data" / "analytics.db"
 PROGRESS_PATH = REPO / "data" / "audit" / "heal_trapped_batch_progress.json"
@@ -74,21 +79,22 @@ PER_TRADER_TIMEOUT_S = 300.0
 RETRY_TIMEOUTS_S = [300.0, 600.0, 900.0]
 GRADUATION_THRESHOLD = len(RETRY_TIMEOUTS_S)
 
-# Market-maker / arbitrage-bot exclusion. Traders the scoring pipeline has
-# already classified as non-signal (composite_score < MM_SCORE_CUTOFF) AND with
-# meaningful volume (positions > MM_POSITION_FLOOR) are skipped — Graph fetches
-# for them are wasted Goldsky time with zero downstream signal value.
+# Bias-conservative bot/MM exclusion. Behavioral signature (high trade volume
+# AND high trade-per-position ratio) PLUS Q5-whitelist exemption. Replaces the
+# prior composite-score-only filter that had a 13% false-positive rate per the
+# MM Filter Critique 2026-05-02 wiki.
 #
-# Threshold rationale: composite_score alone catches 4,371 traders (~94% of
-# scored pool). Most are not bots, just unlucky. The volume floor (>100
-# positions) keeps the conservative filter at ~1,700 traders — the long tail of
-# arb bots that show edge=0 over many markets. See [[Market Maker Bot Detection]]
-# wiki for the discovery and the population analysis.
+# Live calibration on data/analytics.db @ 2026-05-03 (7.4M trades, 28,809 traders):
+#   - trades>5000 AND tpr>20 catches 114 traders / 22% of trades, but 4 of them
+#     are profitable Q5 signal traders (one with composite=1.625) — must NOT exclude
+#   - The Q5 whitelist (composite_score >= -0.10) preserves all 257 scored signal
+#     traders while still catching 110 traders / 21.3% of trades
+#   - User-explicit calibration target: bias toward false-negatives (some bots
+#     through OK) over false-positives (no real signal traders lost)
 #
-# Re-tune as needed: lowering MM_POSITION_FLOOR catches more, raising it
-# catches fewer. Cutoff at -0.10 mirrors the Q5 panel threshold (Phase 2).
-MM_SCORE_CUTOFF = -0.10
-MM_POSITION_FLOOR = 100
+# Constants live in polymarket_analytics.scoring.thresholds so backfill ingest
+# (commands/backfill.py) and the prune script (scripts/prune_bots.py) reuse the
+# exact same definition.
 
 # Trapped definition matches scripts/recover_trapped_traders.sh and
 # dryrun_trapped_recovery.py: (trader, market) pairs with >=1 SELL and 0 BUY.
@@ -103,23 +109,35 @@ WITH pairs AS (
   FROM trades
   GROUP BY trader_address, market_id
 ),
-position_counts AS (
+trader_trades AS (
+  SELECT trader_address, COUNT(*) AS n_trades
+  FROM trades
+  GROUP BY trader_address
+),
+trader_positions AS (
   SELECT trader_address, COUNT(*) AS n_positions
   FROM positions
   GROUP BY trader_address
 ),
-known_mms AS (
-  SELECT ls.trader_address
-  FROM lift_scores ls
-  JOIN position_counts pc ON pc.trader_address = ls.trader_address
-  WHERE ls.composite_score < {MM_SCORE_CUTOFF}
-    AND pc.n_positions > {MM_POSITION_FLOOR}
-    AND ls.computed_at = (SELECT MAX(computed_at) FROM lift_scores)
+q5_whitelist AS (
+  SELECT trader_address FROM lift_scores
+  WHERE composite_score >= {Q5_COMPOSITE_THRESHOLD}
+    AND computed_at = (SELECT MAX(computed_at) FROM lift_scores)
+),
+known_bots AS (
+  SELECT tt.trader_address
+  FROM trader_trades tt
+  JOIN trader_positions tp ON tp.trader_address = tt.trader_address
+  LEFT JOIN q5_whitelist q ON q.trader_address = tt.trader_address
+  WHERE tt.n_trades > {BOT_TRADE_FLOOR}
+    AND tp.n_positions > 0
+    AND (1.0 * tt.n_trades / tp.n_positions) > {BOT_TPR_THRESHOLD}
+    AND q.trader_address IS NULL
 )
 SELECT DISTINCT p.trader_address
 FROM pairs p
 LEFT JOIN traders t  ON t.address  = p.trader_address
-LEFT JOIN known_mms m ON m.trader_address = p.trader_address
+LEFT JOIN known_bots m ON m.trader_address = p.trader_address
 WHERE p.buys = 0
   AND p.sells > 0
   AND m.trader_address IS NULL
