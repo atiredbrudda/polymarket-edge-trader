@@ -9,13 +9,14 @@ Verifies:
 - FLAT positions (size=0) excluded from signals
 - Resolved positions excluded from signals
 - Separate signals for LONG vs SHORT on same market
+- _compute_tier respects ACT thresholds + CLV-dominance gate
 """
 
 import pytest
 from datetime import datetime, timezone, timedelta
 
 from polymarket_analytics.db.schema import init_database
-from polymarket_analytics.detection.convergence import detect_convergence
+from polymarket_analytics.detection.convergence import _compute_tier, detect_convergence
 from polymarket_analytics.detection.writer import upsert_signal
 
 # Import helpers from conftest
@@ -682,3 +683,36 @@ class TestEdgeCases:
         assert len(result_df) == 0, (
             f"Expected 0 convergence signals for 1 trader with multiple positions, got {len(result_df)}"
         )
+
+
+class TestComputeTier:
+    """Unit tests for _compute_tier — ACT/CONSIDER/WATCH thresholds + CLV gate."""
+
+    def test_act_when_majority_clv_dominant(self):
+        # 3 Q5, 2 CLV-dominant → not unanimous → ACT
+        assert _compute_tier(net_q5_count=3, q5_count=3, clv_dominant_count=2) == "ACT"
+
+    def test_demote_to_consider_when_all_clv_dominant(self):
+        # 3 Q5, all 3 CLV-dominant → unanimous → demoted to CONSIDER
+        assert _compute_tier(net_q5_count=3, q5_count=3, clv_dominant_count=3) == "CONSIDER"
+
+    def test_act_with_zero_clv_dominant(self):
+        # 4 Q5, 0 CLV-dominant → 0<4 → ACT (signal driven by ROI/Sharpe instead)
+        assert _compute_tier(net_q5_count=4, q5_count=4, clv_dominant_count=0) == "ACT"
+
+    def test_consider_when_net_below_act_threshold(self):
+        # net_q5=2 → never ACT regardless of CLV mix
+        assert _compute_tier(net_q5_count=2, q5_count=2, clv_dominant_count=0) == "CONSIDER"
+        assert _compute_tier(net_q5_count=2, q5_count=2, clv_dominant_count=2) == "CONSIDER"
+
+    def test_watch_below_consider_threshold(self):
+        assert _compute_tier(net_q5_count=1, q5_count=1, clv_dominant_count=0) == "WATCH"
+        assert _compute_tier(net_q5_count=0, q5_count=2, clv_dominant_count=2) == "WATCH"
+
+    def test_act_when_q5_exceeds_net_due_to_opposing_cancellation(self):
+        # q5=4 (after cancellation net=3 against opposing side); 3 of 4 CLV-dom → not unanimous → ACT
+        assert _compute_tier(net_q5_count=3, q5_count=4, clv_dominant_count=3) == "ACT"
+
+    def test_consider_when_all_q5_clv_dom_even_with_opposing_cancellation(self):
+        # q5=4, all 4 CLV-dom → unanimous on the q5 axis → demoted regardless of net
+        assert _compute_tier(net_q5_count=3, q5_count=4, clv_dominant_count=4) == "CONSIDER"

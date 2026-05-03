@@ -368,13 +368,14 @@ class TestEnrichment:
     def test_tier_consider(
         self, enrichment_db, fixture_traders, fixture_markets, future_end_date
     ):
-        """Test 4: tier = WATCH when q5_count = 2 (below CONSIDER threshold of 3).
+        """Test 4: tier = CONSIDER when net_q5_count = 2 (CONSIDER threshold).
 
         Fixture setup:
         - 2 Q5 traders LONG on same open market
 
         Expected:
-        - detect_convergence returns tier == 'WATCH'
+        - detect_convergence returns tier == 'CONSIDER'
+        - Threshold lowered 2026-04-25: CONSIDER >= 2, ACT >= 3 (was 3 / 5).
         """
         db = enrichment_db
 
@@ -428,21 +429,25 @@ class TestEnrichment:
         # Assert: 1 convergence signal found
         assert len(result_df) == 1, f"Expected 1 signal, got {len(result_df)}"
 
-        # Assert: tier == 'WATCH' (2 Q5 is below CONSIDER threshold of 3)
+        # Assert: tier == 'CONSIDER' (2 Q5 meets CONSIDER threshold of 2)
         row = result_df.iloc[0]
-        assert row["tier"] == "WATCH", f"Expected tier='WATCH', got {row['tier']}"
+        assert row["tier"] == "CONSIDER", f"Expected tier='CONSIDER', got {row['tier']}"
         assert row["q5_count"] == 2, f"Expected q5_count=2, got {row['q5_count']}"
 
     def test_tier_act(
         self, enrichment_db, fixture_traders, fixture_markets, future_end_date
     ):
-        """Test 5: tier = CONSIDER when q5_count = 3 (below ACT threshold of 5).
+        """Test 5: net_q5=3 with all-CLV-dom fixture → tier demoted from ACT to CONSIDER.
 
         Fixture setup:
         - 3 Q5 traders LONG on same open market
+        - create_q5_trader helper sets clv_zscore=1.0 (positive) for every trader,
+          so clv_dominant_count == q5_count == 3 (unanimous CLV-dominance)
 
         Expected:
-        - detect_convergence returns tier == 'CONSIDER'
+        - detect_convergence returns tier == 'CONSIDER' (would be ACT at net_q5>=3,
+          but the all-CLV-dom gate shipped 2026-05-03 demotes redundant convergence
+          to CONSIDER — see [[CLV Consensus A/B]]).
         """
         db = enrichment_db
 
@@ -507,10 +512,12 @@ class TestEnrichment:
         # Assert: 1 convergence signal found
         assert len(result_df) == 1, f"Expected 1 signal, got {len(result_df)}"
 
-        # Assert: tier == 'CONSIDER' (3 Q5 is below ACT threshold of 5)
+        # Assert: tier == 'CONSIDER' (would be ACT at net_q5>=3, but fixture's
+        # unanimous clv_zscore=1.0 trips the all-CLV-dom demote gate)
         row = result_df.iloc[0]
         assert row["tier"] == "CONSIDER", f"Expected tier='CONSIDER', got {row['tier']}"
         assert row["q5_count"] == 3, f"Expected q5_count=3, got {row['q5_count']}"
+        assert row["clv_dominant_count"] == 3, "fixture sets clv_zscore=1.0 → all 3 CLV-dom"
 
     def test_entry_prices(
         self, enrichment_db, fixture_traders, fixture_markets, future_end_date
@@ -744,7 +751,7 @@ class TestEnrichment:
         assert len(result_df) == 1, f"Expected 1 signal, got {len(result_df)}"
         row = result_df.iloc[0]
         assert row["q5_count"] == 2
-        assert row["tier"] == "WATCH"  # 2 Q5 is below CONSIDER threshold of 3
+        assert row["tier"] == "CONSIDER"  # 2 Q5 meets CONSIDER threshold of 2 (lowered 2026-04-25)
         assert "clv_dominant_count" in row
         assert "avg_entry_price" in row
         assert "min_entry_price" in row
