@@ -110,7 +110,10 @@ FROM traders WHERE graph_unservable = 1;
 - ✅ Fix #1 shipped (commit `bd34e8a`, 2026-05-02): backfill self-heals `token_catalog` from `trade["conditionId"]` when the API trade arrives but the catalog row is missing. New stat `self_healed_catalog`. Race-safe via `INSERT ... ignore=True`. FK violations fall through to skip.
 - ✅ Fix #2 shipped (commit `34478e7`, 2026-05-03): when Gamma returns a market with empty `clobTokenIds`, discover falls back to CLOB `/markets/{cid}` (concurrency=10) and inserts the recovered catalog rows. Closes the ingest-time hole for markets with zero post-resolution trade activity.
 - ✅ Fix #3 shipped (commit `44d9c94`, 2026-05-03): `backfill_drops` table logs every drop with reason (`no_token_id`, `catalog_miss_no_cid`, `catalog_miss_fk`, `insert_error`, `self_healed`). Indexed on `reason` and `dropped_at`. 30-day retention via cron `prune-drops` stage. Replaces opaque `stats["skipped"]` counter with queryable rows for future audits.
-- 📋 Validation: after monitor runs a few cycles, `SELECT reason, COUNT(*) FROM backfill_drops WHERE dropped_at > datetime('now', '-7 days') GROUP BY reason` confirms the fix is firing. Re-sample previously-zero-trade resolved markets against the Polymarket API; expect ~15-17% to start populating after backfill touches their tokens.
+- ⚠️ **`44d9c94` shipped two latent bugs (both fixed by `c686e51` 2026-05-03):**
+  - `_log_drop` carried a stray `@contextmanager` decorator → every call created an unused context-manager object and the body never ran. **Zero rows were logged to `backfill_drops` between 05:38 ship and 08:00 cron.** No prior validation possible.
+  - The same misplaced decorator stripped `@contextmanager` off `time_component`, breaking the backfill stage entirely (TypeError: 'generator' object does not support the context manager protocol). 08:00 cron failed; 12:00 will be the first clean run.
+- 📋 Validation: **wait for the 12:00 cron to run with the fix**, then `SELECT reason, COUNT(*) FROM backfill_drops WHERE dropped_at > datetime('now', '-7 days') GROUP BY reason` confirms the fix is firing. Re-sample previously-zero-trade resolved markets against the Polymarket API; expect ~15-17% to start populating after backfill touches their tokens.
 
 ---
 
