@@ -44,9 +44,33 @@ from polymarket_analytics.db.schema import init_database
 from polymarket_analytics.extraction.patterns import EntityPatternMatcher
 from polymarket_analytics.extraction.llm import LLMFallback
 from polymarket_analytics.extraction.slug_parser import parse_event_slug as _parse_event_slug
+from polymarket_analytics.scoring.thresholds import (
+    BOT_TPR_THRESHOLD,
+    BOT_TRADE_FLOOR,
+    Q5_COMPOSITE_THRESHOLD,
+)
 
 
 console = Console()
+
+# Bot/MM exclusion fragment shared by lean + full backfill trader-selection.
+# Same definition as scripts/heal_trapped_batch.py TRAPPED_TRADERS_SQL.
+# Q5 whitelist guarantees no scored signal trader is excluded.
+BOT_EXCLUSION_SUBQUERY = f"""
+    SELECT tt.trader_address
+    FROM (SELECT trader_address, COUNT(*) AS n_trades FROM trades GROUP BY trader_address) tt
+    JOIN (SELECT trader_address, COUNT(*) AS n_positions FROM positions GROUP BY trader_address) tp
+      ON tp.trader_address = tt.trader_address
+    LEFT JOIN (
+      SELECT trader_address FROM lift_scores
+      WHERE composite_score >= {Q5_COMPOSITE_THRESHOLD}
+        AND computed_at = (SELECT MAX(computed_at) FROM lift_scores)
+    ) q ON q.trader_address = tt.trader_address
+    WHERE tt.n_trades > {BOT_TRADE_FLOOR}
+      AND tp.n_positions > 0
+      AND (1.0 * tt.n_trades / tp.n_positions) > {BOT_TPR_THRESHOLD}
+      AND q.trader_address IS NULL
+"""
 
 # Max Graph retry attempts before marking a position as permanently data_incomplete
 GRAPH_RETRY_LIMIT = 3
@@ -774,29 +798,35 @@ async def backfill_async(ctx, db_path: str, new_only: bool = False) -> None:
         datetime.now(timezone.utc) - timedelta(hours=REFRESH_HOURS)
     ).isoformat()
 
+    # Bot/MM exclusion (BOT_EXCLUSION_SUBQUERY) is applied in BOTH branches:
+    # we never want to ingest more trades for the ~110 high-velocity bots
+    # (~21% of all trade rows) that the behavioral signature catches. Q5
+    # whitelist guarantees no scored signal trader is dropped.
     if new_only:
         # Lean mode keeps serving graph_unservable traders — incremental fetches
         # typically fit one 40-day window so they don't trigger fallback.
         traders = list(
             db.execute(
-                """
+                f"""
             SELECT address, last_trade_seen_at FROM traders
             WHERE last_backfilled_at IS NULL
+              AND address NOT IN ({BOT_EXCLUSION_SUBQUERY})
         """
             ).fetchall()
         )
-        console.print(f"  [dim]--new-only mode: selecting only never-backfilled traders[/dim]")
+        console.print(f"  [dim]--new-only mode: selecting only never-backfilled traders (bot-filtered)[/dim]")
     else:
         # Full mode skips graph_unservable traders to keep midnight cron under
         # the 4h target — see GRAPH_UNSERVABLE_THRESHOLD.
         traders = list(
             db.execute(
-                """
+                f"""
             SELECT address, last_trade_seen_at FROM traders
             WHERE
                 (last_trade_seen_at IS NULL OR last_trade_seen_at >= :cutoff)
                 AND (last_backfilled_at IS NULL OR last_backfilled_at < :threshold)
                 AND COALESCE(graph_unservable, 0) = 0
+                AND address NOT IN ({BOT_EXCLUSION_SUBQUERY})
         """,
                 {"cutoff": cutoff, "threshold": threshold},
             ).fetchall()
@@ -808,6 +838,14 @@ async def backfill_async(ctx, db_path: str, new_only: bool = False) -> None:
             console.print(
                 f"  [dim]Skipping {unservable_count:,} graph_unservable trader(s) "
                 f"(served by lean backfill instead)[/dim]"
+            )
+        bot_count = db.execute(
+            f"SELECT COUNT(*) FROM ({BOT_EXCLUSION_SUBQUERY})"
+        ).fetchone()[0]
+        if bot_count:
+            console.print(
+                f"  [dim]Skipping {bot_count:,} bot/MM trader(s) "
+                f"(trades>{BOT_TRADE_FLOOR} AND tpr>{BOT_TPR_THRESHOLD} AND not in Q5)[/dim]"
             )
 
     if not traders:
