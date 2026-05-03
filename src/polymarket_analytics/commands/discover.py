@@ -37,7 +37,7 @@ from rich.progress import (
     TimeElapsedColumn,
 )
 
-from polymarket_analytics.api.gamma import GammaAPIClient
+from polymarket_analytics.api.gamma import CLOB_BASE_URL, GammaAPIClient
 from polymarket_analytics.cli import cli
 from polymarket_analytics.db.schema import init_database
 from polymarket_analytics.extraction.llm import LLMFallback
@@ -318,6 +318,102 @@ def discover(ctx, db_path: str, closing_within: Optional[int], use_llm: bool) ->
                 catalog_records,
             )
         console.print(f"  [green]✓[/green] {len(catalog_records):,} token catalog entries upserted")
+
+    # H-11 fix #2: recover catalog rows for markets that arrived with empty
+    # clobTokenIds via CLOB /markets/{cid}. Gamma occasionally returns markets
+    # without tokens populated (race on freshly-deployed markets); without this
+    # fallback those markets never get a token_catalog row and every later trade
+    # for them gets silently dropped by backfill. backfill.py self-heals from
+    # trade["conditionId"] but only when a trade actually arrives — markets
+    # with zero post-resolution trade activity stay uncataloged forever.
+    empty_clob: List[tuple[str, str]] = []
+    for m in gamma_markets:
+        cid = m.get("conditionId")
+        if not cid:
+            continue
+        clob_token_ids = m.get("clobTokenIds") or []
+        if isinstance(clob_token_ids, str):
+            try:
+                clob_token_ids = json.loads(clob_token_ids)
+            except (json.JSONDecodeError, ValueError):
+                clob_token_ids = []
+        if not clob_token_ids:
+            empty_clob.append((cid, m.get("question", "")))
+
+    if empty_clob:
+        console.print(
+            f"  [dim]H-11:[/dim] {len(empty_clob)} markets arrived with empty "
+            f"clobTokenIds — recovering tokens from CLOB"
+        )
+
+        async def _recover_clob_tokens() -> List[tuple[str, str, list]]:
+            recovered: List[tuple[str, str, list]] = []
+            sem = asyncio.Semaphore(10)
+            async with httpx.AsyncClient(
+                timeout=httpx.Timeout(connect=5.0, read=15.0, write=5.0, pool=5.0)
+            ) as client:
+                async def _one(cid: str, question: str):
+                    async with sem:
+                        try:
+                            resp = await client.get(f"{CLOB_BASE_URL}/markets/{cid}")
+                            if resp.status_code != 200:
+                                return None
+                            data = resp.json()
+                            tokens = [
+                                t.get("token_id")
+                                for t in (data.get("tokens") or [])
+                                if t.get("token_id")
+                            ]
+                            outcomes = [
+                                (t.get("outcome") or "").upper()
+                                for t in (data.get("tokens") or [])
+                            ]
+                            mtype = "binary" if outcomes == ["YES", "NO"] else "categorical"
+                            return (cid, question, tokens, mtype) if tokens else None
+                        except Exception:
+                            return None
+
+                results = await asyncio.gather(*[_one(c, q) for c, q in empty_clob])
+                for r in results:
+                    if r is not None:
+                        recovered.append(r)
+            return recovered
+
+        recovered = asyncio.run(_recover_clob_tokens())
+        fallback_records = []
+        for cid, question, token_ids, mtype in recovered:
+            for token_id in token_ids[:2]:
+                fallback_records.append({
+                    "token_id": str(token_id),
+                    "condition_id": cid,
+                    "question": question,
+                    "niche_slug": niche,
+                    "node_path": f"{niche}/{niche}",
+                    "market_type": mtype,
+                    "created_at": now_iso,
+                })
+
+        if fallback_records:
+            with db.conn:
+                db.conn.executemany(
+                    """
+                    INSERT INTO token_catalog (token_id, condition_id, question, niche_slug, node_path, market_type, created_at)
+                    VALUES (:token_id, :condition_id, :question, :niche_slug, :node_path, :market_type, :created_at)
+                    ON CONFLICT(token_id) DO UPDATE SET
+                        condition_id = excluded.condition_id,
+                        question = excluded.question
+                    """,
+                    fallback_records,
+                )
+            console.print(
+                f"  [green]✓[/green] H-11 recovered {len(fallback_records):,} catalog entries "
+                f"({len(recovered)}/{len(empty_clob)} markets)"
+            )
+        else:
+            console.print(
+                f"  [yellow]H-11: zero markets recovered — CLOB also has no tokens for "
+                f"the {len(empty_clob)} cases[/yellow]"
+            )
 
     # -------------------------------------------------------------------------
     # Step 3: Check cache and load existing entity rows
