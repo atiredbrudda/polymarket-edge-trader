@@ -147,7 +147,6 @@ class ShutdownManager:
 _shutdown = ShutdownManager()
 
 
-@contextmanager
 def _log_drop(
     db,
     reason: str,
@@ -182,6 +181,7 @@ def _log_drop(
         pass
 
 
+@contextmanager
 def time_component(name: str):
     """Time a specific component (API, dedup, processing, DB, Graph fallback).
 
