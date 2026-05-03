@@ -45,32 +45,17 @@ from polymarket_analytics.extraction.patterns import EntityPatternMatcher
 from polymarket_analytics.extraction.llm import LLMFallback
 from polymarket_analytics.extraction.slug_parser import parse_event_slug as _parse_event_slug
 from polymarket_analytics.scoring.thresholds import (
+    BOT_EXCLUSION_SQL,
     BOT_TPR_THRESHOLD,
     BOT_TRADE_FLOOR,
-    Q5_COMPOSITE_THRESHOLD,
 )
+
+# Local alias to keep the existing call sites readable. Single source of
+# truth for the SQL is scoring.thresholds.BOT_EXCLUSION_SQL.
+BOT_EXCLUSION_SUBQUERY = BOT_EXCLUSION_SQL
 
 
 console = Console()
-
-# Bot/MM exclusion fragment shared by lean + full backfill trader-selection.
-# Same definition as scripts/heal_trapped_batch.py TRAPPED_TRADERS_SQL.
-# Q5 whitelist guarantees no scored signal trader is excluded.
-BOT_EXCLUSION_SUBQUERY = f"""
-    SELECT tt.trader_address
-    FROM (SELECT trader_address, COUNT(*) AS n_trades FROM trades GROUP BY trader_address) tt
-    JOIN (SELECT trader_address, COUNT(*) AS n_positions FROM positions GROUP BY trader_address) tp
-      ON tp.trader_address = tt.trader_address
-    LEFT JOIN (
-      SELECT trader_address FROM lift_scores
-      WHERE composite_score >= {Q5_COMPOSITE_THRESHOLD}
-        AND computed_at = (SELECT MAX(computed_at) FROM lift_scores)
-    ) q ON q.trader_address = tt.trader_address
-    WHERE tt.n_trades > {BOT_TRADE_FLOOR}
-      AND tp.n_positions > 0
-      AND (1.0 * tt.n_trades / tp.n_positions) > {BOT_TPR_THRESHOLD}
-      AND q.trader_address IS NULL
-"""
 
 # Max Graph retry attempts before marking a position as permanently data_incomplete
 GRAPH_RETRY_LIMIT = 3

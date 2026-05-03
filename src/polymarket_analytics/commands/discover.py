@@ -43,6 +43,7 @@ from polymarket_analytics.db.schema import init_database
 from polymarket_analytics.extraction.llm import LLMFallback
 from polymarket_analytics.extraction.patterns import EntityPatternMatcher
 from polymarket_analytics.extraction.slug_parser import parse_event_slug
+from polymarket_analytics.scoring.thresholds import load_bot_set
 
 console = Console()
 
@@ -526,6 +527,18 @@ def discover(ctx, db_path: str, closing_within: Optional[int], use_llm: bool) ->
     new_markets_count = 0
     skipped_count = 0
     error_count = 0
+    bot_skipped_count = 0  # bot/MM trade rows dropped at insert time
+
+    # In-memory bot/MM denylist for this discover invocation. Computed once
+    # against the live DB; passed to the per-market trade-extraction loop
+    # below to drop bot proxyWallets before they get written to trades or
+    # added to the traders table. See [[Bot Filter Execution Plan 2026-05-03]].
+    bot_set = load_bot_set(db)
+    if bot_set:
+        console.print(
+            f"  [dim]Bot/MM denylist loaded: {len(bot_set):,} addresses "
+            f"(trades + new traders for these will be dropped at insert)[/dim]"
+        )
 
     def _desc() -> str:
         return (
@@ -599,6 +612,12 @@ def discover(ctx, db_path: str, closing_within: Optional[int], use_llm: bool) ->
             for trade in trades:
                 address = trade.get("proxyWallet")
                 if not address:
+                    continue
+                # Bot/MM denylist drop — same filter applied at heal scan +
+                # backfill ingest. Drops both the trade row and the trader-
+                # extraction (so bots never get added to traders table).
+                if address.lower() in bot_set:
+                    bot_skipped_count += 1
                     continue
                 raw_ts = trade.get("timestamp")
                 try:
@@ -823,6 +842,7 @@ def discover(ctx, db_path: str, closing_within: Optional[int], use_llm: bool) ->
         f"  Cached (skipped):      {skipped_count:,}\n"
         f"  Errors:                {error_count:,}\n"
         f"  Trades stored:         {len(trade_records):,}\n"
+        f"  Bot/MM trades dropped: {bot_skipped_count:,}\n"
         f"  Entities extracted:    {len(entity_records):,} "
         f"(pattern: {pattern_count - event_slug_count - slug_parse_count:,}, event_slug: {event_slug_count:,}, slug_parse: {slug_parse_count:,}, LLM: {llm_count:,})\n"
         f"  Traders discovered:    {len(traders):,}"

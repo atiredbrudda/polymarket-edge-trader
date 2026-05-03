@@ -365,6 +365,22 @@ async def _monitor_pass(
         console.print("[yellow]No Q5 traders found. Run score first.[/yellow]")
         return stats
 
+    # Defensive bot/MM denylist guard. By construction Q5 ∩ bot_set = ∅
+    # (the bot filter has Q5 as a whitelist), so this should be a no-op.
+    # Guards against the edge case where a bot transiently enters Q5 and
+    # bot_set computed mid-cycle hasn't refreshed. See [[Bot Filter
+    # Execution Plan 2026-05-03]].
+    from polymarket_analytics.scoring.thresholds import load_bot_set
+    bot_set = load_bot_set(db)
+    if bot_set:
+        before = len(traders)
+        traders = [t for t in traders if (t["address"] or "").lower() not in bot_set]
+        if before > len(traders):
+            console.print(
+                f"  [yellow]Bot/MM guard: dropped {before - len(traders)} Q5 trader(s) "
+                f"matching denylist[/yellow]"
+            )
+
     console.print(f"  Q5 traders: {len(traders)} (scored at: {computed_at})")
 
     # Phase 2: Concurrent trade fetching

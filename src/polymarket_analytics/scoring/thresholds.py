@@ -25,3 +25,46 @@ Q5_COMPOSITE_THRESHOLD = -0.10
 #     conservative if Q5 whitelist isn't enough
 BOT_TRADE_FLOOR = 5000
 BOT_TPR_THRESHOLD = 20
+
+
+# Self-contained SELECT that returns lowercase trader_address for every
+# trader matching the bot signature. Reused by heal_trapped_batch,
+# backfill ingest, the prune script, and the in-memory leak-closing
+# loaders below. Keep this as the single source of truth.
+BOT_EXCLUSION_SQL = f"""
+    SELECT tt.trader_address
+    FROM (SELECT trader_address, COUNT(*) AS n_trades FROM trades GROUP BY trader_address) tt
+    JOIN (SELECT trader_address, COUNT(*) AS n_positions FROM positions GROUP BY trader_address) tp
+      ON tp.trader_address = tt.trader_address
+    LEFT JOIN (
+      SELECT trader_address FROM lift_scores
+      WHERE composite_score >= {Q5_COMPOSITE_THRESHOLD}
+        AND computed_at = (SELECT MAX(computed_at) FROM lift_scores)
+    ) q ON q.trader_address = tt.trader_address
+    WHERE tt.n_trades > {BOT_TRADE_FLOOR}
+      AND tp.n_positions > 0
+      AND (1.0 * tt.n_trades / tp.n_positions) > {BOT_TPR_THRESHOLD}
+      AND q.trader_address IS NULL
+"""
+
+
+def load_bot_set(db) -> frozenset[str]:
+    """Compute the bot/MM denylist for this invocation.
+
+    Runs BOT_EXCLUSION_SQL against the live DB and returns a frozenset of
+    lowercase addresses. Cost: ~2-3s on a 7M-trade DB. Call once at the
+    top of an invocation (discover, heal sweep, monitor poll cycle) and
+    pass `bot_set` down to inner functions as a parameter.
+
+    Returns an empty frozenset on any DB error — observability decision:
+    a malformed bot set must NOT block ingest. We'd rather over-ingest
+    than crash the pipeline.
+
+    Accepts either a sqlite3.Connection or sqlite_utils.Database.
+    """
+    try:
+        # sqlite_utils.Database exposes .execute(); sqlite3.Connection too.
+        rows = db.execute(BOT_EXCLUSION_SQL).fetchall()
+        return frozenset((r[0] or "").lower() for r in rows if r[0])
+    except Exception:
+        return frozenset()

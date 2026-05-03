@@ -59,6 +59,7 @@ from polymarket_analytics.scoring.thresholds import (
     BOT_TPR_THRESHOLD,
     BOT_TRADE_FLOOR,
     Q5_COMPOSITE_THRESHOLD,
+    load_bot_set,
 )
 
 DB_PATH = REPO / "data" / "analytics.db"
@@ -573,6 +574,21 @@ async def sweep_maker_side(
         print("[sweep] no trapped pairs remaining — skipping maker-side sweep")
         return {"checked_markets": 0, "fetched": 0, "inserted": 0, "healed_pairs": 0}
 
+    # Bot/MM denylist — drops bot trader_addresses from the trapped pairs we
+    # service AND drops bot proxyWallets from per-market trade results below.
+    # Defense in depth: per-trader heal already excludes bots via
+    # TRAPPED_TRADERS_SQL, but this sweep computes its own pair set and could
+    # otherwise re-ingest bot rows from the per-market endpoint.
+    bot_set = load_bot_set(db)
+    if bot_set:
+        before_pairs = len(rows)
+        rows = [r for r in rows if (r[0] or "").lower() not in bot_set]
+        if before_pairs > len(rows):
+            print(
+                f"[sweep] dropped {before_pairs - len(rows):,} bot trader pairs "
+                f"({len(bot_set):,} addresses on denylist)"
+            )
+
     market_to_traders: dict[str, set[str]] = {}
     for trader, market in rows:
         if not market:
@@ -613,6 +629,11 @@ async def sweep_maker_side(
             cid = (tr.get("conditionId") or "").lower()
             wallet = (tr.get("proxyWallet") or "").lower()
             if not cid or not wallet:
+                continue
+            # Defense-in-depth bot drop. Bot trader_addresses already removed
+            # from `wanted` above, but a bot can still appear as the *other*
+            # side of a trapped trader's fill — drop their row at insert.
+            if wallet in bot_set:
                 continue
             wanted = market_to_traders.get(cid)
             if not wanted or wallet not in wanted:
