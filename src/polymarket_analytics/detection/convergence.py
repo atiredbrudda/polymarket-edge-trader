@@ -128,8 +128,15 @@ def _apply_opposing_direction_cancellation(df: pd.DataFrame) -> pd.DataFrame:
 
     df["net_q5_count"] = net_counts
 
-    # Re-tier based on net_q5_count instead of raw q5_count
-    df["tier"] = df["net_q5_count"].apply(_compute_tier)
+    # Re-tier based on net_q5_count + CLV-dominance quality gate
+    df["tier"] = df.apply(
+        lambda r: _compute_tier(
+            int(r["net_q5_count"]),
+            int(r["q5_count"]),
+            int(r["clv_dominant_count"]),
+        ),
+        axis=1,
+    )
 
     return df
 
@@ -150,14 +157,19 @@ def _apply_event_grouping(df: pd.DataFrame) -> pd.DataFrame:
     return df
 
 
-def _compute_tier(net_q5_count: int) -> str:
-    """Compute signal tier from net Q5 count.
+def _compute_tier(net_q5_count: int, q5_count: int, clv_dominant_count: int) -> str:
+    """Compute signal tier from net Q5 count + CLV-dominance quality gate.
 
-    Thresholds lowered 2026-04-22 (from 5/3 to 3/2) — bridge was signal-starved.
-    Per-trade ROI is flat from min=2 through 10 (~65-70%), so the threshold is
-    about filtering noise, not chasing higher edge. Revisit when Q5 panel >= 1000.
+    ACT requires net_q5 >= 3 AND not-all-CLV-dominant. Unanimous CLV-dominance
+    selects redundant convergence (same archetype, same mispricing). Historical
+    A/B (n=198) shows 5pp WR drop vs majority-but-not-unanimous; live n=14
+    confirms direction with much wider gap (21% WR / -$574 vs 47% WR / +$31).
+    See [[CLV Consensus A/B]] + [[Live Bridge Review 2026-05-02]].
+
+    Thresholds lowered 2026-04-22 (5/3 → 3/2) — bridge was signal-starved. Per-trade
+    ROI flat from min=2 through 10 (~65-70%). Revisit when Q5 panel >= 1000.
     """
-    if net_q5_count >= 3:
+    if net_q5_count >= 3 and clv_dominant_count < q5_count:
         return "ACT"
     elif net_q5_count >= 2:
         return "CONSIDER"
