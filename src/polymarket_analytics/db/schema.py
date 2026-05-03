@@ -295,29 +295,48 @@ def create_indexes(db):
 def create_views(db):
     """Create or replace derived views.
 
-    Views are always recreated so they stay current with any schema changes.
+    Idempotent: skips DROP+CREATE when the existing view definition already
+    matches the expected one. DROP VIEW takes a schema-level exclusive lock
+    that races with concurrent writers (e.g. heal subprocess), so avoiding
+    it on the steady-state path keeps `init_database()` lock-free.
     """
+    expected_sql = (
+        f"CREATE VIEW q5_traders AS\n"
+        f"        SELECT\n"
+        f"            trader_address,\n"
+        f"            category,\n"
+        f"            composite_score,\n"
+        f"            clv_raw,\n"
+        f"            roi_raw,\n"
+        f"            sharpe_raw,\n"
+        f"            position_count,\n"
+        f"            total_pnl,\n"
+        f"            computed_at\n"
+        f"        FROM lift_scores\n"
+        f"        WHERE quintile = 5\n"
+        f"          AND composite_score >= {Q5_COMPOSITE_THRESHOLD}\n"
+        f"          AND computed_at = (\n"
+        f"              SELECT MAX(computed_at) FROM lift_scores ls2\n"
+        f"              WHERE ls2.category = lift_scores.category\n"
+        f"          )"
+    )
+
+    row = db.execute(
+        "SELECT sql FROM sqlite_master WHERE type='view' AND name='q5_traders'"
+    ).fetchone()
+    current_sql = row[0] if row else None
+
+    # SQLite stores the CREATE VIEW source verbatim. Compare on whitespace-
+    # collapsed strings so cosmetic re-formatting doesn't trigger a needless
+    # DROP/CREATE.
+    def _norm(s: str) -> str:
+        return " ".join(s.split())
+
+    if current_sql and _norm(current_sql) == _norm(expected_sql):
+        return  # already correct — no schema lock needed
+
     db.execute("DROP VIEW IF EXISTS q5_traders")
-    db.execute(f"""
-        CREATE VIEW q5_traders AS
-        SELECT
-            trader_address,
-            category,
-            composite_score,
-            clv_raw,
-            roi_raw,
-            sharpe_raw,
-            position_count,
-            total_pnl,
-            computed_at
-        FROM lift_scores
-        WHERE quintile = 5
-          AND composite_score >= {Q5_COMPOSITE_THRESHOLD}
-          AND computed_at = (
-              SELECT MAX(computed_at) FROM lift_scores ls2
-              WHERE ls2.category = lift_scores.category
-          )
-    """)
+    db.execute(expected_sql)
 
 
 def run_migrations(db):

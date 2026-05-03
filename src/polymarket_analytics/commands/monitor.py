@@ -694,10 +694,13 @@ async def _monitor_async(
     lock_path = str(Path(db_path).parent / ".pipeline.lock")
     heartbeat_path = Path(db_path).parent / ".monitor_heartbeat"
 
+    heal_proc: Optional[subprocess.Popen] = None
     try:
         pass_num = 0
         while True:
             pass_num += 1
+            cycle_start = time.monotonic()
+            heal_proc = None
             # Touch heartbeat at the start of every poll cycle so heal_loop
             # knows the monitor is mid-cycle and can defer its run.
             try:
@@ -802,60 +805,77 @@ async def _monitor_async(
                             console.print(f"  [yellow]paper-take-profit: {e}[/yellow]")
 
                         # Heal trapped (sell-only) traders left behind by Graph
-                        # pagination. Runs after monitor's own work; deadline =
-                        # next-pass time minus 3-min safety buffer. heal saves
-                        # progress per-batch, so killing mid-flight loses nothing.
+                        # pagination. Kicked off as a non-blocking subprocess
+                        # so it runs concurrently with the inter-pass sleep —
+                        # heal lives *inside* the sleep window, not stacked
+                        # after it. heal_trapped_batch.py is lock-free
+                        # (INSERT OR IGNORE, batched with sleeps so monitor
+                        # SELECTs aren't starved) and self-caps via
+                        # --max-runtime-s. Reaped at end of cycle before the
+                        # next pass starts.
                         if poll_minutes:
                             heal_budget_s = max(0, (poll_minutes - 3) * 60)
                             if heal_budget_s >= 120:
                                 console.print(
                                     f"\n[bold]Heal trapped traders[/bold] "
-                                    f"(budget {heal_budget_s}s)"
+                                    f"(budget {heal_budget_s}s, runs during sleep)"
                                 )
                                 heal_script = (
                                     Path(__file__).resolve().parents[3]
                                     / "scripts" / "heal_trapped_batch.py"
                                 )
                                 cwd = Path(db_path).resolve().parent.parent
-                                proc = subprocess.Popen(
+                                heal_proc = subprocess.Popen(
                                     [".venv/bin/python", str(heal_script),
                                      "--resume",
                                      "--batch-size", "4",
                                      "--max-runtime-s", str(heal_budget_s)],
                                     cwd=str(cwd),
                                 )
-                                try:
-                                    # Hard-cap: budget + one worst-case batch (5 min)
-                                    proc.wait(timeout=heal_budget_s + 360)
-                                except subprocess.TimeoutExpired:
-                                    console.print(
-                                        "  [yellow]heal: hard-cap exceeded — terminating[/yellow]"
-                                    )
-                                    proc.terminate()
-                                    try:
-                                        proc.wait(timeout=15)
-                                    except subprocess.TimeoutExpired:
-                                        proc.kill()
-                                        proc.wait()
-                                except Exception as e:
-                                    console.print(f"  [yellow]heal: {e}[/yellow]")
 
             if not poll_minutes:
                 break
 
-            console.print(
-                f"\n[dim]Next pass in {poll_minutes} minutes. Ctrl+C to stop.[/dim]"
-            )
-            # Sleep in small increments so shutdown is responsive
-            for _ in range(poll_minutes * 60):
-                if shutdown.shutdown_requested:
-                    break
-                await asyncio.sleep(1)
+            # Sleep until the next pass should start (cycle_start + poll_minutes).
+            # Heal subprocess (if launched) runs concurrently during this window.
+            elapsed = time.monotonic() - cycle_start
+            remaining_s = max(0, int(poll_minutes * 60 - elapsed))
+            if remaining_s > 0:
+                heal_note = " (heal running)" if heal_proc and heal_proc.poll() is None else ""
+                console.print(
+                    f"\n[dim]Next pass in {remaining_s // 60}m {remaining_s % 60}s{heal_note}. Ctrl+C to stop.[/dim]"
+                )
+                for _ in range(remaining_s):
+                    if shutdown.shutdown_requested:
+                        break
+                    await asyncio.sleep(1)
+            else:
+                console.print(
+                    f"\n[yellow]Pass + chain exceeded poll interval ({int(elapsed)}s ≥ {poll_minutes*60}s) — starting next pass immediately[/yellow]"
+                )
+
+            # Reap heal subprocess before the next pass starts so it doesn't
+            # overlap with the next pass's writes.
+            if heal_proc and heal_proc.poll() is None:
+                heal_proc.terminate()
+                try:
+                    heal_proc.wait(timeout=15)
+                except subprocess.TimeoutExpired:
+                    heal_proc.kill()
+                    heal_proc.wait()
 
             if shutdown.shutdown_requested:
                 shutdown.print_interrupted_summary()
                 break
     finally:
+        # Reap any heal subprocess still running on shutdown.
+        if heal_proc and heal_proc.poll() is None:
+            heal_proc.terminate()
+            try:
+                heal_proc.wait(timeout=15)
+            except subprocess.TimeoutExpired:
+                heal_proc.kill()
+                heal_proc.wait()
         shutdown.uninstall(loop)
 
 
