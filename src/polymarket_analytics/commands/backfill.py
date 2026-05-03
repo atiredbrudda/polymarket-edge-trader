@@ -524,8 +524,35 @@ async def backfill_trader(
         # Token catalog lookup: resolve token_id -> condition_id (from cache)
         condition_id = catalog_cache.get(str(token_id))
         if not condition_id:
-            stats["skipped"] += 1
-            continue
+            # H-11 self-heal: Polymarket Data API ships `conditionId` per trade,
+            # so when discover.py omits a token_catalog row (Gamma occasionally
+            # returns markets with empty clobTokenIds), we can insert the
+            # missing catalog entry on the spot rather than silently dropping
+            # the trade. Graph trades don't carry conditionId, so this only
+            # fixes the API path — which is the H-11 root cause.
+            api_condition_id = trade.get("conditionId") or trade.get("condition_id")
+            if api_condition_id:
+                try:
+                    db["token_catalog"].insert(
+                        {
+                            "token_id": str(token_id),
+                            "condition_id": str(api_condition_id),
+                        },
+                        pk="token_id",
+                        ignore=True,  # Race-safe vs concurrent backfill writers
+                    )
+                    condition_id = str(api_condition_id)
+                    catalog_cache[str(token_id)] = condition_id
+                    stats["self_healed_catalog"] = stats.get("self_healed_catalog", 0) + 1
+                except Exception:
+                    # FK violation (market itself missing) or other write
+                    # failure — fall through to skip. Rare; a real fix would
+                    # also self-heal the market, but that's out of scope.
+                    stats["skipped"] += 1
+                    continue
+            else:
+                stats["skipped"] += 1
+                continue
 
         # Convert price to Decimal
         try:

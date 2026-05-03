@@ -37,6 +37,7 @@ from __future__ import annotations
 
 import argparse
 import asyncio
+import hashlib
 import json
 import os
 import signal
@@ -51,6 +52,7 @@ from sqlite_utils import Database
 REPO = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(REPO / "src"))
 
+from polymarket_analytics.api.data import DataAPIClient
 from polymarket_analytics.api.graph import GraphAPIClient, parse_graph_event
 from polymarket_analytics.db.connection import get_db
 
@@ -72,25 +74,60 @@ PER_TRADER_TIMEOUT_S = 300.0
 RETRY_TIMEOUTS_S = [300.0, 600.0, 900.0]
 GRADUATION_THRESHOLD = len(RETRY_TIMEOUTS_S)
 
+# Market-maker / arbitrage-bot exclusion. Traders the scoring pipeline has
+# already classified as non-signal (composite_score < MM_SCORE_CUTOFF) AND with
+# meaningful volume (positions > MM_POSITION_FLOOR) are skipped — Graph fetches
+# for them are wasted Goldsky time with zero downstream signal value.
+#
+# Threshold rationale: composite_score alone catches 4,371 traders (~94% of
+# scored pool). Most are not bots, just unlucky. The volume floor (>100
+# positions) keeps the conservative filter at ~1,700 traders — the long tail of
+# arb bots that show edge=0 over many markets. See [[Market Maker Bot Detection]]
+# wiki for the discovery and the population analysis.
+#
+# Re-tune as needed: lowering MM_POSITION_FLOOR catches more, raising it
+# catches fewer. Cutoff at -0.10 mirrors the Q5 panel threshold (Phase 2).
+MM_SCORE_CUTOFF = -0.10
+MM_POSITION_FLOOR = 100
+
 # Trapped definition matches scripts/recover_trapped_traders.sh and
 # dryrun_trapped_recovery.py: (trader, market) pairs with >=1 SELL and 0 BUY.
 # We pull the full set of such traders (both no-position-row and exhausted
 # position-row cases) so a single Graph fetch per trader heals every trapped
 # market they own.
-TRAPPED_TRADERS_SQL = """
+TRAPPED_TRADERS_SQL = f"""
 WITH pairs AS (
   SELECT trader_address, market_id,
          SUM(CASE WHEN side='BUY'  THEN 1 ELSE 0 END) AS buys,
          SUM(CASE WHEN side='SELL' THEN 1 ELSE 0 END) AS sells
   FROM trades
   GROUP BY trader_address, market_id
+),
+position_counts AS (
+  SELECT trader_address, COUNT(*) AS n_positions
+  FROM positions
+  GROUP BY trader_address
+),
+known_mms AS (
+  SELECT ls.trader_address
+  FROM lift_scores ls
+  JOIN position_counts pc ON pc.trader_address = ls.trader_address
+  WHERE ls.composite_score < {MM_SCORE_CUTOFF}
+    AND pc.n_positions > {MM_POSITION_FLOOR}
+    AND ls.computed_at = (SELECT MAX(computed_at) FROM lift_scores)
 )
 SELECT DISTINCT p.trader_address
 FROM pairs p
-LEFT JOIN traders t ON t.address = p.trader_address
+LEFT JOIN traders t  ON t.address  = p.trader_address
+LEFT JOIN known_mms m ON m.trader_address = p.trader_address
 WHERE p.buys = 0
   AND p.sells > 0
-  AND COALESCE(t.graph_unservable, 0) = 0
+  AND m.trader_address IS NULL
+  -- graph_unservable traders ARE included now: they're routed to the Data API
+  -- path inside the batch loop (heal_one_trader_via_api) instead of Graph.
+  -- This closes REVIEW.md H-10 — graph_unservable traders no longer fall into
+  -- a coverage hole between full backfill (skips them) and lean (skips them
+  -- after first run).
 ORDER BY p.trader_address
 """
 
@@ -313,6 +350,172 @@ async def heal_one_trader(
     }
 
 
+def _api_trade_to_row(api_trade: dict, trader: str, catalog: dict[str, str]) -> dict | None:
+    """Convert a Data API trade dict to an insert-ready trades row, or None if unparseable.
+
+    Mirrors the API-format branch of backfill.py (~line 506-558). Kept inline
+    to avoid pulling backfill_trader's heavy deps into heal.
+    """
+    token_id = api_trade.get("asset") or api_trade.get("asset_id")
+    if not token_id:
+        return None
+    condition_id = catalog.get(str(token_id))
+    if not condition_id:
+        return None
+
+    side = "BUY" if api_trade.get("side") == "BUY" else "SELL"
+    price_str = str(api_trade.get("price", "0"))
+    size_str = str(api_trade.get("size", "0"))
+    timestamp = api_trade.get("timestamp")
+
+    trade_id = (
+        api_trade.get("trade_id")
+        or api_trade.get("txHash")
+        or hashlib.sha256(
+            f"{trader}:{token_id}:{side}:{price_str}:{size_str}:{timestamp}".encode()
+        ).hexdigest()[:32]
+    )
+
+    try:
+        price = Decimal(price_str)
+        if price > 1:  # decimal odds → implied probability
+            price = Decimal("1") / price
+    except Exception:
+        price = Decimal("0")
+    try:
+        size = Decimal(size_str)
+    except Exception:
+        size = Decimal("0")
+
+    if isinstance(timestamp, int):
+        ts_iso = datetime.fromtimestamp(timestamp, tz=timezone.utc).replace(microsecond=0).isoformat()
+    elif timestamp:
+        try:
+            ts_iso = datetime.fromisoformat(str(timestamp).replace("Z", "+00:00")).replace(microsecond=0).isoformat()
+        except Exception:
+            ts_iso = datetime.now(timezone.utc).replace(microsecond=0).isoformat()
+    else:
+        ts_iso = datetime.now(timezone.utc).replace(microsecond=0).isoformat()
+
+    return {
+        "trade_id": trade_id,
+        "token_id": str(token_id),
+        "timestamp": ts_iso,
+        "side": side,
+        "price": price,
+        "size": size,
+        "market_id": condition_id,
+        "trader_address": trader,
+    }
+
+
+async def heal_one_trader_via_api(
+    data: DataAPIClient,
+    db: Database,
+    catalog: dict[str, str],
+    trader: str,
+    sem: asyncio.Semaphore,
+    since_unix_ts: int | None,
+    timeout: float = PER_TRADER_TIMEOUT_S,
+) -> dict:
+    """Data API path for graph_unservable traders.
+
+    Goldsky times out for these traders; the Data API doesn't. Trades returned
+    are taker-side only (REVIEW.md H-10 option #3) — the maker-side recovery
+    story remains open. This still beats the alternative of zero updates.
+
+    Behavior:
+      - Returns the same dict shape as heal_one_trader for batch-loop reuse.
+      - Updates traders.last_trade_seen_at + last_backfilled_at on success so
+        the next heal pass picks up only new trades.
+      - Does NOT touch positions.graph_retry_count (that's Graph-attempt state).
+    """
+    trapped_before = trader_trapped_markets(db, trader)
+
+    async with sem:
+        t0 = time.time()
+        try:
+            api_trades = await asyncio.wait_for(
+                data.fetch_user_trades(trader, since_unix_ts=since_unix_ts),
+                timeout=timeout,
+            )
+        except asyncio.TimeoutError:
+            return {
+                "trader": trader,
+                "error": f"api timeout (>{timeout:.0f}s)",
+                "events": 0, "inserted": 0, "healed_markets": 0,
+                "trapped_before": len(trapped_before),
+                "via": "data_api",
+            }
+        except Exception as e:
+            return {
+                "trader": trader,
+                "error": f"api {type(e).__name__}: {e}",
+                "events": 0, "inserted": 0, "healed_markets": 0,
+                "trapped_before": len(trapped_before),
+                "via": "data_api",
+            }
+        elapsed = time.time() - t0
+
+    batch: list[dict] = []
+    latest_ts: str | None = None
+    for api_t in api_trades:
+        row = _api_trade_to_row(api_t, trader, catalog)
+        if row is None:
+            continue
+        batch.append(row)
+        if latest_ts is None or row["timestamp"] > latest_ts:
+            latest_ts = row["timestamp"]
+
+    inserted = 0
+    if batch:
+        before = db.conn.total_changes
+        try:
+            for i in range(0, len(batch), 500):
+                chunk = batch[i : i + 500]
+                db["trades"].insert_all(chunk, ignore=True)
+                if i + 500 < len(batch):
+                    await asyncio.sleep(0.05)
+            inserted = db.conn.total_changes - before
+        except Exception as e:
+            return {
+                "trader": trader,
+                "error": f"insert: {type(e).__name__}: {e}",
+                "events": len(api_trades),
+                "inserted": 0, "healed_markets": 0,
+                "trapped_before": len(trapped_before),
+                "via": "data_api",
+            }
+
+    # Advance the trader's incremental watermark so the next heal pass fetches
+    # only new trades. Stamp last_backfilled_at too so this counts as a service.
+    now_iso = datetime.now(timezone.utc).isoformat()
+    update_fields = {"last_backfilled_at": now_iso}
+    if latest_ts:
+        update_fields["last_trade_seen_at"] = latest_ts
+    set_clause = ", ".join(f"{k} = ?" for k in update_fields)
+    db.execute(
+        f"UPDATE traders SET {set_clause} WHERE address = ?",
+        list(update_fields.values()) + [trader],
+    )
+    db.conn.commit()
+
+    trapped_after = trader_trapped_markets(db, trader)
+    healed_markets = len(trapped_before - trapped_after)
+
+    return {
+        "trader": trader,
+        "events": len(api_trades),
+        "inserted": inserted,
+        "healed_markets": healed_markets,
+        "trapped_before": len(trapped_before),
+        "trapped_after": len(trapped_after),
+        "irredeemable_marked": 0,  # Data API path doesn't touch graph_retry_count
+        "elapsed_s": round(elapsed, 1),
+        "via": "data_api",
+    }
+
+
 async def run(
     batch_size: int,
     batch_sleep_s: float,
@@ -333,6 +536,32 @@ async def run(
     t0 = time.time()
     all_traders = [row[0] for row in db.execute(TRAPPED_TRADERS_SQL).fetchall()]
     print(f"[heal]   {len(all_traders):,} trapped traders (scan {time.time()-t0:.1f}s)")
+
+    # Lookup which trapped traders are graph_unservable (route to Data API path)
+    # and what their incremental watermark is. Single query, then in-memory.
+    unservable_set: set[str] = set()
+    since_unix_ts_map: dict[str, int | None] = {}
+    if all_traders:
+        placeholders = ",".join("?" * len(all_traders))
+        rows = db.execute(
+            f"SELECT address, last_trade_seen_at FROM traders "
+            f"WHERE COALESCE(graph_unservable, 0) = 1 AND address IN ({placeholders})",
+            all_traders,
+        ).fetchall()
+        for addr, last_seen in rows:
+            unservable_set.add(addr)
+            if last_seen:
+                try:
+                    dt = datetime.fromisoformat(str(last_seen).replace("Z", "+00:00"))
+                    since_unix_ts_map[addr] = int(dt.timestamp())
+                except Exception:
+                    since_unix_ts_map[addr] = None
+            else:
+                since_unix_ts_map[addr] = None
+        print(
+            f"[heal]   {len(unservable_set):,} of those are graph_unservable "
+            f"(routed to Data API path)"
+        )
 
     if resume:
         completed, failed, attempts = load_progress()
@@ -433,6 +662,7 @@ async def run(
     print(f"[heal]   catalog: {len(catalog):,} tokens")
 
     graph = GraphAPIClient(api_key=api_key)
+    data = DataAPIClient()
     sem = asyncio.Semaphore(concurrency)
 
     totals = {
@@ -475,17 +705,29 @@ async def run(
 
             # as_completed so we log per-trader as they finish — without this,
             # a slow trader silently blocks the whole batch (no feedback).
+            # Per-trader routing: graph_unservable → Data API; everyone else → Graph.
             tasks = []
             for t in chunk:
                 attempt = attempts.get(t, 0)
                 # Clamp into the schedule; graduation already happened upstream
                 # if attempt >= GRADUATION_THRESHOLD, so we shouldn't see it.
                 tmo = RETRY_TIMEOUTS_S[min(attempt, GRADUATION_THRESHOLD - 1)]
-                tasks.append(
-                    asyncio.create_task(
-                        heal_one_trader(graph, db, catalog, t, sem, timeout=tmo)
+                if t in unservable_set:
+                    tasks.append(
+                        asyncio.create_task(
+                            heal_one_trader_via_api(
+                                data, db, catalog, t, sem,
+                                since_unix_ts=since_unix_ts_map.get(t),
+                                timeout=tmo,
+                            )
+                        )
                     )
-                )
+                else:
+                    tasks.append(
+                        asyncio.create_task(
+                            heal_one_trader(graph, db, catalog, t, sem, timeout=tmo)
+                        )
+                    )
             batch_inserted = 0
             batch_healed = 0
             batch_irredeemable = 0
@@ -581,6 +823,7 @@ async def run(
                 await asyncio.sleep(batch_sleep_s)
     finally:
         await graph.close()
+        await data.close()
         save_progress(completed, failed, attempts, totals)
 
     print("\n[heal] === done ===")

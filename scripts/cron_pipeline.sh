@@ -32,10 +32,29 @@ echo "$LOG_PREFIX Starting cron pipeline run"
 LOCK_FILE="$PROJECT_DIR/data/.pipeline.lock"
 mkdir -p "$(dirname "$LOCK_FILE")"
 if [ -f "$LOCK_FILE" ]; then
-    EXISTING_PID=$(python3 -c "import json,sys; d=json.load(open('$LOCK_FILE')); print(d.get('pid',''))" 2>/dev/null)
+    LOCK_INFO=$(python3 -c "import json; d=json.load(open('$LOCK_FILE')); print(d.get('pid',''),d.get('process_type','unknown'))" 2>/dev/null)
+    EXISTING_PID="${LOCK_INFO% *}"
+    EXISTING_TYPE="${LOCK_INFO#* }"
     if [ -n "$EXISTING_PID" ] && kill -0 "$EXISTING_PID" 2>/dev/null; then
-        echo "$LOG_PREFIX Lock held by PID $EXISTING_PID (still alive) — skipping run"
-        exit 0
+        if [ "$EXISTING_TYPE" = "cron" ]; then
+            echo "$LOG_PREFIX Lock held by another cron (PID $EXISTING_PID) — skipping run"
+            exit 0
+        elif [ "$EXISTING_TYPE" = "monitor" ]; then
+            # Wait for monitor to finish its pass (max 3 min) rather than
+            # preempting — preempting causes concurrent DB writes and "database
+            # is locked" errors because monitor keeps writing until its with-block exits.
+            echo "$LOG_PREFIX Lock held by monitor (PID $EXISTING_PID) — waiting up to 3 min for it to finish"
+            WAIT=0
+            while [ $WAIT -lt 180 ] && kill -0 "$EXISTING_PID" 2>/dev/null && [ -f "$LOCK_FILE" ]; do
+                sleep 10
+                WAIT=$((WAIT + 10))
+            done
+            if kill -0 "$EXISTING_PID" 2>/dev/null && [ -f "$LOCK_FILE" ]; then
+                echo "$LOG_PREFIX Monitor still running after 3 min — proceeding anyway (monitor will see cron lock and stop chain)"
+            else
+                echo "$LOG_PREFIX Monitor finished — proceeding"
+            fi
+        fi
     else
         echo "$LOG_PREFIX Stale lock (PID ${EXISTING_PID:-unknown} is gone) — overwriting"
     fi
@@ -107,6 +126,23 @@ run_stage "detect" polymarket --niche esports detect
 # poll cycle for faster signal-to-trade latency. Cron only resolves closed
 # markets (depends on ingest-events --full + resolve-outcomes above).
 run_stage "paper-resolve" polymarket --niche esports paper-dashboard --resolve
+
+# --- Daily DB maintenance (midnight only) ---
+# Prunes resolved markets older than 40d + their dependents, deletes orphans,
+# truncates the WAL high-water mark. Runs after all upstream data-consuming
+# stages so they see complete data before deletion.
+#
+# Each step is independently failable (run_stage continues on error).
+# prune_resolved_40d.py runs VACUUM internally; the WAL truncate at the end
+# drains both the prune's freelist work AND the orphan-delete WAL bloat.
+if [ -z "$BACKFILL_MODE" ]; then
+    echo "$LOG_PREFIX Daily DB maintenance starting"
+    run_stage "snapshot-40d"   .venv/bin/python scripts/snapshot_resolved_40d.py
+    run_stage "prune-40d"      .venv/bin/python scripts/prune_resolved_40d.py --execute
+    run_stage "prune-orphans"  sqlite3 data/analytics.db "BEGIN; DELETE FROM trades WHERE NOT EXISTS (SELECT 1 FROM markets m WHERE m.condition_id = trades.market_id); DELETE FROM positions WHERE NOT EXISTS (SELECT 1 FROM markets m WHERE m.condition_id = positions.market_id); COMMIT;"
+    run_stage "wal-truncate"   sqlite3 data/analytics.db "PRAGMA wal_checkpoint(TRUNCATE);"
+    echo "$LOG_PREFIX Daily DB maintenance complete"
+fi
 
 # --- Update full backfill marker ---
 if [ -z "$BACKFILL_MODE" ]; then

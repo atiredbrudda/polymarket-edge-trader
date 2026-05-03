@@ -531,9 +531,17 @@ def discover(ctx, db_path: str, closing_within: Optional[int], use_llm: bool) ->
                 # Build trade record (same format as backfill)
                 raw_token_id = trade.get("asset") or trade.get("asset_id")
                 tx_hash = trade.get("transactionHash", "")
-                trade_id = tx_hash or hashlib.sha256(
-                    f"{address}:{raw_token_id}:{trade.get('side', '')}:{trade.get('price', '')}:{trade.get('size', '')}:{raw_ts}".encode()
-                ).hexdigest()[:32]
+                if tx_hash:
+                    # Trader-prefix the txHash to prevent maker/taker PK
+                    # collision — Data API returns one row per fill participant
+                    # (maker AND taker), both rows share the same txHash, and
+                    # ON CONFLICT(trade_id) DO NOTHING would silently drop one
+                    # side. See commit 98cfc3b for the same fix in graph.py.
+                    trade_id = f"{address.lower()}_{tx_hash}"
+                else:
+                    trade_id = hashlib.sha256(
+                        f"{address}:{raw_token_id}:{trade.get('side', '')}:{trade.get('price', '')}:{trade.get('size', '')}:{raw_ts}".encode()
+                    ).hexdigest()[:32]
 
                 # Resolve market_id via token catalog; fall back to conditionId
                 if raw_token_id and raw_token_id in catalog_by_token:

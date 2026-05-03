@@ -14,6 +14,7 @@ import asyncio
 import json
 import os
 import signal
+import subprocess
 import time
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
@@ -716,7 +717,21 @@ async def _monitor_async(
                     # Chain: run build-positions + detect using the
                     # monitor's existing db connection to avoid
                     # "database is locked" from a second connection.
-                    if chain and not dry_run:
+                    #
+                    # Guard: cron can preempt a running monitor by overwriting
+                    # the lock file while _monitor_pass is executing.  If that
+                    # happened, skip all chain writes so we don't race with cron.
+                    _current_lock = check_lock(lock_path)
+                    _cron_preempted = (
+                        _current_lock is None
+                        or _current_lock.get("pid") != os.getpid()
+                    )
+                    if _cron_preempted:
+                        console.print(
+                            "  [yellow]Cron preempted mid-pass — skipping chain writes to avoid DB contention[/yellow]"
+                        )
+
+                    if chain and not dry_run and not _cron_preempted:
                         console.print("\n[bold]Chaining: build-positions → detect → paper-bridge → paper-take-profit[/bold]")
                         from polymarket_analytics.positions.aggregation import (
                             build_positions_from_trades,
@@ -769,6 +784,45 @@ async def _monitor_async(
                             _run_take_profit(db_path, paper_data_dir="data/paper_trader", dry_run=False, threshold=1.5)
                         except Exception as e:
                             console.print(f"  [yellow]paper-take-profit: {e}[/yellow]")
+
+                        # Heal trapped (sell-only) traders left behind by Graph
+                        # pagination. Runs after monitor's own work; deadline =
+                        # next-pass time minus 3-min safety buffer. heal saves
+                        # progress per-batch, so killing mid-flight loses nothing.
+                        if poll_minutes:
+                            heal_budget_s = max(0, (poll_minutes - 3) * 60)
+                            if heal_budget_s >= 120:
+                                console.print(
+                                    f"\n[bold]Heal trapped traders[/bold] "
+                                    f"(budget {heal_budget_s}s)"
+                                )
+                                heal_script = (
+                                    Path(__file__).resolve().parents[3]
+                                    / "scripts" / "heal_trapped_batch.py"
+                                )
+                                cwd = Path(db_path).resolve().parent.parent
+                                proc = subprocess.Popen(
+                                    [".venv/bin/python", str(heal_script),
+                                     "--resume",
+                                     "--batch-size", "4",
+                                     "--max-runtime-s", str(heal_budget_s)],
+                                    cwd=str(cwd),
+                                )
+                                try:
+                                    # Hard-cap: budget + one worst-case batch (5 min)
+                                    proc.wait(timeout=heal_budget_s + 360)
+                                except subprocess.TimeoutExpired:
+                                    console.print(
+                                        "  [yellow]heal: hard-cap exceeded — terminating[/yellow]"
+                                    )
+                                    proc.terminate()
+                                    try:
+                                        proc.wait(timeout=15)
+                                    except subprocess.TimeoutExpired:
+                                        proc.kill()
+                                        proc.wait()
+                                except Exception as e:
+                                    console.print(f"  [yellow]heal: {e}[/yellow]")
 
             if not poll_minutes:
                 break
