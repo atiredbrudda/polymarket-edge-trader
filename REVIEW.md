@@ -57,18 +57,18 @@ Add the export to whatever cron sources its env (crontab wrapper, `.env`, system
 1. **Concurrent fetching** — use `asyncio.Semaphore(10)` like monitor does. 283 markets / 10 concurrent = ~4.5 min instead of 45 min. Straightforward refactor of `_fetch_market_trades` → async.
 2. **Skip zero-volume markets** — Gamma API response includes `volumeNum`. Skip markets with `volumeNum == 0` before fetching trades. Eliminates ~60% of fetches.
 
-### H-10: `graph_unservable` traders fall into a backfill coverage hole — **CHEAP FIX SHIPPED 2026-05-02; option #2 (auto-clear) still pending**
+### H-10: `graph_unservable` traders fall into a backfill coverage hole — **TAKER + MAKER SIDE BOTH SHIPPED 2026-05-03; option #2 (auto-clear) still pending**
 
 **Found:** 2026-05-01. **Trigger:** comparing Polymarket REST `/trades?user=` vs DB for `0x8c0b024c17831a0dde038547b7e791ae6a0d7aa5`.
 
 **File:** `src/polymarket_analytics/commands/backfill.py:709-734`
 
-**Status (2026-05-02):**
-- ✅ **Resolved via M-09 expansion (heal Data API path)**, not via lean modification. Initial cheap-fix attempt in lean was reverted in favor of the cleaner architecture: heal owns graph_unservable maintenance, lean stays focused on newly-discovered traders. See M-09 entry below for shipped details.
-- The 56 graph_unservable traders that have trapped pairs are now serviced via `heal_one_trader_via_api` in `scripts/heal_trapped_batch.py`, which uses `DataAPIClient` (no Goldsky timeouts) and updates `traders.last_trade_seen_at` / `last_backfilled_at` incrementally each heal pass.
-- The remaining 48 graph_unservable traders without trapped pairs continue to be served only by monitor's REST polling — same as before. They have no positions or trapped data so heal has no work for them; this is the expected steady state.
-- 🔁 Option #2 (auto-clear flag after N successful Data API heals) still pending. Less urgent now: the Data API path means flag traders aren't dead-ended; they get routine updates every heal pass.
-- 📋 Validation: after the next monitor poll cycle that runs heal, re-run the audit query for `0x8c0b024c…` against `data-api.polymarket.com/trades?market=…` for the 04-30 window. Taker-side fills should reconcile; maker-side recovery still requires Goldsky (out of scope here).
+**Status (2026-05-03):**
+- ✅ **Taker-side resolved via M-09 expansion** (commit `bd34e8a`, 2026-05-02). graph_unservable traders are routed to `heal_one_trader_via_api` (DataAPIClient, no Goldsky timeouts), watermark advances incrementally each heal pass.
+- ✅ **Maker-side resolved 2026-05-03** (commit `632abad`). New `sweep_maker_side` in `scripts/heal_trapped_batch.py` queries `/trades?market=cid` (which exposes BOTH participants per fill) for every still-trapped market after the per-trader pass. Closes the original H-10 audit case where the audit trader was missing maker-side fills the per-user endpoint never returned. Bot/MM filter applied (commit `d5ea6e0`) so the sweep doesn't re-ingest bot rows.
+- Also fixed: `_api_trade_to_row` had the same maker/taker PK collision as Discover (commit `632abad`) — trader-prefixed trade_id now.
+- 🔁 Option #2 (auto-clear `graph_unservable=1` after N successful Data API heals) still pending. Less urgent now that flagged traders are fully serviced via heal.
+- 📋 Validation: after the next monitor poll runs heal + sweep, re-run the audit query for `0x8c0b024c…` against `/trades?market=…` for the 04-30 window. Should reconcile both maker and taker fills.
 
 **Impact:** 94 traders flagged `graph_unservable=1` are silently excluded from **both** lean and full backfill, so their trade history only gets updated by `monitor` (REST `/trades?user=`, taker-side, partial). Confirmed data loss: for the audit trader (a market-maker, 193 positions, ~20k trades), the DB is missing trades from 2026-04-30 15:31–16:21 in 3 known markets that REST clearly exposes — including 4 large fills in `lol-shft-vit-game1` (~$25k notional). Reproduced via last-15 comparison: 5/15 matched.
 
@@ -104,13 +104,13 @@ FROM traders WHERE graph_unservable = 1;
 
 **Recommended:** ship #1 immediately (one-line SQL change, low blast radius), then #2 to prevent the hole from re-forming.
 
-### H-11: ~27% of resolved markets have zero trades ingested — uncataloged-token silent drop — **FIX #1 SHIPPED 2026-05-02; #2 + #3 still pending**
+### H-11: ~27% of resolved markets have zero trades ingested — uncataloged-token silent drop — **ALL THREE FIXES SHIPPED 2026-05-03**
 
-**Status (2026-05-02):**
-- ✅ Fix #1 shipped: backfill self-heals `token_catalog` from `trade["conditionId"]` when the API trade arrives but the catalog row is missing. New stat `self_healed_catalog` counts heals per backfill run. Race-safe via `INSERT ... ignore=True`. FK violations (rare — would need the market itself to also be missing) fall through to the existing skip path.
-- 🔁 Fix #2 (discover.py retry on empty `clobTokenIds`) still pending. Without it, new markets with the Gamma race condition still arrive without catalog rows; the backfill self-heal patches them up *if* a trade arrives, but markets with zero post-resolution trade activity stay uncataloged. Low-impact gap.
-- 🔁 Fix #3 (`backfill_drops` observability table) still pending. Today the only signal is the new `self_healed_catalog` stat (positive case) and the existing `stats["skipped"]` (negative case, still opaque). For a future audit pass to query "what was dropped and why", the drops table would help.
-- 📋 Validation: after monitor runs a few cycles, query `SELECT SUM(...)` on backfill output for non-zero `self_healed_catalog` counts. Re-sample previously-zero-trade resolved markets against the Polymarket API; expect ~15-17% to start populating after subsequent backfill runs touch their tokens.
+**Status (2026-05-03):**
+- ✅ Fix #1 shipped (commit `bd34e8a`, 2026-05-02): backfill self-heals `token_catalog` from `trade["conditionId"]` when the API trade arrives but the catalog row is missing. New stat `self_healed_catalog`. Race-safe via `INSERT ... ignore=True`. FK violations fall through to skip.
+- ✅ Fix #2 shipped (commit `34478e7`, 2026-05-03): when Gamma returns a market with empty `clobTokenIds`, discover falls back to CLOB `/markets/{cid}` (concurrency=10) and inserts the recovered catalog rows. Closes the ingest-time hole for markets with zero post-resolution trade activity.
+- ✅ Fix #3 shipped (commit `44d9c94`, 2026-05-03): `backfill_drops` table logs every drop with reason (`no_token_id`, `catalog_miss_no_cid`, `catalog_miss_fk`, `insert_error`, `self_healed`). Indexed on `reason` and `dropped_at`. 30-day retention via cron `prune-drops` stage. Replaces opaque `stats["skipped"]` counter with queryable rows for future audits.
+- 📋 Validation: after monitor runs a few cycles, `SELECT reason, COUNT(*) FROM backfill_drops WHERE dropped_at > datetime('now', '-7 days') GROUP BY reason` confirms the fix is firing. Re-sample previously-zero-trade resolved markets against the Polymarket API; expect ~15-17% to start populating after backfill touches their tokens.
 
 ---
 
@@ -167,6 +167,21 @@ Spot-check of 5 random zero-trade April markets against live `data-api.polymarke
 
 **Recommended:** ship #1 first (highest leverage, narrowest blast radius — only adds rows when a real token is encountered). Pair with #3 to catch any remaining drop modes. Defer #2 unless #1 doesn't close the gap.
 
+### H-12: Bot/MM trades silently re-ingested at every discover pass — **FILTER + LEAK-CLOSING SHIPPED 2026-05-03; one-shot prune awaiting user**
+
+**Status (2026-05-03):**
+- ✅ Filter v2 designed and shipped (commit `1f8307a`): behavioral signature `trades > 5000 AND tpr > 20` combined with Q5 whitelist (`composite_score >= -0.10`). Catches 110 traders / 21.3% of all 7.4M trade rows. Zero Q5 false-positives. Constants in `src/polymarket_analytics/scoring/thresholds.py`.
+- ✅ Backfill ingest applies the filter (commit `18148ae`): both lean and full mode skip bot traders. Saves ~50-100 bot backfills/day.
+- ✅ Discover + heal sweep + monitor leak-closing (commit `d5ea6e0`): `load_bot_set(db)` runs once per invocation; bot proxyWallets dropped at trade-insert and trader-extraction. Without this, `discover.py` silently re-ingested bot trades on every closing market — refilling pruned trades within ~1 week.
+- ✅ One-shot prune script (commit `478254f`): `scripts/prune_bots.py --execute --vacuum` deletes the historical 1.58M trade rows + 40K positions + 110 trader rows. Q5 panel SHA256 invariant + residual check. NOT yet executed (requires monitor + cron paused; user-controlled).
+- ⏸ Pattern-label validation (n=34 stratified sample) deferred per [[Bot Filter Execution Plan 2026-05-03]]. Done by Claude on next session, not by user — pattern recognition over trade data is what Claude does.
+- 🔒 Materialization (column-based denylist) GATED on labeling outcome. Defended in 4 review rounds; only proceed if pattern-labeling shows precision ≥ 28/34.
+
+**Wiki:**
+- [[MM Filter Critique 2026-05-02]] — the original critique that drove v2
+- [[Bot Denylist Architecture 2026-05-03]] — full design artifact + 4 review rounds + decision log
+- [[Bot Filter Execution Plan 2026-05-03]] — final converged plan (read for "what to do")
+
 ### M-02: Graph side determination wrong for token-for-token swaps
 
 **File:** `src/polymarket_analytics/api/graph.py`
@@ -177,13 +192,13 @@ Spot-check of 5 random zero-trade April markets against live `data-api.polymarke
 **File:** `src/polymarket_analytics/extraction/llm.py`
 **Impact:** When the Anthropic API returns an "insufficient funds" / billing error, the pipeline silently falls back to empty extraction. Should trigger a Telegram alert via `health/notify.py` so the user knows to top up the account before LLM-dependent features degrade.
 
-### M-09: Heal scan returns mostly-noise — irredeemable + no-position-row pairs — **PARTIALLY FIXED 2026-05-02; option 3 still pending**
+### M-09: Heal scan returns mostly-noise — irredeemable + no-position-row pairs — **PARTIALLY FIXED 2026-05-02; MM filter v2 + option 3 still pending**
 
-**Status (2026-05-02):**
-- ✅ Heal scan now applies an MM filter (`composite_score < -0.10 AND positions > 100`) — drops 508 known-MM trapped traders per scan (2,520 → 2,012). Conservative thresholds (volume floor of 100 positions) preserve borderline real traders. See `MM_SCORE_CUTOFF`/`MM_POSITION_FLOOR` constants in `scripts/heal_trapped_batch.py`.
-- ✅ Heal scope expanded to include `graph_unservable=1` traders, routed to a new Data API path (`heal_one_trader_via_api`) that bypasses Goldsky entirely. **Closes REVIEW.md H-10** for the 56 graph_unservable traders that had trapped pairs (full population: 104). Scan now picks up 2,068 traders, with 56 routed via Data API at ~1s each instead of 5+ min Graph timeouts.
-- 🔁 Option 3 (graduate `graph_unservable=1` when 100% of trapped markets are dead-ended) still pending. Less urgent now that graduated traders are still serviceable via the Data API path — the noise reduction is the only remaining win.
-- 📋 Wiki updates needed: [[Heal Loop Daemon]] should document the new Data API routing; [[Market Maker Bot Detection]] should mark its proposed filter as shipped.
+**Status (2026-05-03):**
+- ✅ Heal scope expanded to include `graph_unservable=1` traders via new Data API path (`heal_one_trader_via_api`). Closes H-10 taker-side. Scan picks up trapped graph_unservable traders, routed at ~1s each instead of 5+ min Goldsky timeouts.
+- ✅ MM filter REPLACED with v2 (commit `1f8307a`, 2026-05-03). Old filter (`composite_score < -0.10 AND positions > 100`) had a 13% false-positive rate per [[MM Filter Critique 2026-05-02]] wiki. New filter: `trades > 5000 AND tpr > 20 AND NOT in Q5`. Catches 110 traders / 21.3% of all trade rows with zero Q5 false-positives (Q5 panel SHA256 invariant asserted by prune script). See H-12 below for the full story.
+- 🔁 Option 3 (graduate `graph_unservable=1` when 100% of trapped markets are dead-ended) still pending. Less urgent now that graduated traders are serviceable via Data API path.
+- 📋 Wiki documented: [[Bot Denylist Architecture 2026-05-03]] (full design + 4 review rounds) and [[Bot Filter Execution Plan 2026-05-03]] (final converged plan).
 
 ---
 
