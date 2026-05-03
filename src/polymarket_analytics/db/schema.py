@@ -408,6 +408,32 @@ def run_migrations(db):
     from polymarket_analytics.health.log import create_health_log_table
     create_health_log_table(db)
 
+    # backfill_drops — observability for H-11 silent-drop audit
+    # (REVIEW.md H-11 fix #3). One row per dropped or self-healed trade
+    # during backfill. Lets us SELECT reason, COUNT(*) instead of doing
+    # API-vs-DB sampling by hand. Pruned by daily cron — 30d retention.
+    if "backfill_drops" not in db.table_names():
+        db.execute("""
+            CREATE TABLE backfill_drops (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                trader_address TEXT,
+                market_id TEXT,
+                token_id TEXT,
+                reason TEXT,
+                trade_payload TEXT,
+                error_msg TEXT,
+                dropped_at TEXT
+            )
+        """)
+        db.execute(
+            "CREATE INDEX IF NOT EXISTS idx_backfill_drops_reason "
+            "ON backfill_drops(reason)"
+        )
+        db.execute(
+            "CREATE INDEX IF NOT EXISTS idx_backfill_drops_dropped_at "
+            "ON backfill_drops(dropped_at)"
+        )
+
     # Commit any pending migration writes so a second connection to the same
     # file doesn't see a stale write lock from this one.
     db.conn.commit()

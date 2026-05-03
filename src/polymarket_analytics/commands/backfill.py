@@ -139,6 +139,40 @@ _shutdown = ShutdownManager()
 
 
 @contextmanager
+def _log_drop(
+    db,
+    reason: str,
+    trader: str,
+    trade: dict,
+    error_msg: Optional[str] = None,
+) -> None:
+    """Log a dropped or self-healed trade row to backfill_drops (REVIEW.md H-11 #3).
+
+    Reasons:
+      - 'no_token_id'           — trade has no asset/asset_id field
+      - 'catalog_miss_no_cid'   — token not in catalog AND trade has no conditionId
+      - 'catalog_miss_fk'       — self-heal attempted but FK violation (market missing)
+      - 'insert_error'          — exception in fallback per-trade insert
+      - 'self_healed'           — positive case, catalog row inserted on the spot
+
+    Swallows all exceptions — observability must never break ingest.
+    """
+    try:
+        db["backfill_drops"].insert(
+            {
+                "trader_address": trader,
+                "market_id": trade.get("conditionId") or trade.get("condition_id") or trade.get("market_id"),
+                "token_id": str(trade.get("asset") or trade.get("asset_id") or "") or None,
+                "reason": reason,
+                "trade_payload": json.dumps(trade, default=str)[:2000],
+                "error_msg": error_msg,
+                "dropped_at": datetime.now(timezone.utc).isoformat(),
+            }
+        )
+    except Exception:
+        pass
+
+
 def time_component(name: str):
     """Time a specific component (API, dedup, processing, DB, Graph fallback).
 
@@ -519,6 +553,7 @@ async def backfill_trader(
 
         if not token_id:
             stats["skipped"] += 1
+            _log_drop(db, "no_token_id", trader_address, trade)
             continue
 
         # Token catalog lookup: resolve token_id -> condition_id (from cache)
@@ -544,14 +579,18 @@ async def backfill_trader(
                     condition_id = str(api_condition_id)
                     catalog_cache[str(token_id)] = condition_id
                     stats["self_healed_catalog"] = stats.get("self_healed_catalog", 0) + 1
-                except Exception:
+                    _log_drop(db, "self_healed", trader_address, trade)
+                except Exception as e:
                     # FK violation (market itself missing) or other write
                     # failure — fall through to skip. Rare; a real fix would
                     # also self-heal the market, but that's out of scope.
                     stats["skipped"] += 1
+                    _log_drop(db, "catalog_miss_fk", trader_address, trade,
+                              error_msg=f"{type(e).__name__}: {e}")
                     continue
             else:
                 stats["skipped"] += 1
+                _log_drop(db, "catalog_miss_no_cid", trader_address, trade)
                 continue
 
         # Convert price to Decimal
@@ -601,8 +640,10 @@ async def backfill_trader(
                 try:
                     db["trades"].insert(item, replace=False)
                     stats["ingested"] += 1
-                except Exception:
+                except Exception as e:
                     stats["skipped"] += 1
+                    _log_drop(db, "insert_error", trader_address, item,
+                              error_msg=f"{type(e).__name__}: {e}")
 
     # After Graph fallback, check if positions are still sell-only and track retry count
     if stats["fallback"]:

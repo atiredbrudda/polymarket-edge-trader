@@ -140,6 +140,8 @@ if [ -z "$BACKFILL_MODE" ]; then
     run_stage "snapshot-40d"   .venv/bin/python scripts/snapshot_resolved_40d.py
     run_stage "prune-40d"      .venv/bin/python scripts/prune_resolved_40d.py --execute
     run_stage "prune-orphans"  sqlite3 data/analytics.db "BEGIN; DELETE FROM trades WHERE NOT EXISTS (SELECT 1 FROM markets m WHERE m.condition_id = trades.market_id); DELETE FROM positions WHERE NOT EXISTS (SELECT 1 FROM markets m WHERE m.condition_id = positions.market_id); COMMIT;"
+    # backfill_drops 30d retention (REVIEW.md H-11 #3 observability table).
+    run_stage "prune-drops"    sqlite3 data/analytics.db "DELETE FROM backfill_drops WHERE dropped_at < datetime('now', '-30 days');"
     run_stage "wal-truncate"   sqlite3 data/analytics.db "PRAGMA wal_checkpoint(TRUNCATE);"
     echo "$LOG_PREFIX Daily DB maintenance complete"
 fi
