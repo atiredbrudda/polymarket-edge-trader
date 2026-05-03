@@ -842,7 +842,10 @@ def _html_resolved_positions(conn: sqlite3.Connection, limit: int = 20) -> str:
         else:
             # TP exit — shares zeroed by engine.sell(), no resolved_at in paper.db
             result = f'<span class="blue">TP exit</span>'
-            pnl_str = f'<span class="green">+${pnl:.2f}</span>'
+            if pnl >= 0:
+                pnl_str = f'<span class="green">+${pnl:.2f}</span>'
+            else:
+                pnl_str = f'<span class="red">-${abs(pnl):.2f}</span>'
             type_str = '<span class="blue">TP exit</span>'
             date_str = '<span class="dim">—</span>'
 
@@ -1003,7 +1006,7 @@ def _html_signal_log(analytics_db_path: str, limit: int = 50) -> str:
         "SKIP_PRICE": "yellow", "SKIP_SIZE": "yellow",
         "SKIP_OPPOSITE_HELD": "yellow",
         "SKIP_API": "red", "SKIP_NO_BOOK": "gray",
-        "SKIP_TP_EXIT": "gray",
+        "SKIP_TP_EXIT": "gray", "SKIP_THIN_BOOK": "yellow",
         "SKIP_ERROR": "red",
         "DRY_RUN": "blue",
     }
@@ -1074,7 +1077,7 @@ def _html_decision_stats(analytics_db_path: str, days: int = 7) -> str:
         "BUY": "green", "SKIP_PRICE": "yellow", "SKIP_SIZE": "yellow",
         "SKIP_OPPOSITE_HELD": "yellow",
         "SKIP_API": "red", "SKIP_NO_BOOK": "gray",
-        "SKIP_TP_EXIT": "gray",
+        "SKIP_TP_EXIT": "gray", "SKIP_THIN_BOOK": "yellow",
         "SKIP_ERROR": "red", "DRY_RUN": "blue",
     }
     try:

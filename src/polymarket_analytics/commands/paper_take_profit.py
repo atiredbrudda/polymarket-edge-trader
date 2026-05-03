@@ -408,9 +408,38 @@ def _run_take_profit(
         if ratio >= threshold:
             action = "DRY_RUN" if dry_run else "TAKE_PROFIT"
             if not dry_run:
+                # Simulate bid-side fill before committing — midpoint can lie on thin books.
                 try:
-                    engine.sell(market_id, outcome, shares)
-                    _record_tp_exit(analytics_db, pos, live_price, threshold)
+                    from pm_trader.orderbook import simulate_sell_fill
+                    book = engine.api.get_order_book(cached_token_id)
+                    fee_rate_bps = engine.api.get_fee_rate(cached_token_id)
+                    fill_preview = simulate_sell_fill(book, shares, fee_rate_bps)
+                    if fill_preview.avg_price < avg_entry:
+                        _log_decision(
+                            analytics_db, market_id, outcome, "SKIP_THIN_BOOK",
+                            fill_preview.avg_price, avg_entry, value_usd,
+                            reason=f"fill {fill_preview.avg_price:.3f} < entry {avg_entry:.3f}",
+                        )
+                        t.add_row(
+                            label, outcome,
+                            f"{avg_entry:.3f}", f"{live_price:.3f}", f"{ratio:.2f}x",
+                            f"{shares:.1f}", "[yellow]SKIP_THIN_BOOK[/yellow]",
+                            f"${fill_preview.avg_price * shares:.2f}",
+                        )
+                        errors += 1
+                        continue
+                except Exception as e:
+                    _log_decision(analytics_db, market_id, outcome, "SKIP_API",
+                                  live_price, avg_entry, value_usd, reason=str(e))
+                    t.add_row(label, outcome, f"{avg_entry:.3f}", f"{live_price:.3f}",
+                              f"{ratio:.2f}x", f"{shares:.1f}", "[red]SKIP_API[/red]", "")
+                    errors += 1
+                    continue
+
+                try:
+                    result = engine.sell(market_id, outcome, shares)
+                    actual_exit_price = result.trade.avg_price
+                    _record_tp_exit(analytics_db, pos, actual_exit_price, threshold)
                 except SimError as e:
                     _log_decision(analytics_db, market_id, outcome, "SKIP_ERROR",
                                   live_price, avg_entry, value_usd, reason=str(e))
