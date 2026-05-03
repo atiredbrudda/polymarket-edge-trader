@@ -77,13 +77,16 @@ def main() -> None:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--execute", action="store_true",
                         help="Actually delete (default is dry-run)")
+    parser.add_argument("--no-lock-check", action="store_true",
+                        help="Skip the .pipeline.lock guard (use only when called "
+                             "from cron_pipeline.sh, which already holds the lock)")
     args = parser.parse_args()
 
     if not DB_PATH.exists():
         print(f"ERROR: db not found at {DB_PATH}", file=sys.stderr)
         sys.exit(1)
 
-    if LOCK_PATH.exists():
+    if not args.no_lock_check and LOCK_PATH.exists():
         print(f"ERROR: pipeline lock at {LOCK_PATH} — pipeline may be running.", file=sys.stderr)
         print("  Wait for it to clear or remove manually if stale.", file=sys.stderr)
         sys.exit(1)
