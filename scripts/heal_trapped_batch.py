@@ -368,13 +368,16 @@ def _api_trade_to_row(api_trade: dict, trader: str, catalog: dict[str, str]) -> 
     size_str = str(api_trade.get("size", "0"))
     timestamp = api_trade.get("timestamp")
 
-    trade_id = (
-        api_trade.get("trade_id")
-        or api_trade.get("txHash")
-        or hashlib.sha256(
+    # Trader-prefix the trade_id to prevent maker/taker PK collision when
+    # the same fill is ingested for both participants (e.g. from the per-market
+    # sweep_maker_side path). Same fix as discover.py / graph.py.
+    raw_id = api_trade.get("trade_id") or api_trade.get("txHash")
+    if raw_id:
+        trade_id = f"{trader.lower()}_{raw_id}"
+    else:
+        trade_id = hashlib.sha256(
             f"{trader}:{token_id}:{side}:{price_str}:{size_str}:{timestamp}".encode()
         ).hexdigest()[:32]
-    )
 
     try:
         price = Decimal(price_str)
@@ -513,6 +516,132 @@ async def heal_one_trader_via_api(
         "irredeemable_marked": 0,  # Data API path doesn't touch graph_retry_count
         "elapsed_s": round(elapsed, 1),
         "via": "data_api",
+    }
+
+
+async def sweep_maker_side(
+    data: DataAPIClient,
+    db: Database,
+    catalog: dict[str, str],
+    deadline: float | None = None,
+) -> dict:
+    """Per-market Data API sweep for maker-side recovery (REVIEW.md H-10 #3).
+
+    The per-user endpoint (/trades?user=X) returns one row per fill — only
+    the trader's proxyWallet side. The audit trader for H-10 (a market-maker)
+    was missing 4 large maker-side fills in 3 markets that the per-market
+    endpoint clearly exposes. This sweep fetches every still-trapped market
+    in batches of 50 and inserts any rows for trapped traders that the per-
+    user pass missed.
+
+    Runs after the per-trader heal pass so it only re-checks pairs that
+    didn't heal. Respects `deadline` (monotonic clock) to fit within the
+    monitor heal-budget.
+    """
+    t0 = time.time()
+    rows = db.execute(
+        """
+        WITH pairs AS (
+          SELECT trader_address, market_id,
+                 SUM(CASE WHEN side='BUY' THEN 1 ELSE 0 END) AS buys,
+                 SUM(CASE WHEN side='SELL' THEN 1 ELSE 0 END) AS sells
+          FROM trades GROUP BY trader_address, market_id
+        )
+        SELECT trader_address, market_id FROM pairs WHERE buys=0 AND sells>0
+        """
+    ).fetchall()
+
+    if not rows:
+        print("[sweep] no trapped pairs remaining — skipping maker-side sweep")
+        return {"checked_markets": 0, "fetched": 0, "inserted": 0, "healed_pairs": 0}
+
+    market_to_traders: dict[str, set[str]] = {}
+    for trader, market in rows:
+        if not market:
+            continue
+        market_to_traders.setdefault(market, set()).add(trader.lower())
+
+    markets = list(market_to_traders)
+    print(
+        f"[sweep] {len(markets):,} unique trapped markets, {len(rows):,} pairs "
+        f"to re-check via /trades?market="
+    )
+
+    inserted_total = 0
+    fetched_total = 0
+    BATCH = 50
+    PER_MARKET_LIMIT = 1000
+    batch_count = (len(markets) + BATCH - 1) // BATCH
+
+    for i in range(0, len(markets), BATCH):
+        if deadline is not None and time.monotonic() > deadline:
+            print(
+                f"[sweep] deadline hit at batch {i // BATCH}/{batch_count} — "
+                f"stopping cleanly"
+            )
+            break
+
+        batch = markets[i : i + BATCH]
+        try:
+            trades = await data.fetch_trades(batch, limit=PER_MARKET_LIMIT)
+        except Exception as e:
+            print(f"[sweep] batch {i // BATCH}/{batch_count} error: "
+                  f"{type(e).__name__}: {e}")
+            continue
+        fetched_total += len(trades)
+
+        rows_to_insert: list[dict] = []
+        for tr in trades:
+            cid = (tr.get("conditionId") or "").lower()
+            wallet = (tr.get("proxyWallet") or "").lower()
+            if not cid or not wallet:
+                continue
+            wanted = market_to_traders.get(cid)
+            if not wanted or wallet not in wanted:
+                continue
+            row = _api_trade_to_row(tr, wallet, catalog)
+            if row:
+                rows_to_insert.append(row)
+
+        if rows_to_insert:
+            before = db.conn.total_changes
+            try:
+                for j in range(0, len(rows_to_insert), 500):
+                    db["trades"].insert_all(rows_to_insert[j : j + 500], ignore=True)
+                db.conn.commit()
+                inserted_total += db.conn.total_changes - before
+            except Exception as e:
+                print(f"[sweep] insert error in batch {i // BATCH}: "
+                      f"{type(e).__name__}: {e}")
+
+        # Light pacing so monitor's SELECTs aren't starved.
+        await asyncio.sleep(0.1)
+
+    new_pair_count = db.execute(
+        """
+        WITH pairs AS (
+          SELECT trader_address, market_id,
+                 SUM(CASE WHEN side='BUY' THEN 1 ELSE 0 END) AS buys,
+                 SUM(CASE WHEN side='SELL' THEN 1 ELSE 0 END) AS sells
+          FROM trades GROUP BY trader_address, market_id
+        )
+        SELECT COUNT(*) FROM pairs WHERE buys=0 AND sells>0
+        """
+    ).fetchone()[0]
+
+    healed_pairs = max(0, len(rows) - new_pair_count)
+    elapsed = time.time() - t0
+    print(
+        f"[sweep] done in {elapsed:.1f}s  "
+        f"fetched={fetched_total:,}  inserted={inserted_total:,}  "
+        f"healed_pairs={healed_pairs:,}  trapped_now={new_pair_count:,}"
+    )
+
+    return {
+        "checked_markets": len(markets),
+        "fetched": fetched_total,
+        "inserted": inserted_total,
+        "healed_pairs": healed_pairs,
     }
 
 
@@ -821,6 +950,27 @@ async def run(
 
             if batch_idx + batch_size < len(queue) and not _stop_requested:
                 await asyncio.sleep(batch_sleep_s)
+
+        # Maker-side sweep (REVIEW.md H-10 #3). Runs after the per-trader pass
+        # so it only re-checks pairs that didn't heal. Cheap (~30s for ~1500
+        # markets) and bounded by the remaining runtime budget.
+        if not _stop_requested and not dry_run:
+            sweep_deadline = None
+            if max_runtime_s is not None:
+                remaining = max_runtime_s - (time.monotonic() - run_start)
+                if remaining < 30:
+                    print(
+                        f"[sweep] only {remaining:.0f}s of budget left — "
+                        f"skipping maker-side sweep"
+                    )
+                else:
+                    sweep_deadline = time.monotonic() + remaining
+            sweep_stats = await sweep_maker_side(
+                data, db, catalog, deadline=sweep_deadline
+            )
+            totals["trades_inserted"] += sweep_stats["inserted"]
+            totals["sweep_inserted"] = sweep_stats["inserted"]
+            totals["sweep_healed_pairs"] = sweep_stats["healed_pairs"]
     finally:
         await graph.close()
         await data.close()
