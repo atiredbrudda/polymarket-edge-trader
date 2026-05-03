@@ -27,8 +27,9 @@ from polymarket_analytics.scoring.thresholds import Q5_COMPOSITE_THRESHOLD
 console = Console()
 
 BANKROLL = 10_000.0
-SPREAD_HARD_LIMIT = 0.03  # 3c — edge is gone
+SPREAD_HARD_LIMIT = 0.03  # 3c — edge is gone (slippage cap)
 SPREAD_SOFT_LIMIT = 0.01  # 1-2c — reduce size by half
+NEGATIVE_SPREAD_FLOOR = -0.30  # falling knife — Q5's pre-game thesis disproven by post-news drift
 PRICE_FLOOR = 0.05        # skip decided markets (backtest used 0.05-0.95 range)
 
 _PRICE_CACHE_FILE = ".price_cache.json"
@@ -57,9 +58,10 @@ class _Journal:
             f"Open: {n_held}  |  TP-exited: {n_tp_exited}\n"
             f"\n"
             f"Entry rules:\n"
-            f"  Signal tier      : ACT (net_q5 >= 3) + CONSIDER (net_q5 >= 2)\n"
+            f"  Signal tier      : ACT (net_q5 >= 3, not all-CLV-dom) + CONSIDER (net_q5 >= 2)\n"
             f"  Spread hard limit: {SPREAD_HARD_LIMIT}  → SKIP if live > q5_entry + this\n"
             f"  Spread soft limit: {SPREAD_SOFT_LIMIT}  → half size if spread > this\n"
+            f"  Falling-knife    : {NEGATIVE_SPREAD_FLOOR}  → SKIP if live < q5_entry + this\n"
             f"  Price floor      : {PRICE_FLOOR}  → SKIP if live price below this\n"
             f"\n"
             f"Sizing:\n"
@@ -536,6 +538,19 @@ def _run_bridge(db_path: str, dry_run: bool, paper_data_dir: str) -> None:
                 f"{signal['q5_count']}/{signal['net_q5_count']}",
                 f"{q5_entry:.3f}", f"{live_price:.3f}", f"{spread:+.3f}",
                 "[red]SKIP_PRICE[/red]", ""
+            )
+            skips += 1
+            continue
+
+        if spread < NEGATIVE_SPREAD_FLOOR:
+            _log_decision(analytics_db, signal, "SKIP_FALLING_KNIFE",
+                          live_price, spread, reason=f"spread {spread:.3f} < {NEGATIVE_SPREAD_FLOOR}")
+            results.add_row(
+                signal.get("question", "")[:40],
+                signal["direction"], signal["tier"],
+                f"{signal['q5_count']}/{signal['net_q5_count']}",
+                f"{q5_entry:.3f}", f"{live_price:.3f}", f"{spread:+.3f}",
+                "[red]SKIP_FALLING_KNIFE[/red]", ""
             )
             skips += 1
             continue
