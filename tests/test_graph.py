@@ -146,8 +146,17 @@ class TestParseGraphEventSize:
 # ---------------------------------------------------------------------------
 
 
+_NARROW_SINCE = 1_700_000_000  # 2023-11-14 — a fixed past timestamp
+_NARROW_UNTIL = _NARROW_SINCE + 86_400  # +1 day — fits in one 30-day window
+
+
 class TestFetchTraderTradesQuery:
-    """First page sends no id_gt; subsequent pages include id_gt cursor."""
+    """First page sends no id_gt; subsequent pages include id_gt cursor.
+
+    All tests pass both since_unix_ts and until_unix_ts so the range fits
+    inside a single 30-day window and the outer windowing loop runs exactly
+    once per role (= exactly the number of mocked responses).
+    """
 
     def _make_response(self, events):
         mock_resp = MagicMock()
@@ -189,7 +198,10 @@ class TestFetchTraderTradesQuery:
         client = GraphAPIClient()
         client._client = mock_client
 
-        await client.fetch_trader_trades("0xtrader", batch_size=100)
+        await client.fetch_trader_trades(
+            "0xtrader", batch_size=100,
+            since_unix_ts=_NARROW_SINCE, until_unix_ts=_NARROW_UNTIL,
+        )
 
         assert mock_client.post.call_count == 2
 
@@ -222,7 +234,10 @@ class TestFetchTraderTradesQuery:
         client = GraphAPIClient()
         client._client = mock_client
 
-        await client.fetch_trader_trades("0xtrader", batch_size=2)
+        await client.fetch_trader_trades(
+            "0xtrader", batch_size=2,
+            since_unix_ts=_NARROW_SINCE, until_unix_ts=_NARROW_UNTIL,
+        )
 
         assert mock_client.post.call_count == 3
 
@@ -253,7 +268,10 @@ class TestFetchTraderTradesQuery:
         client = GraphAPIClient()
         client._client = mock_client
 
-        result = await client.fetch_trader_trades("0xtrader", batch_size=2)
+        result = await client.fetch_trader_trades(
+            "0xtrader", batch_size=2,
+            since_unix_ts=_NARROW_SINCE, until_unix_ts=_NARROW_UNTIL,
+        )
 
         assert len(result) == 3
 
@@ -264,7 +282,12 @@ class TestFetchTraderTradesQuery:
 
 
 class TestFetchTraderTradesTimestampFilter:
-    """timestamp_gte is included in GraphQL where clause when since_unix_ts is set."""
+    """timestamp_gte appears in every GraphQL query (windowing always sets it).
+
+    When since_unix_ts is provided, the first window starts at that value.
+    When since_unix_ts is None, the first window starts at now-40d (default lookback).
+    Both cases include timestamp_gte — the difference is the value, not presence.
+    """
 
     def _make_response(self, events):
         mock_resp = MagicMock()
@@ -274,7 +297,7 @@ class TestFetchTraderTradesTimestampFilter:
 
     @pytest.mark.asyncio
     async def test_timestamp_gte_in_query_when_since_set(self):
-        """When since_unix_ts is set, timestamp_gte appears in the GraphQL where clause."""
+        """When since_unix_ts is set, timestamp_gte equals that value in the query."""
         from polymarket_analytics.api.graph import GraphAPIClient
 
         responses = [
@@ -289,27 +312,41 @@ class TestFetchTraderTradesTimestampFilter:
         client = GraphAPIClient()
         client._client = mock_client
 
-        await client.fetch_trader_trades("0xtrader", since_unix_ts=1700000000)
+        await client.fetch_trader_trades(
+            "0xtrader",
+            since_unix_ts=_NARROW_SINCE,
+            until_unix_ts=_NARROW_UNTIL,
+        )
 
         assert mock_client.post.call_count == 2
         for call in mock_client.post.call_args_list:
             payload = call[1]["json"] if call[1] else call[0][1]
             query_text = payload["query"]
             assert "timestamp_gte" in query_text, (
-                "timestamp_gte must appear when since_unix_ts set"
+                "timestamp_gte must appear (windowing always sets it)"
             )
-            assert "1700000000" in query_text, (
-                "since_unix_ts value must appear in query"
+            assert str(_NARROW_SINCE) in query_text, (
+                "since_unix_ts value must be the window start"
             )
 
     @pytest.mark.asyncio
-    async def test_no_timestamp_filter_when_since_none(self):
-        """When since_unix_ts is None, timestamp_gte is absent from the query."""
+    async def test_default_lookback_uses_40d_window_start(self):
+        """When since_unix_ts is None, the first window's timestamp_gte is ~now-40d.
+
+        Windowing always emits timestamp_gte; this test verifies the default
+        lookback value (40 days) is used as the window start, not e.g. epoch 0.
+        """
+        import time
         from polymarket_analytics.api.graph import GraphAPIClient
 
+        # Pin a narrow until_unix_ts so only one window fires (now-40d → now-39d).
+        DEFAULT_LOOKBACK = 40 * 86400
+        now = int(time.time())
+        narrow_until = now - DEFAULT_LOOKBACK + 86400  # one day past the lookback start
+
         responses = [
-            self._make_response([]),
-            self._make_response([]),
+            self._make_response([]),  # maker page 1
+            self._make_response([]),  # taker page 1
         ]
 
         mock_client = AsyncMock()
@@ -319,11 +356,19 @@ class TestFetchTraderTradesTimestampFilter:
         client = GraphAPIClient()
         client._client = mock_client
 
-        await client.fetch_trader_trades("0xtrader", since_unix_ts=None)
+        await client.fetch_trader_trades(
+            "0xtrader",
+            since_unix_ts=None,
+            until_unix_ts=narrow_until,
+        )
 
-        for call in mock_client.post.call_args_list:
-            payload = call[1]["json"] if call[1] else call[0][1]
-            query_text = payload["query"]
-            assert "timestamp_gte" not in query_text, (
-                "timestamp_gte must be absent when since_unix_ts=None"
-            )
+        assert mock_client.post.call_count == 2
+        first_call = mock_client.post.call_args_list[0]
+        payload = first_call[1]["json"] if first_call[1] else first_call[0][1]
+        query_text = payload["query"]
+        assert "timestamp_gte" in query_text, "windowing always emits timestamp_gte"
+        # The window start should be within ±60s of now-40d
+        expected_start = now - DEFAULT_LOOKBACK
+        assert str(expected_start) in query_text or str(expected_start - 1) in query_text or str(expected_start + 1) in query_text, (
+            f"Expected window start near {expected_start} in query"
+        )

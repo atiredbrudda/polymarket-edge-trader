@@ -65,8 +65,8 @@ class _Journal:
             f"  Price floor      : {PRICE_FLOOR}  → SKIP if live price below this\n"
             f"\n"
             f"Sizing:\n"
-            f"  High conviction  : 2.5% bankroll (q5 >= 5 AND clv_ratio > 60%)\n"
-            f"  Standard ACT     : 2.0% bankroll\n"
+            f"  ACT              : 2.0% bankroll (net_q5 >= 3, not all-CLV-dom)\n"
+            f"  CONSIDER         : 1.0% bankroll (net_q5 >= 2 OR all-CLV-dom)\n"
             f"  Correlated adj   : ÷ event_group_size\n"
             f"  Minimum order    : $1.00\n"
             f"\n"
@@ -123,25 +123,24 @@ def _get_actionable_signals(db: sqlite_utils.Database) -> list[dict]:
 
 
 def _compute_size(signal: dict, account_cash: float) -> float:
-    """Compute bet size based on enrichment tier + correlation adjustment.
+    """Compute bet size based on tier + correlation adjustment.
 
     Sizing tiers:
-        - High conviction (q5_count >= 5, CLV dominant): 2.5% bankroll
-        - Standard ACT (net_q5 >= 3): 2.0% bankroll
-        - CONSIDER (net_q5 >= 2): 1.0% bankroll
+        - ACT (net_q5 >= 3, not all-CLV-dom): 2.0% bankroll
+        - CONSIDER (net_q5 >= 2 OR all-CLV-dom): 1.0% bankroll
 
     Divided by event_group_size to avoid over-allocating to correlated markets.
-    """
-    q5_count = signal["q5_count"]
-    clv_dominant = signal["clv_dominant_count"] or 0
-    clv_ratio = clv_dominant / q5_count if q5_count > 0 else 0
 
-    if q5_count >= 5 and clv_ratio > 0.6:
-        base_pct = 0.025  # 2.5% high conviction
-    elif signal["tier"] == "ACT":
-        base_pct = 0.02  # 2% standard ACT
+    Hi-conviction tier (was 2.5% on q5>=5 + clv_ratio>0.6) removed 2026-05-04.
+    Q5_count past 3-4 carries no validated edge (historical n=6,398 + live n=727);
+    the q5>=5/clv-dom>0.6 quadrant has the worst WR (46.5%) and second-worst ROI
+    in live data. The override also directly contradicted the 2026-05-03 CLV-dom
+    filter — both resolved by removal. See [[Plan Sizing Rework 2026-05-04]].
+    """
+    if signal["tier"] == "ACT":
+        base_pct = 0.02
     else:
-        base_pct = 0.01  # 1% CONSIDER
+        base_pct = 0.01
 
     event_group = signal["event_group_size"] or 1
     adjusted_pct = base_pct / event_group
