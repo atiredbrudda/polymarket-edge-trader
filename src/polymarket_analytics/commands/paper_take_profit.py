@@ -72,8 +72,41 @@ def _ensure_tp_log(analytics_db: sqlite_utils.Database) -> None:
     analytics_db.conn.commit()
 
 
+def _ensure_book_dead_column(paper_dir: Path) -> None:
+    """Add book_dead column to paper.db positions if missing.
+
+    Set to 1 once CLOB returns "No orderbook exists" so we stop re-polling
+    a position whose book has been removed (game ended, awaiting Gamma
+    resolution). Without this flag, take-profit scans the same dead-book
+    position every 30min and logs a redundant SKIP_NO_BOOK each time.
+    """
+    db_path = paper_dir / "paper.db"
+    if not db_path.exists():
+        return
+    conn = sqlite3.connect(str(db_path))
+    cols = {r[1] for r in conn.execute("PRAGMA table_info(positions)").fetchall()}
+    if "book_dead" not in cols:
+        conn.execute("ALTER TABLE positions ADD COLUMN book_dead INTEGER NOT NULL DEFAULT 0")
+        conn.commit()
+    conn.close()
+
+
+def _mark_book_dead(paper_dir: Path, market_id: str, outcome: str) -> None:
+    """Flag a position as orderbook-removed so subsequent take-profit scans skip it."""
+    db_path = paper_dir / "paper.db"
+    if not db_path.exists():
+        return
+    conn = sqlite3.connect(str(db_path))
+    conn.execute(
+        "UPDATE positions SET book_dead=1 WHERE market_condition_id=? AND outcome=?",
+        (market_id, outcome),
+    )
+    conn.commit()
+    conn.close()
+
+
 def _load_open_positions(paper_dir: Path) -> list[dict]:
-    """Return all unresolved paper positions with shares > 0."""
+    """Return all unresolved paper positions with shares > 0 and a live orderbook."""
     db_path = paper_dir / "paper.db"
     if not db_path.exists():
         return []
@@ -81,7 +114,8 @@ def _load_open_positions(paper_dir: Path) -> list[dict]:
     conn.row_factory = sqlite3.Row
     rows = conn.execute(
         "SELECT market_condition_id, outcome, shares, avg_entry_price, market_question "
-        "FROM positions WHERE is_resolved=0 AND shares>0"
+        "FROM positions "
+        "WHERE is_resolved=0 AND shares>0 AND COALESCE(book_dead,0)=0"
     ).fetchall()
     conn.close()
     return [dict(r) for r in rows]
@@ -319,6 +353,7 @@ def _run_take_profit(
     analytics_db = init_database(Path(db_path))
     _ensure_tp_log(analytics_db)
     paper_dir = Path(paper_data_dir)
+    _ensure_book_dead_column(paper_dir)
     engine = Engine(paper_dir)
     price_cache = _read_price_cache(paper_dir)
 
@@ -392,6 +427,9 @@ def _run_take_profit(
                 if "No orderbook exists" in err:
                     decision = "SKIP_NO_BOOK"
                     dec_label = "[dim]SKIP_NO_BOOK[/dim]"
+                    # Stop polling — book is gone, no take-profit exit possible.
+                    # paper-resolve-outcomes will settle this position when Gamma resolves.
+                    _mark_book_dead(paper_dir, market_id, outcome)
                 else:
                     decision = "SKIP_API"
                     dec_label = "[red]SKIP_API[/red]"
