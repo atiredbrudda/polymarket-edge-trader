@@ -964,9 +964,12 @@ async def run(
             print(f"  {t}  (attempt={attempts.get(t, 0)})")
         return 0
 
-    if not queue:
+    if not queue and not repair_idle:
         print("[heal] nothing to do.")
         return 0
+
+    if not queue:
+        print("[heal] nothing to heal — proceeding to repair loop.")
 
     print("[heal] building token catalog...")
     catalog = build_token_catalog(db)
