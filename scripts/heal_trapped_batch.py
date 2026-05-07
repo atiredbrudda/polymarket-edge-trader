@@ -1156,7 +1156,7 @@ async def run(
             totals["trades_inserted"] += sweep_stats["inserted"]
             totals["sweep_inserted"] = sweep_stats["inserted"]
             totals["sweep_healed_pairs"] = sweep_stats["healed_pairs"]
-        if not _stop_requested and not dry_run:
+        if not _stop_requested and not dry_run and queue:
             n_dead = _graduate_dead_ended_traders(db)
             if n_dead:
                 print(f"[heal] graduated {n_dead} trader(s) with all-dead-ended trapped pairs → graph_unservable=1")
