@@ -204,7 +204,7 @@ def _resolve_token_and_outcome(
     # Map token_id back to an outcome name the paper trader recognises
     for token in market.tokens:
         if token["token_id"] == token_id:
-            return token_id, token["outcome"]
+            return token_id, token["outcome"].strip()
 
     raise ValueError(
         f"Token {token_id} found in trades but not in market.tokens "
