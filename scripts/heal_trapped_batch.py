@@ -159,7 +159,7 @@ ORDER BY
       SELECT DISTINCT trader_address FROM lift_scores
       WHERE composite_score >= {Q5_COMPOSITE_THRESHOLD}
   )) DESC,
-  (SELECT COUNT(*) FROM trades WHERE trader_address = traders.address) DESC
+  (SELECT COUNT(*) FROM trades WHERE trader_address = traders.address) ASC
 LIMIT {REPAIR_BATCH_SIZE}
 """
 
