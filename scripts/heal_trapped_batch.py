@@ -154,6 +154,58 @@ ORDER BY p.trader_address
 _stop_requested = False
 
 
+def _graduate_dead_ended_traders(db) -> int:
+    """Mark graph_unservable=1 for traders whose every trapped pair is dead-ended.
+
+    A pair is dead-ended when the market is resolved OR the position row is
+    marked irredeemable (data_incomplete=1 AND graph_retry_count>=3). Returns
+    the number of traders graduated.
+    """
+    rows = db.execute("""
+        WITH pairs AS (
+            SELECT trader_address, market_id,
+                   SUM(CASE WHEN side='BUY'  THEN 1 ELSE 0 END) AS buys,
+                   SUM(CASE WHEN side='SELL' THEN 1 ELSE 0 END) AS sells
+            FROM trades
+            GROUP BY trader_address, market_id
+        ),
+        trapped AS (
+            SELECT p.trader_address, p.market_id
+            FROM pairs p
+            WHERE p.buys = 0 AND p.sells > 0
+        ),
+        dead AS (
+            SELECT t.trader_address, t.market_id
+            FROM trapped t
+            LEFT JOIN markets m   ON m.condition_id  = t.market_id
+            LEFT JOIN positions pos
+                      ON pos.trader_address = t.trader_address
+                     AND pos.market_id      = t.market_id
+            WHERE COALESCE(m.resolved, 0) = 1
+               OR (pos.data_incomplete = 1 AND COALESCE(pos.graph_retry_count, 0) >= 3)
+        )
+        SELECT t.trader_address
+        FROM trapped t
+        WHERE COALESCE((SELECT graph_unservable FROM traders WHERE address = t.trader_address), 0) = 0
+        GROUP BY t.trader_address
+        HAVING COUNT(*) > 0
+           AND COUNT(*) = (
+               SELECT COUNT(*) FROM dead d WHERE d.trader_address = t.trader_address
+           )
+    """).fetchall()
+
+    if not rows:
+        return 0
+
+    addresses = [r[0] for r in rows]
+    db.execute(
+        f"UPDATE traders SET graph_unservable = 1 WHERE address IN ({','.join('?' * len(addresses))})",
+        addresses,
+    )
+    db.conn.commit()
+    return len(addresses)
+
+
 def _install_signal_handlers() -> None:
     def _handler(signum, frame):
         global _stop_requested
@@ -1010,6 +1062,11 @@ async def run(
             totals["trades_inserted"] += sweep_stats["inserted"]
             totals["sweep_inserted"] = sweep_stats["inserted"]
             totals["sweep_healed_pairs"] = sweep_stats["healed_pairs"]
+        if not _stop_requested and not dry_run:
+            n_dead = _graduate_dead_ended_traders(db)
+            if n_dead:
+                print(f"[heal] graduated {n_dead} trader(s) with all-dead-ended trapped pairs → graph_unservable=1")
+                totals["graduated"] += n_dead
     finally:
         await graph.close()
         await data.close()

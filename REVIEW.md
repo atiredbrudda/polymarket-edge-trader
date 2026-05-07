@@ -54,7 +54,7 @@ Add the export to whatever cron sources its env (crontab wrapper, `.env`, system
 - ✅ **Taker-side resolved via M-09 expansion** (commit `bd34e8a`, 2026-05-02). graph_unservable traders are routed to `heal_one_trader_via_api` (DataAPIClient, no Goldsky timeouts), watermark advances incrementally each heal pass.
 - ✅ **Maker-side resolved 2026-05-03** (commit `632abad`). New `sweep_maker_side` in `scripts/heal_trapped_batch.py` queries `/trades?market=cid` (which exposes BOTH participants per fill) for every still-trapped market after the per-trader pass. Closes the original H-10 audit case where the audit trader was missing maker-side fills the per-user endpoint never returned. Bot/MM filter applied (commit `d5ea6e0`) so the sweep doesn't re-ingest bot rows.
 - Also fixed: `_api_trade_to_row` had the same maker/taker PK collision as Discover (commit `632abad`) — trader-prefixed trade_id now.
-- 🔁 Option #2 (auto-clear `graph_unservable=1` after N successful Data API heals) still pending. Less urgent now that flagged traders are fully serviced via heal.
+- ✅ Option #2 shipped 2026-05-07: lean mode SQL now includes `graph_unservable=1` traders on the same 6h cadence as full backfill uses for normal traders.
 - 📋 Validation: after the next monitor poll runs heal + sweep, re-run the audit query for `0x8c0b024c…` against `/trades?market=…` for the 04-30 window. Should reconcile both maker and taker fills.
 
 **Impact:** 94 traders flagged `graph_unservable=1` are silently excluded from **both** lean and full backfill, so their trade history only gets updated by `monitor` (REST `/trades?user=`, taker-side, partial). Confirmed data loss: for the audit trader (a market-maker, 193 positions, ~20k trades), the DB is missing trades from 2026-04-30 15:31–16:21 in 3 known markets that REST clearly exposes — including 4 large fills in `lol-shft-vit-game1` (~$25k notional). Reproduced via last-15 comparison: 5/15 matched.
@@ -188,7 +188,7 @@ Spot-check of 5 random zero-trade April markets against live `data-api.polymarke
 **Status (2026-05-03):**
 - ✅ Heal scope expanded to include `graph_unservable=1` traders via new Data API path (`heal_one_trader_via_api`). Closes H-10 taker-side. Scan picks up trapped graph_unservable traders, routed at ~1s each instead of 5+ min Goldsky timeouts.
 - ✅ MM filter REPLACED with v2 (commit `1f8307a`, 2026-05-03). Old filter (`composite_score < -0.10 AND positions > 100`) had a 13% false-positive rate per [[MM Filter Critique 2026-05-02]] wiki. New filter: `trades > 5000 AND tpr > 20 AND NOT in Q5`. Catches 110 traders / 21.3% of all trade rows with zero Q5 false-positives (Q5 panel SHA256 invariant asserted by prune script). See H-12 below for the full story.
-- 🔁 Option 3 (graduate `graph_unservable=1` when 100% of trapped markets are dead-ended) still pending. Less urgent now that graduated traders are serviceable via Data API path.
+- ✅ Option 3 shipped 2026-05-07: `_graduate_dead_ended_traders` runs after each heal sweep and marks `graph_unservable=1` for any trader whose every trapped pair is either resolved or irredeemable (data_incomplete=1, graph_retry_count≥3).
 - 📋 Wiki documented: [[Bot Denylist Architecture 2026-05-03]] (full design + 4 review rounds) and [[Bot Filter Execution Plan 2026-05-03]] (final converged plan).
 
 ---

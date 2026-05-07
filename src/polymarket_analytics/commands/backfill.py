@@ -788,18 +788,20 @@ async def backfill_async(ctx, db_path: str, new_only: bool = False) -> None:
     # (~21% of all trade rows) that the behavioral signature catches. Q5
     # whitelist guarantees no scored signal trader is dropped.
     if new_only:
-        # Lean mode keeps serving graph_unservable traders — incremental fetches
-        # typically fit one 40-day window so they don't trigger fallback.
+        # Lean mode: never-backfilled traders + graph_unservable traders (incremental
+        # window fits one 40-day fetch, so Graph timeouts are rare here).
         traders = list(
             db.execute(
                 f"""
             SELECT address, last_trade_seen_at FROM traders
-            WHERE last_backfilled_at IS NULL
+            WHERE (last_backfilled_at IS NULL
+               OR (COALESCE(graph_unservable, 0) = 1 AND last_backfilled_at < :threshold))
               AND address NOT IN ({BOT_EXCLUSION_SUBQUERY})
-        """
+        """,
+                {"threshold": threshold},
             ).fetchall()
         )
-        console.print(f"  [dim]--new-only mode: selecting only never-backfilled traders (bot-filtered)[/dim]")
+        console.print(f"  [dim]--new-only mode: never-backfilled + graph_unservable traders (bot-filtered)[/dim]")
     else:
         # Full mode skips graph_unservable traders to keep midnight cron under
         # the 4h target — see GRAPH_UNSERVABLE_THRESHOLD.
