@@ -44,19 +44,6 @@ Add the export to whatever cron sources its env (crontab wrapper, `.env`, system
 
 ## Open Findings
 
-### H-04: `discover` sequential HTTP — 45 min for 283 markets
-
-**File:** `src/polymarket_analytics/commands/discover.py:57-69`
-**Impact:** `_fetch_market_trades()` is synchronous httpx, called once per market in a sequential loop. Each call takes ~9s (network round-trip even for empty markets). 283 markets × 9s = 45 minutes. This is the cron bottleneck.
-
-**Root cause of high market count:** Each BO3 match spawns 23–37 Polymarket markets (winner, map winners, game handicaps, first blood, baron nashor, penta kill, total kills O/U, odd/even kills, etc.). Most are prop markets with zero trades — nobody bets on "Any Player Penta Kill?" — but discover fetches trades for all of them.
-
-**Measured 2026-04-16:** 295 markets in `--closing-within 4` window, 12 cached, 283 processed. Of those, 603 had zero trades. Discover spent 45 min fetching nothing for most of them.
-
-**Fix options (pick one or both):**
-1. **Concurrent fetching** — use `asyncio.Semaphore(10)` like monitor does. 283 markets / 10 concurrent = ~4.5 min instead of 45 min. Straightforward refactor of `_fetch_market_trades` → async.
-2. **Skip zero-volume markets** — Gamma API response includes `volumeNum`. Skip markets with `volumeNum == 0` before fetching trades. Eliminates ~60% of fetches.
-
 ### H-10: `graph_unservable` traders fall into a backfill coverage hole — **TAKER + MAKER SIDE BOTH SHIPPED 2026-05-03; option #2 (auto-clear) still pending**
 
 **Found:** 2026-05-01. **Trigger:** comparing Polymarket REST `/trades?user=` vs DB for `0x8c0b024c17831a0dde038547b7e791ae6a0d7aa5`.
@@ -229,6 +216,10 @@ Spot-check of 5 random zero-trade April markets against live `data-api.polymarke
 ### P-04: Price cache across `paper-bridge` + `paper-take-profit`
 
 **Impact:** Both commands run back-to-back in cron and hit the live API independently for overlapping markets. Could share a price snapshot to avoid duplicate API calls for the same tokens.
+
+### P-05: `paper-take-profit` direction label wrong + HOLD not logged — **FIXED 2026-05-07**
+
+Direction hardcoded to `"LONG"` (all TP positions are longs). HOLD branch now calls `_log_decision` so bridge_decisions has a complete audit trail.
 
 ### L-01: Unused `asyncio` import in `score.py` and `detect.py`
 

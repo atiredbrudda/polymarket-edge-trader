@@ -144,7 +144,7 @@ def _log_decision(
             )
         """)
 
-    direction = "LONG" if outcome.lower() == "yes" else "SHORT"
+    direction = "LONG"
     spread = (live_price - entry_price) if live_price is not None else None
     analytics_db.execute(
         """
@@ -452,11 +452,11 @@ def _run_take_profit(
                     book = engine.api.get_order_book(cached_token_id)
                     fee_rate_bps = engine.api.get_fee_rate(cached_token_id)
                     fill_preview = simulate_sell_fill(book, shares, fee_rate_bps)
-                    if fill_preview.avg_price < avg_entry:
+                    if fill_preview.avg_price < avg_entry * threshold:
                         _log_decision(
                             analytics_db, market_id, outcome, "SKIP_THIN_BOOK",
                             fill_preview.avg_price, avg_entry, value_usd,
-                            reason=f"fill {fill_preview.avg_price:.3f} < entry {avg_entry:.3f}",
+                            reason=f"fill {fill_preview.avg_price:.3f} < threshold {avg_entry * threshold:.3f}",
                         )
                         t.add_row(
                             label, outcome,
@@ -500,6 +500,9 @@ def _run_take_profit(
             exits += 1
         else:
             holds += 1
+            _log_decision(analytics_db, market_id, outcome, "HOLD",
+                          live_price, avg_entry, value_usd,
+                          reason=f"ratio {ratio:.2f} < {threshold:.1f}")
             t.add_row(
                 label, outcome,
                 f"{avg_entry:.3f}", f"{live_price:.3f}", f"{ratio:.2f}x",
