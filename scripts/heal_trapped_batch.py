@@ -126,14 +126,7 @@ q5_whitelist AS (
     AND computed_at = (SELECT MAX(computed_at) FROM lift_scores)
 ),
 known_bots AS (
-  SELECT tt.trader_address
-  FROM trader_trades tt
-  JOIN trader_positions tp ON tp.trader_address = tt.trader_address
-  LEFT JOIN q5_whitelist q ON q.trader_address = tt.trader_address
-  WHERE tt.n_trades > {BOT_TRADE_FLOOR}
-    AND tp.n_positions > 0
-    AND (1.0 * tt.n_trades / tp.n_positions) > {BOT_TPR_THRESHOLD}
-    AND q.trader_address IS NULL
+  SELECT address AS trader_address FROM traders WHERE COALESCE(is_bot, 0) = 1
 )
 SELECT DISTINCT p.trader_address
 FROM pairs p

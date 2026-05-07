@@ -49,22 +49,24 @@ BOT_EXCLUSION_SQL = f"""
 
 
 def load_bot_set(db) -> frozenset[str]:
-    """Compute the bot/MM denylist for this invocation.
+    """Load the materialized bot denylist from traders.is_bot.
 
-    Runs BOT_EXCLUSION_SQL against the live DB and returns a frozenset of
-    lowercase addresses. Cost: ~2-3s on a 7M-trade DB. Call once at the
-    top of an invocation (discover, heal sweep, monitor poll cycle) and
-    pass `bot_set` down to inner functions as a parameter.
-
-    Returns an empty frozenset on any DB error — observability decision:
-    a malformed bot set must NOT block ingest. We'd rather over-ingest
-    than crash the pipeline.
+    Reads traders WHERE is_bot=1 — a fast indexed lookup now that
+    refresh_bot_flags.py keeps the column current each cron cycle.
+    Falls back to the behavioral query if the column doesn't exist yet
+    (pre-migration environments).
 
     Accepts either a sqlite3.Connection or sqlite_utils.Database.
     """
     try:
-        # sqlite_utils.Database exposes .execute(); sqlite3.Connection too.
-        rows = db.execute(BOT_EXCLUSION_SQL).fetchall()
+        rows = db.execute(
+            "SELECT address FROM traders WHERE COALESCE(is_bot, 0) = 1"
+        ).fetchall()
         return frozenset((r[0] or "").lower() for r in rows if r[0])
     except Exception:
-        return frozenset()
+        # Column not yet migrated — fall back to behavioral query.
+        try:
+            rows = db.execute(BOT_EXCLUSION_SQL).fetchall()
+            return frozenset((r[0] or "").lower() for r in rows if r[0])
+        except Exception:
+            return frozenset()

@@ -50,9 +50,9 @@ from polymarket_analytics.scoring.thresholds import (
     BOT_TRADE_FLOOR,
 )
 
-# Local alias to keep the existing call sites readable. Single source of
-# truth for the SQL is scoring.thresholds.BOT_EXCLUSION_SQL.
-BOT_EXCLUSION_SUBQUERY = BOT_EXCLUSION_SQL
+# Fast indexed lookup now that refresh_bot_flags.py materializes is_bot each cron.
+# Falls back gracefully if column not yet migrated (load_bot_set handles that).
+BOT_EXCLUSION_SUBQUERY = "SELECT address FROM traders WHERE COALESCE(is_bot, 0) = 1"
 
 
 console = Console()
