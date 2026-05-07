@@ -399,6 +399,8 @@ def run_migrations(db):
             db.execute(
                 "ALTER TABLE traders ADD COLUMN graph_timeout_streak INTEGER DEFAULT 0"
             )
+        if "repair_backfill_at" not in traders_cols:
+            db.execute("ALTER TABLE traders ADD COLUMN repair_backfill_at TEXT")
         # One-time migration: seed last_backfilled_at for traders that were
         # marked complete before this column existed. Guarded by _migrated flag
         # in the DB so it doesn't overwrite intentional NULL resets.

@@ -247,6 +247,86 @@ Direction hardcoded to `"LONG"` (all TP positions are longs). HOLD branch now ca
 
 ---
 
+### B-01: Heal-Driven Repair Backfill for Pre-Fix Trade Gaps — **SHIPPED 2026-05-07**
+
+**Status:** Complete. `repair_backfill_at TEXT` column added to `traders` table (schema.py migration). `_repair_idle_loop()` added to `scripts/heal_trapped_batch.py` — runs after primary heal + sweep + graduation when budget remains, processes `REPAIR_BATCH_SIZE=10` traders/pass using `heal_one_trader()` (full Graph history, `since_unix_ts=None`), marks `repair_backfill_at` on success. Monitor wired with `--repair-idle` flag. Priority: Q5 (lift_scores) traders first, then by trade count; bots and graph_unservable excluded.
+
+📋 **Validation:** after first heal pass with `--repair-idle`, check `SELECT COUNT(*) FROM traders WHERE repair_backfill_at IS NOT NULL` to confirm the loop fires and marks traders. Re-sample 3–5 traders from the pre-fix cohort (backfilled before 2026-04-26) against `/trades?market=…` to confirm gaps are closing.
+
+**Context:**
+The graph pagination truncation bug (fixed commit `4eabb52`, 2026-04-25) left historical trade gaps for traders backfilled before the fix. Confirmed via API vs DB comparison across 10 random traders:
+- Pre-fix window (<Apr 26): gaps exist across many traders — old truncation damage
+- Transitional window (Apr 26–30): gaps on heavy traders from first post-fix runs
+- Settled window (May 1+): **fully clean across all 10 traders checked**
+
+Gaps self-heal as the 40-day retention window rolls forward (~May 25–30 for pre-fix, ~May 30 for transitional). No ongoing bug — fix works correctly for all new data since May 1. The remaining ~32K traders in the DB carry historical gaps of varying size that will never be re-fetched under normal incremental backfill logic (which uses `last_trade_seen_at` as the start window, not 40 days back).
+
+**Goal:** Gradually re-backfill all traders with a full 40-day force-fetch, without disturbing the monitor or cron schedule.
+
+**Design — attach to heal, idle-only:**
+
+The heal command already runs at the end of each monitor poll pass within the `--max-runtime-s = (poll-3)*60` budget. The repair backfill runs as a **secondary idle job inside that same budget**: heal does its normal trader-rescue work first; only when there are zero traders/trades left to heal (i.e. heal's actual job is done for the pass) does it consume remaining budget on repair backfills.
+
+This means:
+- Monitor timing is never disturbed — repair only runs in genuine idle time
+- No extra cron slots, no lock contention, no second process
+- If real healing work appears mid-pass, repair stops immediately and yields
+
+**How heal's runtime management works (context for implementation):**
+
+The monitor launches `heal_trapped_batch.py` as a `subprocess.Popen` with `--max-runtime-s {budget}` and immediately enters its sleep loop — the two run **concurrently** during the poll interval's idle window. Before the next pass, the monitor calls `heal_proc.terminate()` to hard-kill it regardless of state.
+
+Inside `heal_trapped_batch.py`, the budget is self-enforced via a `time.monotonic()` check **between batches** (not mid-batch). After each batch of traders completes, it checks `elapsed >= max_runtime_s` and exits cleanly if over. This is the exact pattern the repair loop will reuse.
+
+**Implementation steps:**
+
+1. **Add `repair_backfill_at` column to `traders` table**
+   ```sql
+   ALTER TABLE traders ADD COLUMN repair_backfill_at TEXT;
+   ```
+   NULL = not yet repaired. Set to `now()` on successful force-full fetch.
+
+2. **Add repair loop inside `heal_trapped_batch.py`**
+   After the primary heal loop exits (zero trapped traders remaining), add a second loop at the bottom of the same script. It only activates when:
+   - Primary heal loop found nothing to heal (idle), AND
+   - `time.monotonic() - run_start < max_runtime_s` (budget still remains)
+
+   The between-batch clock check is identical to the primary loop — no new timing infrastructure needed.
+
+3. **Repair loop logic:**
+   ```sql
+   SELECT address FROM traders
+   WHERE repair_backfill_at IS NULL
+     AND COALESCE(graph_unservable, 0) = 0
+     AND COALESCE(is_bot, 0) = 0
+   ORDER BY
+     (address IN (SELECT DISTINCT market_id FROM signals)) DESC,
+     (SELECT COUNT(*) FROM trades WHERE trader_address = traders.address) DESC
+   LIMIT 10
+   ```
+   For each trader: fetch with `since_unix_ts=None` (full 40-day windowed fetch). On success: `UPDATE traders SET repair_backfill_at = now()`. Check clock before each trader; stop if budget exhausted.
+
+4. **No changes to monitor.py needed**
+   Monitor already launches heal with `--max-runtime-s` and terminates at end of cycle. The repair loop is invisible to it — just more work inside the same subprocess and budget.
+
+5. **Progress visibility**
+   Log at end of each pass: `[repair] N traders processed this pass, M remaining`.
+
+**Expected throughput:**
+Each full 40-day fetch takes ~10–30s per trader (windowed paginator). At 10 traders per heal pass and a 60-minute poll cycle, ~240 traders per day. 32K traders ≈ 133 days at that rate — but gaps fully age out by May 30, so priority ordering (Q5 first) ensures the traders that matter get fixed well before that. Bot/unservable traders (excluded) represent a large fraction of the 32K, so effective population is smaller.
+
+**Files to touch:**
+- `src/polymarket_analytics/commands/heal.py` — add `--repair-idle` flag + idle repair loop
+- `src/polymarket_analytics/db/schema.py` — add `repair_backfill_at` column migration
+- Monitor invocation of heal — add `--repair-idle` flag
+
+**Not needed:**
+- No new cron slot
+- No new lock protocol
+- No changes to backfill.py beyond confirming `since_unix_ts=None` path works (already verified)
+
+---
+
 ## Acceptable / By Design
 
 | ID   | Finding                                    | Status                                                                                                                                                                                                  |

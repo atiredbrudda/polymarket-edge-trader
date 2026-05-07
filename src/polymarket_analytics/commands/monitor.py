@@ -829,6 +829,7 @@ async def _monitor_async(
                                     [".venv/bin/python", str(heal_script),
                                      "--resume",
                                      "--batch-size", "4",
+                                     "--repair-idle",
                                      "--max-runtime-s", str(heal_budget_s)],
                                     cwd=str(cwd),
                                 )

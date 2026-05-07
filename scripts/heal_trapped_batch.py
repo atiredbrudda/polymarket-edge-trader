@@ -79,6 +79,7 @@ PER_TRADER_TIMEOUT_S = 300.0
 # attempt 3+ = graduate to traders.graph_unservable=1, never tried again.
 RETRY_TIMEOUTS_S = [300.0, 600.0, 900.0]
 GRADUATION_THRESHOLD = len(RETRY_TIMEOUTS_S)
+REPAIR_BATCH_SIZE = 10
 
 # Bias-conservative bot/MM exclusion. Behavioral signature (high trade volume
 # AND high trade-per-position ratio) PLUS Q5-whitelist exemption. Replaces the
@@ -143,8 +144,104 @@ WHERE p.buys = 0
 ORDER BY p.trader_address
 """
 
+# Traders eligible for the repair backfill (B-01): those who have never had a
+# full force-re-fetch since the pagination truncation fix (commit 4eabb52).
+# Priority: Q5 signal traders first, then by trade volume.
+# graph_unservable and bot traders are excluded — they either need the Data API
+# path (handled by heal) or are pruned entirely.
+REPAIR_TRADERS_SQL = f"""
+SELECT address FROM traders
+WHERE repair_backfill_at IS NULL
+  AND COALESCE(graph_unservable, 0) = 0
+  AND COALESCE(is_bot, 0) = 0
+ORDER BY
+  (address IN (
+      SELECT DISTINCT trader_address FROM lift_scores
+      WHERE composite_score >= {Q5_COMPOSITE_THRESHOLD}
+  )) DESC,
+  (SELECT COUNT(*) FROM trades WHERE trader_address = traders.address) DESC
+LIMIT {REPAIR_BATCH_SIZE}
+"""
+
 
 _stop_requested = False
+
+
+async def _repair_idle_loop(
+    db,
+    graph: "GraphAPIClient",
+    catalog: dict[str, str],
+    run_start: float,
+    max_runtime_s: float | None,
+    sem: "asyncio.Semaphore",
+) -> int:
+    """Consume remaining heal budget re-fetching full Graph history for traders
+    with pre-fix pagination gaps (REVIEW.md B-01).
+
+    Runs after the primary heal loop and maker-side sweep only when budget
+    remains.  Processes REPAIR_BATCH_SIZE traders per pass, marks each with
+    repair_backfill_at on success, and exits cleanly when budget is exhausted or
+    all eligible traders are processed.
+
+    Returns the total number of traders successfully repaired this invocation.
+    """
+    repaired = 0
+    while True:
+        if _stop_requested:
+            break
+        if max_runtime_s is not None:
+            elapsed = time.monotonic() - run_start
+            if elapsed >= max_runtime_s:
+                print(
+                    f"[repair] budget reached ({elapsed:.0f}s/{max_runtime_s:.0f}s) — stopping"
+                )
+                break
+
+        pending = [r[0] for r in db.execute(REPAIR_TRADERS_SQL).fetchall()]
+        if not pending:
+            total_done = db.execute(
+                "SELECT COUNT(*) FROM traders WHERE repair_backfill_at IS NOT NULL"
+            ).fetchone()[0]
+            print(f"[repair] all eligible traders repaired ({total_done:,} total) — done")
+            break
+
+        remaining_str = (
+            f"{max_runtime_s - (time.monotonic() - run_start):.0f}s remaining"
+            if max_runtime_s else "no budget limit"
+        )
+        print(f"[repair] {len(pending)} traders this batch ({remaining_str})")
+
+        for trader in pending:
+            if _stop_requested:
+                break
+            if max_runtime_s is not None and (time.monotonic() - run_start) >= max_runtime_s:
+                print(f"[repair] budget reached mid-batch — stopping")
+                return repaired
+
+            r = await heal_one_trader(graph, db, catalog, trader, sem)
+            if "error" in r:
+                print(f"[repair] {trader[:10]}  err={r['error']}")
+            else:
+                db.execute(
+                    "UPDATE traders SET repair_backfill_at = ? WHERE address = ?",
+                    [datetime.now(timezone.utc).replace(microsecond=0).isoformat(), trader],
+                )
+                db.conn.commit()
+                repaired += 1
+                print(
+                    f"[repair] {trader[:10]}  events={r['events']:>6}  "
+                    f"inserted={r['inserted']:>5}"
+                )
+
+        total_remaining = db.execute(
+            "SELECT COUNT(*) FROM traders "
+            "WHERE repair_backfill_at IS NULL "
+            "  AND COALESCE(graph_unservable, 0) = 0 "
+            "  AND COALESCE(is_bot, 0) = 0"
+        ).fetchone()[0]
+        print(f"[repair] batch done — {repaired} repaired this run, {total_remaining:,} remaining")
+
+    return repaired
 
 
 def _graduate_dead_ended_traders(db) -> int:
@@ -737,6 +834,7 @@ async def run(
     dry_run: bool,
     retry_failed: bool,
     max_runtime_s: float | None = None,
+    repair_idle: bool = False,
 ) -> int:
     api_key = os.environ.get("GOLDSKY_API_KEY") or os.environ.get("GRAPH_API_KEY")
     # Route through get_db() so heal inherits the same 30s busy_timeout +
@@ -1060,6 +1158,18 @@ async def run(
             if n_dead:
                 print(f"[heal] graduated {n_dead} trader(s) with all-dead-ended trapped pairs → graph_unservable=1")
                 totals["graduated"] += n_dead
+        if repair_idle and not _stop_requested and not dry_run:
+            remaining = (
+                max_runtime_s - (time.monotonic() - run_start)
+                if max_runtime_s is not None else None
+            )
+            if remaining is None or remaining >= 30:
+                repair_n = await _repair_idle_loop(
+                    db, graph, catalog, run_start, max_runtime_s, sem
+                )
+                totals["repair_repaired"] = repair_n
+            else:
+                print(f"[repair] only {remaining:.0f}s budget left — skipping repair loop")
     finally:
         await graph.close()
         await data.close()
@@ -1106,6 +1216,12 @@ def main() -> int:
         default=None,
         help="Wall-clock budget. Exits cleanly between batches when exceeded.",
     )
+    ap.add_argument(
+        "--repair-idle",
+        action="store_true",
+        help="After primary heal, consume idle budget re-fetching full history for "
+             "traders with pre-fix pagination gaps (REVIEW.md B-01).",
+    )
     args = ap.parse_args()
 
     return asyncio.run(
@@ -1117,6 +1233,7 @@ def main() -> int:
             dry_run=args.dry_run,
             retry_failed=args.retry_failed,
             max_runtime_s=args.max_runtime_s,
+            repair_idle=args.repair_idle,
         )
     )
 
