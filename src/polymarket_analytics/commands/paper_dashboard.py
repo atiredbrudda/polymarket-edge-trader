@@ -324,7 +324,7 @@ def _determine_winner(
       - team name       → find case-insensitive match in outcomes_list
       - fallback        → parse "Team A vs Team B" from question text
     """
-    p = paper_outcome.lower()
+    p = paper_outcome.strip().lower()
 
     if p in ("yes", "over"):
         return analytics_outcome == "YES"
@@ -333,7 +333,7 @@ def _determine_winner(
 
     # Team name — look up position in outcomes_list
     for i, name in enumerate(outcomes_list):
-        if name.lower() == p:
+        if name.strip().lower() == p:
             if i == 0:
                 return analytics_outcome == "YES"
             else:
@@ -349,6 +349,31 @@ def _determine_winner(
                 return (analytics_outcome == "YES") if i == 0 else (analytics_outcome == "NO")
 
     return None  # outcomes_list empty or name not matched
+
+
+def _winner_from_cache_tokens(paper_outcome: str, cached_data: dict) -> bool | None:
+    """Determine WIN/LOSS from market_cache token winner flags.
+
+    Used when analytics.db has no outcome yet (Gamma propagation lag) but the
+    CLOB token data in market_cache already carries winner=True/False.
+
+    Returns True (won), False (lost), or None if no resolved token found.
+    """
+    tokens = cached_data.get("tokens")
+    if not tokens:
+        return None
+
+    p = paper_outcome.strip().lower()
+    winning_outcome: str | None = None
+    for tok in tokens:
+        if tok.get("winner") is True:
+            winning_outcome = (tok.get("outcome") or "").lower()
+            break
+
+    if winning_outcome is None:
+        return None  # no winner token present — genuine VOID
+
+    return p == winning_outcome
 
 
 def _do_resolve(paper_data_dir: str, analytics_db_path: str) -> None:
@@ -412,27 +437,39 @@ def _do_resolve(paper_data_dir: str, analytics_db_path: str) -> None:
 
             analytics_outcome = mkt["outcome"]
 
-            if analytics_outcome is None:
-                # VOID: cancelled/postponed — refund stake, zero P&L
-                payout = total_cost
-                pnl = 0.0
-                label = "VOID"
-                void_count += 1
-            else:
-                # Get outcomes ordering from market_cache to map team names → YES/NO
-                cached = paper_conn.execute(
-                    "SELECT data FROM market_cache WHERE cache_key=?",
-                    (f"market:{cid}",),
-                ).fetchone()
+            # Always load market_cache — needed for outcome mapping and winner fallback.
+            cached = paper_conn.execute(
+                "SELECT data FROM market_cache WHERE cache_key=?",
+                (f"market:{cid}",),
+            ).fetchone()
+            cached_data: dict = {}
+            if cached:
+                try:
+                    cached_data = json.loads(cached["data"])
+                except (json.JSONDecodeError, ValueError):
+                    pass
 
+            if analytics_outcome is None:
+                # analytics.db has no outcome yet (Gamma lag). Check market_cache
+                # tokens for a winner=True flag before falling back to VOID.
+                won = _winner_from_cache_tokens(paper_outcome, cached_data)
+                if won is not None:
+                    payout = shares if won else 0.0
+                    pnl = payout - total_cost
+                    label = "WIN" if won else "LOSS"
+                else:
+                    # Genuine VOID: cancelled/postponed — refund stake, zero P&L
+                    payout = total_cost
+                    pnl = 0.0
+                    label = "VOID"
+                    void_count += 1
+            else:
                 outcomes_list: list[str] = []
-                if cached:
-                    try:
-                        mdata = json.loads(cached["data"])
-                        raw = mdata.get("outcomes", "[]")
-                        outcomes_list = json.loads(raw) if isinstance(raw, str) else raw
-                    except (json.JSONDecodeError, ValueError):
-                        pass
+                raw = cached_data.get("outcomes", "[]")
+                try:
+                    outcomes_list = json.loads(raw) if isinstance(raw, str) else raw
+                except (json.JSONDecodeError, ValueError):
+                    pass
 
                 won = _determine_winner(
                     paper_outcome, analytics_outcome, outcomes_list,
