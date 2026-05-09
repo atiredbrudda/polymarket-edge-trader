@@ -171,7 +171,7 @@ def _compute_tier(net_q5_count: int, q5_count: int, clv_dominant_count: int) -> 
     """
     if net_q5_count >= 3 and clv_dominant_count < q5_count:
         return "ACT"
-    elif net_q5_count >= 2:
+    elif net_q5_count >= 3:
         return "CONSIDER"
     else:
         return "WATCH"

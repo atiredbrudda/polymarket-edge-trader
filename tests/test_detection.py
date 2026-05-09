@@ -700,10 +700,10 @@ class TestComputeTier:
         # 4 Q5, 0 CLV-dominant → 0<4 → ACT (signal driven by ROI/Sharpe instead)
         assert _compute_tier(net_q5_count=4, q5_count=4, clv_dominant_count=0) == "ACT"
 
-    def test_consider_when_net_below_act_threshold(self):
-        # net_q5=2 → never ACT regardless of CLV mix
-        assert _compute_tier(net_q5_count=2, q5_count=2, clv_dominant_count=0) == "CONSIDER"
-        assert _compute_tier(net_q5_count=2, q5_count=2, clv_dominant_count=2) == "CONSIDER"
+    def test_watch_when_net_below_consider_threshold(self):
+        # net_q5=2 → WATCH under tightened threshold (≥3 required for CONSIDER/ACT)
+        assert _compute_tier(net_q5_count=2, q5_count=2, clv_dominant_count=0) == "WATCH"
+        assert _compute_tier(net_q5_count=2, q5_count=2, clv_dominant_count=2) == "WATCH"
 
     def test_watch_below_consider_threshold(self):
         assert _compute_tier(net_q5_count=1, q5_count=1, clv_dominant_count=0) == "WATCH"
