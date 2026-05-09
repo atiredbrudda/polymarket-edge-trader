@@ -9,6 +9,7 @@ Usage:
 """
 
 import json
+import math
 import sqlite3
 import time
 from datetime import datetime, timezone
@@ -152,7 +153,7 @@ def _compute_size(signal: dict, account_cash: float) -> float:
         base_pct = 0.01
 
     event_group = signal["event_group_size"] or 1
-    adjusted_pct = base_pct / event_group
+    adjusted_pct = base_pct / math.sqrt(event_group)
 
     return account_cash * adjusted_pct
 
