@@ -115,7 +115,17 @@ def refresh(conn: sqlite3.Connection, dry_run: bool) -> None:
         ).fetchall()
     }
 
-    promoted, demoted, streak_incr, streak_reset = [], [], [], []
+    promoted, demoted, streak_incr, streak_reset, prune_skipped = [], [], [], [], []
+
+    # Trade counts for flagged traders — used to detect prune artifacts below.
+    trade_counts = {
+        r[0].lower(): r[1]
+        for r in conn.execute(
+            "SELECT trader_address, COUNT(*) FROM trades "
+            "WHERE trader_address IN (SELECT address FROM traders WHERE COALESCE(is_bot,0)=1) "
+            "GROUP BY trader_address"
+        ).fetchall()
+    }
 
     # Promote: matches filter but not yet flagged
     for r in conn.execute("SELECT address FROM traders WHERE COALESCE(is_bot,0)=0").fetchall():
@@ -127,11 +137,17 @@ def refresh(conn: sqlite3.Connection, dry_run: bool) -> None:
     for addr, row in db_rows.items():
         if row["is_bot"] == 1:
             if addr not in current_bots:
-                new_streak = row["streak"] + 1
-                if new_streak >= DEMOTE_STREAK_THRESHOLD:
-                    demoted.append(addr)
+                n_trades = trade_counts.get(addr, 0)
+                if n_trades < BOT_TRADE_FLOOR:
+                    # Trade count below floor — likely a prune artifact, not a
+                    # behavior change. Don't penalise the streak; keep flagged.
+                    prune_skipped.append(addr)
                 else:
-                    streak_incr.append((addr, new_streak))
+                    new_streak = row["streak"] + 1
+                    if new_streak >= DEMOTE_STREAK_THRESHOLD:
+                        demoted.append(addr)
+                    else:
+                        streak_incr.append((addr, new_streak))
             elif row["streak"] > 0:
                 streak_reset.append(addr)
 
@@ -139,7 +155,8 @@ def refresh(conn: sqlite3.Connection, dry_run: bool) -> None:
     print(
         f"[bot-flags] current_bots={len(current_bots)}  "
         f"to_promote={len(promoted)}  to_demote={len(demoted)}  "
-        f"streak_incr={len(streak_incr)}  streak_reset={len(streak_reset)}"
+        f"streak_incr={len(streak_incr)}  streak_reset={len(streak_reset)}  "
+        f"prune_skipped={len(prune_skipped)}"
     )
 
     if total_changes > MAX_CHANGES_PER_RUN:
@@ -176,6 +193,13 @@ def refresh(conn: sqlite3.Connection, dry_run: bool) -> None:
         )
 
     for addr in streak_reset:
+        conn.execute(
+            "UPDATE traders SET bot_demote_streak=0 WHERE LOWER(address)=?",
+            [addr],
+        )
+
+    # Reset any prior streak accumulated before this guard was added.
+    for addr in prune_skipped:
         conn.execute(
             "UPDATE traders SET bot_demote_streak=0 WHERE LOWER(address)=?",
             [addr],

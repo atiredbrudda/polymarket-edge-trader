@@ -288,11 +288,16 @@ def _graduate_dead_ended_traders(db) -> int:
         return 0
 
     addresses = [r[0] for r in rows]
-    db.execute(
-        f"UPDATE traders SET graph_unservable = 1 WHERE address IN ({','.join('?' * len(addresses))})",
-        addresses,
-    )
-    db.conn.commit()
+    try:
+        db.execute(
+            f"UPDATE traders SET graph_unservable = 1 WHERE address IN ({','.join('?' * len(addresses))})",
+            addresses,
+        )
+        db.conn.commit()
+    except Exception as exc:
+        # DB locked by concurrent backfill — graduation is non-critical, will retry next pass.
+        print(f"[heal] graduation skipped (DB contention): {exc}")
+        return 0
     return len(addresses)
 
 

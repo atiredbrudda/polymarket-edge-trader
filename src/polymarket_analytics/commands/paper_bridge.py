@@ -122,6 +122,15 @@ def _get_actionable_signals(db: sqlite_utils.Database) -> list[dict]:
     return [dict(zip(cols, row)) for row in rows]
 
 
+def _would_have_size(signal: dict, cash: float, live_price: float) -> float:
+    """Compute the would-have-been buy size for SKIP row cost tracking."""
+    size = _compute_size(signal, cash)
+    spread = live_price - (signal["avg_entry_price"] or 0)
+    if spread > SPREAD_SOFT_LIMIT:
+        size *= 0.5
+    return size
+
+
 def _compute_size(signal: dict, account_cash: float) -> float:
     """Compute bet size based on tier + correlation adjustment.
 
@@ -220,6 +229,8 @@ def _log_decision(
     spread: float | None = None,
     size_usd: float = 0.0,
     reason: str = "",
+    cash_at_decision: float | None = None,
+    would_have_size_usd: float | None = None,
 ) -> None:
     """Log every signal evaluation to the bridge_decisions table."""
     if "bridge_decisions" not in db.table_names():
@@ -239,7 +250,9 @@ def _log_decision(
                 size_usd REAL,
                 event_group_size INTEGER,
                 reason TEXT,
-                checked_at TEXT
+                checked_at TEXT,
+                cash_at_decision REAL,
+                would_have_size_usd REAL
             )
         """)
 
@@ -248,11 +261,13 @@ def _log_decision(
         INSERT INTO bridge_decisions (
             signal_id, market_id, direction, tier, q5_count, net_q5_count,
             q5_avg_entry, live_price, spread_vs_q5, decision, size_usd,
-            event_group_size, reason, checked_at
+            event_group_size, reason, checked_at,
+            cash_at_decision, would_have_size_usd
         ) VALUES (
             :signal_id, :market_id, :direction, :tier, :q5_count, :net_q5_count,
             :q5_avg_entry, :live_price, :spread_vs_q5, :decision, :size_usd,
-            :event_group_size, :reason, :checked_at
+            :event_group_size, :reason, :checked_at,
+            :cash_at_decision, :would_have_size_usd
         )
         """,
         {
@@ -270,6 +285,8 @@ def _log_decision(
             "event_group_size": signal["event_group_size"],
             "reason": reason,
             "checked_at": datetime.now(timezone.utc).isoformat(),
+            "cash_at_decision": cash_at_decision,
+            "would_have_size_usd": would_have_size_usd,
         },
     )
     db.conn.commit()
@@ -363,6 +380,14 @@ def _run_bridge(db_path: str, dry_run: bool, paper_data_dir: str) -> None:
     # Open analytics DB
     analytics_db = init_database(Path(db_path))
 
+    # Phase 1 migration: add cost-tracking columns if missing
+    if "bridge_decisions" in analytics_db.table_names():
+        _existing = {r[1] for r in analytics_db.execute("PRAGMA table_info(bridge_decisions)").fetchall()}
+        for _col in ("cash_at_decision", "would_have_size_usd"):
+            if _col not in _existing:
+                analytics_db.execute(f"ALTER TABLE bridge_decisions ADD COLUMN {_col} REAL")
+        analytics_db.conn.commit()
+
     # Open paper trader engine
     paper_dir = Path(paper_data_dir)
     paper_dir.mkdir(parents=True, exist_ok=True)
@@ -444,7 +469,8 @@ def _run_bridge(db_path: str, dry_run: bool, paper_data_dir: str) -> None:
             else:
                 decision = "SKIP_API"
                 label = "[red]SKIP_API[/red]"
-            _log_decision(analytics_db, signal, decision, reason=err)
+            _log_decision(analytics_db, signal, decision, reason=err,
+                          cash_at_decision=account.cash)
             results.add_row(
                 signal.get("question", signal["market_id"])[:40],
                 signal["direction"], signal["tier"],
@@ -463,7 +489,9 @@ def _run_bridge(db_path: str, dry_run: bool, paper_data_dir: str) -> None:
         ]
         if opposite_held:
             _log_decision(analytics_db, signal, "SKIP_OPPOSITE_HELD",
-                          live_price, reason=f"holding opposite outcome: {opposite_held[0][1]}")
+                          live_price, reason=f"holding opposite outcome: {opposite_held[0][1]}",
+                          cash_at_decision=account.cash,
+                          would_have_size_usd=_would_have_size(signal, account.cash, live_price))
             results.add_row(
                 signal.get("question", "")[:40],
                 signal["direction"], signal["tier"],
@@ -483,7 +511,9 @@ def _run_bridge(db_path: str, dry_run: bool, paper_data_dir: str) -> None:
                              live_price, entry)
             _log_decision(analytics_db, signal, "SKIP_HELD",
                           live_price, live_price - (entry or live_price),
-                          reason="already holding position")
+                          reason="already holding position",
+                          cash_at_decision=account.cash,
+                          would_have_size_usd=_would_have_size(signal, account.cash, live_price))
             results.add_row(
                 signal.get("question", "")[:40],
                 signal["direction"], signal["tier"],
@@ -498,7 +528,9 @@ def _run_bridge(db_path: str, dry_run: bool, paper_data_dir: str) -> None:
         # Don't re-enter a position we already took profit on
         if (signal["market_id"], resolved_outcome.lower()) in tp_exited:
             _log_decision(analytics_db, signal, "SKIP_TP_EXIT",
-                          live_price, reason="already took profit on this position")
+                          live_price, reason="already took profit on this position",
+                          cash_at_decision=account.cash,
+                          would_have_size_usd=_would_have_size(signal, account.cash, live_price))
             results.add_row(
                 signal.get("question", "")[:40],
                 signal["direction"], signal["tier"],
@@ -516,7 +548,9 @@ def _run_bridge(db_path: str, dry_run: bool, paper_data_dir: str) -> None:
         # Floor check — skip decided markets where price has collapsed
         if live_price < PRICE_FLOOR:
             _log_decision(analytics_db, signal, "SKIP_FLOOR",
-                          live_price, spread, reason=f"live {live_price:.3f} < {PRICE_FLOOR}")
+                          live_price, spread, reason=f"live {live_price:.3f} < {PRICE_FLOOR}",
+                          cash_at_decision=account.cash,
+                          would_have_size_usd=_would_have_size(signal, account.cash, live_price))
             results.add_row(
                 signal.get("question", "")[:40],
                 signal["direction"], signal["tier"],
@@ -530,7 +564,9 @@ def _run_bridge(db_path: str, dry_run: bool, paper_data_dir: str) -> None:
         # Price check
         if spread > SPREAD_HARD_LIMIT:
             _log_decision(analytics_db, signal, "SKIP_PRICE",
-                          live_price, spread, reason=f"spread {spread:.3f} > {SPREAD_HARD_LIMIT}")
+                          live_price, spread, reason=f"spread {spread:.3f} > {SPREAD_HARD_LIMIT}",
+                          cash_at_decision=account.cash,
+                          would_have_size_usd=_would_have_size(signal, account.cash, live_price))
             results.add_row(
                 signal.get("question", "")[:40],
                 signal["direction"], signal["tier"],
@@ -543,7 +579,9 @@ def _run_bridge(db_path: str, dry_run: bool, paper_data_dir: str) -> None:
 
         if spread < NEGATIVE_SPREAD_FLOOR:
             _log_decision(analytics_db, signal, "SKIP_FALLING_KNIFE",
-                          live_price, spread, reason=f"spread {spread:.3f} < {NEGATIVE_SPREAD_FLOOR}")
+                          live_price, spread, reason=f"spread {spread:.3f} < {NEGATIVE_SPREAD_FLOOR}",
+                          cash_at_decision=account.cash,
+                          would_have_size_usd=_would_have_size(signal, account.cash, live_price))
             results.add_row(
                 signal.get("question", "")[:40],
                 signal["direction"], signal["tier"],
@@ -564,7 +602,9 @@ def _run_bridge(db_path: str, dry_run: bool, paper_data_dir: str) -> None:
         # Floor at minimum order
         if size_usd < 1.0:
             _log_decision(analytics_db, signal, "SKIP_SIZE",
-                          live_price, spread, reason="size below $1 minimum")
+                          live_price, spread, reason="size below $1 minimum",
+                          cash_at_decision=account.cash,
+                          would_have_size_usd=size_usd)
             results.add_row(
                 signal.get("question", "")[:40],
                 signal["direction"], signal["tier"],
@@ -577,7 +617,9 @@ def _run_bridge(db_path: str, dry_run: bool, paper_data_dir: str) -> None:
 
         if dry_run:
             _log_decision(analytics_db, signal, "DRY_RUN",
-                          live_price, spread, size_usd)
+                          live_price, spread, size_usd,
+                          cash_at_decision=account.cash,
+                          would_have_size_usd=size_usd)
             results.add_row(
                 signal.get("question", "")[:40],
                 signal["direction"], signal["tier"],
@@ -592,7 +634,9 @@ def _run_bridge(db_path: str, dry_run: bool, paper_data_dir: str) -> None:
             result = engine.buy(signal["market_id"], resolved_outcome, size_usd)
             _log_decision(analytics_db, signal, "BUY",
                           live_price, spread, size_usd,
-                          reason=f"{resolved_outcome} @ {live_price:.3f}, q5_entry={q5_entry:.3f}")
+                          reason=f"{resolved_outcome} @ {live_price:.3f}, q5_entry={q5_entry:.3f}",
+                          cash_at_decision=account.cash,
+                          would_have_size_usd=size_usd)
             results.add_row(
                 signal.get("question", "")[:40],
                 signal["direction"], signal["tier"],
@@ -606,7 +650,9 @@ def _run_bridge(db_path: str, dry_run: bool, paper_data_dir: str) -> None:
             account = engine.get_account()
         except SimError as e:
             _log_decision(analytics_db, signal, "SKIP_ERROR",
-                          live_price, spread, reason=str(e))
+                          live_price, spread, reason=str(e),
+                          cash_at_decision=account.cash,
+                          would_have_size_usd=size_usd)
             results.add_row(
                 signal.get("question", "")[:40],
                 signal["direction"], signal["tier"],

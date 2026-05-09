@@ -114,7 +114,7 @@ class GammaAPIClient:
                     last_err = None
                     break
                 except (httpx.ReadError, httpx.ConnectError, httpx.RemoteProtocolError,
-                        httpx.ReadTimeout, httpx.HTTPStatusError) as e:
+                        httpx.ReadTimeout, httpx.ConnectTimeout, httpx.HTTPStatusError) as e:
                     last_err = e
                     if isinstance(e, httpx.HTTPStatusError) and e.response.status_code < 500:
                         raise  # don't retry client errors

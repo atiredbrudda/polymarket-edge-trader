@@ -788,23 +788,21 @@ async def backfill_async(ctx, db_path: str, new_only: bool = False) -> None:
     # (~21% of all trade rows) that the behavioral signature catches. Q5
     # whitelist guarantees no scored signal trader is dropped.
     if new_only:
-        # Lean mode: never-backfilled traders + graph_unservable traders (incremental
-        # window fits one 40-day fetch, so Graph timeouts are rare here).
+        # Lean mode: only never-backfilled traders. graph_unservable traders are
+        # handled by full mode so lean stays fast and bounded.
         traders = list(
             db.execute(
                 f"""
             SELECT address, last_trade_seen_at FROM traders
-            WHERE (last_backfilled_at IS NULL
-               OR (COALESCE(graph_unservable, 0) = 1 AND last_backfilled_at < :threshold))
+            WHERE last_backfilled_at IS NULL
               AND address NOT IN ({BOT_EXCLUSION_SUBQUERY})
-        """,
-                {"threshold": threshold},
+        """
             ).fetchall()
         )
-        console.print(f"  [dim]--new-only mode: never-backfilled + graph_unservable traders (bot-filtered)[/dim]")
+        console.print(f"  [dim]--new-only mode: {len(traders)} never-backfilled traders (bot-filtered)[/dim]")
     else:
-        # Full mode skips graph_unservable traders to keep midnight cron under
-        # the 4h target — see GRAPH_UNSERVABLE_THRESHOLD.
+        # Full mode includes graph_unservable traders so the graduated population
+        # gets periodic refreshes without touching lean cron runtime.
         traders = list(
             db.execute(
                 f"""
@@ -812,20 +810,11 @@ async def backfill_async(ctx, db_path: str, new_only: bool = False) -> None:
             WHERE
                 (last_trade_seen_at IS NULL OR last_trade_seen_at >= :cutoff)
                 AND (last_backfilled_at IS NULL OR last_backfilled_at < :threshold)
-                AND COALESCE(graph_unservable, 0) = 0
                 AND address NOT IN ({BOT_EXCLUSION_SUBQUERY})
         """,
                 {"cutoff": cutoff, "threshold": threshold},
             ).fetchall()
         )
-        unservable_count = db.execute(
-            "SELECT COUNT(*) FROM traders WHERE COALESCE(graph_unservable, 0) = 1"
-        ).fetchone()[0]
-        if unservable_count:
-            console.print(
-                f"  [dim]Skipping {unservable_count:,} graph_unservable trader(s) "
-                f"(served by lean backfill instead)[/dim]"
-            )
         bot_count = db.execute(
             f"SELECT COUNT(*) FROM ({BOT_EXCLUSION_SUBQUERY})"
         ).fetchone()[0]
