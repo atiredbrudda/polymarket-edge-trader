@@ -788,13 +788,20 @@ async def _monitor_async(
                         # Paper trading: evaluate signals and manage exits.
                         # Uses its own DB connections (analytics via WAL,
                         # paper.db is a separate file) so no lock contention.
-                        try:
-                            from polymarket_analytics.commands.paper_bridge import (
-                                _run_bridge,
+                        _pause_buys_flag = Path(db_path).parent / ".pause_buys"
+                        if _pause_buys_flag.exists():
+                            console.print(
+                                "  [yellow]Buy pause active (.pause_buys exists) — "
+                                "skipping paper-bridge (TP + heal continue)[/yellow]"
                             )
-                            _run_bridge(db_path, dry_run=False, paper_data_dir="data/paper_trader")
-                        except Exception as e:
-                            console.print(f"  [yellow]paper-bridge: {e}[/yellow]")
+                        else:
+                            try:
+                                from polymarket_analytics.commands.paper_bridge import (
+                                    _run_bridge,
+                                )
+                                _run_bridge(db_path, dry_run=False, paper_data_dir="data/paper_trader")
+                            except Exception as e:
+                                console.print(f"  [yellow]paper-bridge: {e}[/yellow]")
 
                         try:
                             from polymarket_analytics.commands.paper_take_profit import (
