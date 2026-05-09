@@ -122,6 +122,7 @@ run_stage "build-positions" polymarket --niche esports build-positions
 run_stage "resolve-positions" polymarket --niche esports resolve-positions
 run_stage "score" polymarket --niche esports score
 run_stage "refresh-bot-flags" .venv/bin/python scripts/refresh_bot_flags.py
+run_stage "q5-tripwire" .venv/bin/python scripts/q5_panel_tripwire.py --niche esports
 run_stage "detect" polymarket --niche esports detect
 # paper-bridge and paper-take-profit are handled by monitor --chain on every
 # poll cycle for faster signal-to-trade latency. Cron only resolves closed
